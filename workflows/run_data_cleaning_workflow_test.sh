@@ -1,8 +1,5 @@
 #!/bin/bash
 
-pheno=$1
-icd10=$2
-phenoStr=$3
 
 
 # Set base directories
@@ -10,22 +7,22 @@ WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$WORKFLOW_DIR")"
 SCRIPTS_DIR="$PROJECT_ROOT/scripts"
 DATA_DIR="$PROJECT_ROOT/testData"
-PHENO_DIR="$PROJECT_ROOT/testData/$pheno/"
+PHENO_DIR="$PROJECT_ROOT/testData/typ2Diabetes"
 
 
 # Set environment variable
 export DATA_PATH="$DATA_DIR"
 export PHENO_PATH="$PHENO_DIR"
-export PHENO="$pheno"
-export PHENO_STR="$phenoStr"
-export ICD="$icd10"
+export PHENO="type2Diabetes"
+export PHENO_STR="type 2 diabetes"
+export ICD_CODE="E11"
 
 
 echo "[WORKFLOW] DATA_PATH is set to: $DATA_PATH"
 echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
 echo "[WORKFLOW] Scripts directory: $SCRIPTS_DIR"
 echo "PHENOTYPE BEING ANALYZED ...: $PHENO"
-echo "ICD 10 BEING ANALYZED ...: $ICD"
+echo "ICD 10 BEING ANALYZED ...: $ICD_CODE"
 echo "PHENOTYPE STRING TO FILTER FOR IF ICD CODE NOT PRESENT ...: $PHENO"
 
 
@@ -41,11 +38,12 @@ else
     echo "Folder '${PHENO_PATH}' already exists."	
 fi
 
-# create phenotype data and train test split IDs
-python "$SCRIPTS_DIR/test/create_simulated_participant_covariate_data.py"
-
+#create 
 bash "$SCRIPTS_DIR/test/create_simulation_genotype_data.sh"
 
+
+# create phenotype data and train test split IDs
+python "$SCRIPTS_DIR/test/create_simulated_participant_covariate_data.py"
 
 # create phenotype data and train test split IDs
 python "$SCRIPTS_DIR/create_pheno_train_test_split.py"
@@ -55,7 +53,7 @@ python "$SCRIPTS_DIR/create_pheno_train_test_split.py"
 bash "$SCRIPTS_DIR/test/plink_clean_variant_calls_test.sh"
 
 #merge separate chromosome files into one
-bash "$SCRIPTS_DIR/merge_chromosomes_submit.sh"
+bash "$SCRIPTS_DIR/merge_chromosomes.sh"
 
 #merge separate chromosome files into one
 bash "$SCRIPTS_DIR/plink_convert_merged_to_A_submit.sh"
