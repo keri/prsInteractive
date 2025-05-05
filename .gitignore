@@ -16,3 +16,4 @@ documents/
 *.DS_Store
 testData/*
 *.RDataTmp
+results/*

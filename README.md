@@ -37,16 +37,17 @@ File downloaded from cohort created using cohort browser on DNA nexus platform.
     "Genetic principal components | Array 9",
     "Genetic principal components | Array 10",
    "Age at recruitment"]
+    
 
 ## raw variant calls in bed format
 
-## HLA data
+## hla_participant.csv
 
 ### column headings = ukb_hla_v2.txt 
 ### imputed data = hla_participant.csv
 File downloaded from cohort created using cohort browser on DNA nexus platform with imputation values range from 0 - 2
 
-## environmental.csv
+## participant_environment.csv
  File downloaded from cohort created using cohort browser on DNA nexus platform with clinical markers for blood chemistry, blood counts, and cardiometabolic features listed in Supplemental Table S13 of thesis
  
  Workflow can use as input any clinical marker which includes blood counts, blood chemistry, and lifestyle data available at initial screening and follow up visits for all participants.

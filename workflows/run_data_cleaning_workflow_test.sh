@@ -7,7 +7,7 @@ WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$WORKFLOW_DIR")"
 SCRIPTS_DIR="$PROJECT_ROOT/scripts"
 DATA_DIR="$PROJECT_ROOT/testData"
-PHENO_DIR="$PROJECT_ROOT/testData/typ2Diabetes"
+PHENO_DIR="$PROJECT_ROOT/testResults/typ2Diabetes"
 
 
 # Set environment variable

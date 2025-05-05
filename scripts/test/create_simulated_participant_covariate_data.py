@@ -11,6 +11,10 @@ import os
 data_path = os.environ.get("DATA_PATH")
 print(f"[PYTHON] Reading from: {data_path}")
 
+# Prefer command-line input if provided; fallback to env var
+results_path = os.environ.get("RESULTS_PATH")
+print(f"[PYTHON] writing to: {results_path}")
+
 pheno_path = os.environ.get("PHENO_PATH")
 print(f"[PYTHON] Reading from: {pheno_path}")
 
@@ -61,7 +65,7 @@ covar.loc[indices_to_change, 'SEX'] = 1
 
 phenoDf = covar[['IID','FID','PHENOTYPE']]
 
-phenoDf.to_csv(f"{data_path}/pheno.txt",sep=' ',index=False, header=None)
+phenoDf.to_csv(f"{results_path}/pheno.txt",sep=' ',index=False, header=None)
 
 
 
@@ -74,7 +78,7 @@ for i in range(1,11):
     
 covar['age'] = np.random.randint(45, 65, len(covar))
 
-covar.to_csv(f"{data_path}/covar.txt",sep=' ',index=False)
+covar.to_csv(f"{results_path}/covar.txt",sep=' ',index=False)
 
 ##################  create clinical marker data  ##############
 
@@ -98,7 +102,7 @@ for measure,thresholds in clinical_measures.items():
     # Set those rows in 'col' to NaN
     environmentalData.loc[nan_indices, measure] = np.nan
 
-environmentalData.to_csv(f"{data_path}/participant_environmental.csv",index=False)
+environmentalData.to_csv(f"{data_path}/participant_environment.csv",index=False)
 
 ################################ CREATE HLA DATA ######################
 
@@ -107,7 +111,7 @@ hlaData = environmentalData[['Participant ID']]
 for i in range(1,5):
     hlaData[f'hla{i}'] = np.random.uniform(0, 2, len(hlaData)).tolist()
     
-hlaData.to_csv(f"{data_path}/hlaData.raw.csv",index=False)
+hlaData.to_csv(f"{data_path}/participant_hla.csv",index=False)
 
 ###################### CREATE PARTICIPANT DATA ########################
 

@@ -16,11 +16,13 @@ WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$WORKFLOW_DIR")"
 SCRIPTS_DIR="$PROJECT_ROOT/scripts"
 DATA_DIR="$PROJECT_ROOT/data"
-PHENO_DIR="$PROJECT_ROOT/data/$pheno/"
+RESULTS_DIR = "$PROJECT_ROOT/results"
+PHENO_DIR="$RESULTS_DIR/$pheno/"
 
 
 # Set environment variable
 export DATA_PATH="$DATA_DIR"
+export RESULTS_PATH="$RESULTS_DIR"
 export PHENO_PATH="$PHENO_DIR"
 export PHENO="$pheno"
 export PHENO_STR="$phenoStr"
@@ -28,6 +30,7 @@ export ICD="$icd10"
 
 
 echo "[WORKFLOW] DATA_PATH is set to: $DATA_PATH"
+echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
 echo "[WORKFLOW] Scripts directory: $SCRIPTS_DIR"
 echo "PHENOTYPE BEING ANALYZED ...: $PHENO"
@@ -52,7 +55,7 @@ fi
 python "$SCRIPTS_DIR/create_pheno_train_test_split.py"
 
 # create hla (and environmental data files?)
-python "$SCRIPTS_DIR/clean_environmental_hla_data.py"
+python "$SCRIPTS_DIR/clean_environmental_hla_covar_data.py"
 
 # Run the variant call cleaning
 bash "$SCRIPTS_DIR/plink_clean_variant_calls.sh"

@@ -7,10 +7,27 @@ import pandas as pd
 import os
 import sys
 
+
+def rename_covar_columns(covarFile):
+    '''rename columns to simple headings'''
+    columns = covarFile.columns
+    columns1 = [('PC'+ col.split(' ')[-1]) if 'principal' in col else col for col in columns ]
+    covarFile.columns = columns1
+    covarFile.rename(columns={'Age at recruitment':'age'},inplace=True)
+    return(covarFile)
+
 def clean_environmental(data_path):
     #download and clean data
-    pass
-
+    df = pd.read_csv('participant_environment.csv')
+    return(df)
+    
+def create_covar_data(data_path):
+    df = pd.read_csv(f'{data_path}/participant.csv')
+    df.rename(columns={'Participant ID':'IID'},inplace=True)
+    df['SEX'] = df['Sex'].apply( lambda x : 0 if x == 'Female' else 1)
+    return(df)
+    
+    
 def clean_hla(data_path):
     '''input: hla data in csv format with header = Participant ID, HLA imputation
                                                    float (0-2)
@@ -46,18 +63,26 @@ def clean_hla(data_path):
     
     hla5 = hla4[hlaToKeep]
     hla5.reset_index(inplace=True)
+    return(hla5)
     
-    hla5.to_csv(f'{data_path}/participant_hla.csv',index=False)
 
-def main(data_path):
+def main(data_path,results_path):
     
     #clean_environmental(data_path)
-    clean_hla(data_path)
-
+    hla_data = clean_hla(data_path)
+    hla_data.to_csv(f'{results_path}/participant_hla.csv',index=False)
+    
+    covar_data = create_covar_data(data_path)
+    covar_data.to_csv(f'{results_path}/covar.txt', sep=' ', index=False)
+    
+    env_data = clean_environmental(data_path)
+    env_data.to_csv(f'{results_path}/participant_environmental.txt', sep=' ', index=False)
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="creating hla data file...")
+    parser = argparse.ArgumentParser(description="creating hla and covar data file...")
     parser.add_argument("--data_folder", help="Path to the input data folder")
+    
+    parser.add_argument("--results_folder", help="Path to the results data folder")
 
     
     
@@ -65,11 +90,19 @@ if __name__ == "__main__":
     
     # Prefer command-line input if provided; fallback to env var
     data_path = args.data_folder or os.environ.get("DATA_PATH")
-    print(f"[PYTHON] Reading from: {data_path}")
-    
 
     if not data_path:
         raise ValueError("You must provide a data path via --data_folder or set the DATA_PATH environment variable.")
+        
+    print(f"[PYTHON] Reading from: {data_path}")
+    
+    
+    results_path = args.data_folder or os.environ.get("RESULTS_PATH")
+    
+    if not results_path:
+        raise ValueError("You must provide a results path via --results_path or set the RESULTS_PATH environment variable.")
+    
+    print(f"[PYTHON] Writing to: {results_path}")
 
             
-    main(data_path)
+    main(data_path,results_path)
