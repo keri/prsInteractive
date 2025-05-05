@@ -3,7 +3,7 @@
 The prs Insteractive pipeline was developed using genotyped, imputed HLA, and environmental data for UK Biobank participants with a European background. The pipeline is comprised of workflows for the inclusion of inclusion of gene (G), gene-gene (GxGxE), and gene-environment (GxE) interaction weights into polygenic risk (PRS) calculations for complex traits. The pipeline was developed and validated for type 2 diabetes (T2D) and celiac disease (CD) but can be applied to any trait with a ICD10 code and/or substring filter present in the Non-cancer illness code [instances 0-2] fields. Specific G, GxG, and GxGxE cohorts are further analysed to identify underlying features important to each cohorts to identify different molecular pathways driving risk within the cohorts.
 
 
-#INPUT FILES NEEDED 
+# INPUT FILES NEEDED 
 
 ## European ancestry filters used in development dataset
 ### Fields:
@@ -59,11 +59,13 @@ File downloaded from cohort created using cohort browser on DNA nexus platform w
 
 # G, GxG, and GxGxE Analysis Overview using T2D data as an example
 
-[insert workflow image : combinedGWASWorkflow.png]
+![PRS Pipeline Workflow](figures/combinedGWASWorkflow.png)
+
 
 # Important Underlying Feature Analysis using T2D data as an example
 
-[insert important feature workflow image : importantFeatureWorkflowSHAP.png]
+![Important Feature Pipeline Workflow](figures/importantFeatureWorkflowSHAP.png)
+
 
 # File Structure needed for running analysis
 
