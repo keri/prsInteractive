@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import os
 
+
 # Prefer command-line input if provided; fallback to env var
 data_path = os.environ.get("DATA_PATH")
 print(f"[PYTHON] Reading from: {data_path}")
@@ -65,7 +66,7 @@ covar.loc[indices_to_change, 'SEX'] = 1
 
 phenoDf = covar[['IID','FID','PHENOTYPE']]
 
-phenoDf.to_csv(f"{results_path}/pheno.txt",sep=' ',index=False, header=None)
+phenoDf.to_csv(f"{pheno_path}/pheno.txt",sep=' ',index=False, header=None)
 
 
 
@@ -111,7 +112,13 @@ hlaData = environmentalData[['Participant ID']]
 for i in range(1,5):
     hlaData[f'hla{i}'] = np.random.uniform(0, 2, len(hlaData)).tolist()
     
-hlaData.to_csv(f"{data_path}/participant_hla.csv",index=False)
+hlaData.to_csv(f"{data_path}/hla_participant.csv",index=False)
+
+hlaDataHeader = hlaData[hlaData.columns[1:].tolist()]
+print('hlaData data columns = ',hlaDataHeader.head(1))
+hlaDataHeader.head(0).to_csv(f"{data_path}/ukb_hla_v2.txt", sep="\t", index=False)
+
+
 
 ###################### CREATE PARTICIPANT DATA ########################
 

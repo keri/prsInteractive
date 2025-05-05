@@ -1,0 +1,44 @@
+PLINK v1.90b6.26 64-bit (2 Apr 2022)
+Options in effect:
+  --bfile /Users/kerimulterer/prsInteractive/testData/variant_calls/ukb22418_c1_b0_v2
+  --extract /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.snplist
+  --keep /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutID.txt
+  --make-bed
+  --merge-list /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/mergeChromosomeList.txt
+  --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined
+  --pheno /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/pheno.txt
+
+Hostname: SCRI-C8QL3F3.staff.vuw.ac.nz
+Working directory: /Users/kerimulterer/prsInteractive/workflows
+Start time: Mon May  5 20:14:32 2025
+
+Random number seed: 1746432872
+131072 MB RAM detected; reserving 65536 MB for main workspace.
+Performing single-pass merge (2000 people, 400 variants).
+Merged fileset written to
+/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined-merge.bed
++
+/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined-merge.bim
++
+/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined-merge.fam
+.
+400 variants loaded from .bim file.
+2000 people (0 males, 2000 females) loaded from .fam.
+2000 phenotype values present after --pheno.
+--extract: 400 variants remaining.
+--keep: 200 people remaining.
+Using 1 thread (no multithreaded calculations invoked).
+Before main variant filters, 200 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+Total genotyping rate in remaining samples is 0.647288.
+400 variants and 200 people pass filters and QC.
+Among remaining phenotypes, 82 are cases and 118 are controls.
+--make-bed to
+/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.bed
++
+/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.bim
++
+/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.fam
+... done.
+
+End time: Mon May  5 20:14:32 2025

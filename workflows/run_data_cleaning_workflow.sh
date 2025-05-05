@@ -6,9 +6,13 @@
 #   raw hla data in csv format  : hla_participant.csv',index_col='Participant ID') and file with headers : ukb_hla_v2.txt
 #   participant data in csv format with 
 
-pheno=$1
-icd10=$2
-phenoStr=$3
+#pheno=$1
+#icd10=$2
+#phenoStr=$3
+
+pheno="myocardialInfarction"
+icd10="I21"
+phenoStr="myocardial infarction"
 
 
 # Set base directories
@@ -16,8 +20,8 @@ WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$WORKFLOW_DIR")"
 SCRIPTS_DIR="$PROJECT_ROOT/scripts"
 DATA_DIR="$PROJECT_ROOT/data"
-RESULTS_DIR = "$PROJECT_ROOT/results"
-PHENO_DIR="$RESULTS_DIR/$pheno/"
+RESULTS_DIR="$PROJECT_ROOT/results"
+PHENO_DIR="$RESULTS_DIR/$pheno"
 
 
 # Set environment variable
@@ -35,19 +39,19 @@ echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
 echo "[WORKFLOW] Scripts directory: $SCRIPTS_DIR"
 echo "PHENOTYPE BEING ANALYZED ...: $PHENO"
 echo "ICD 10 BEING ANALYZED ...: $ICD"
-echo "PHENOTYPE STRING TO FILTER FOR IF ICD CODE NOT PRESENT ...: $PHENO"
+echo "PHENOTYPE STRING TO FILTER FOR IF ICD CODE NOT PRESENT ...: $PHENO_STR"
 
 
 
 #make a folder inside root data folder for each phenotype
 
-if [ ! -d "${PHENO_PATH}" ]; then
-    echo "Folder '${PHENO_PATH}' does not exist. Creating it..."
-    mkdir "${PHENO_PATH}" 
+if [ ! -d "${PHENO_DIR}" ]; then
+    echo "Folder '${PHENO_DIR}' does not exist. Creating it..."
+    mkdir "${PHENO_DIR}" 
 
     
 else
-    echo "Folder '${PHENO_PATH}' already exists."	
+    echo "Folder '${PHENO_DIR}' already exists."	
 fi
 
 
@@ -55,22 +59,16 @@ fi
 python "$SCRIPTS_DIR/create_pheno_train_test_split.py"
 
 # create hla (and environmental data files?)
-python "$SCRIPTS_DIR/clean_environmental_hla_covar_data.py"
+python "$SCRIPTS_DIR/clean_environment_hla_covar_data.py"
 
 # Run the variant call cleaning
 bash "$SCRIPTS_DIR/plink_clean_variant_calls.sh"
 
 #merge separate chromosome files into one
-bash "$SCRIPTS_DIR/merge_chromosomes_submit.sh"
+bash "$SCRIPTS_DIR/merge_chromosomes.sh"
 
-#merge separate chromosome files into one
-bash "$SCRIPTS_DIR/plink_convert_merged_to_A_submit.sh"
 
-#run fast epistasis on merged bed files
-bash "$SCRIPTS_DIR/multiprocessing_fast_epistasis_submit.sh"
 
-# create filtered snp list
-#bash "$SCRIPTS_DIR/create_filtered_snp_list_2.sh"
 
 
 

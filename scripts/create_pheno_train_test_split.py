@@ -144,7 +144,7 @@ if __name__ == "__main__":
     pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
     
-    icd = args.icd_code or os.environ.get("ICD_CODE")
+    icd = args.icd_code or os.environ.get("ICD")
     print(f"[PYTHON] icd code : {icd}")
     
     pheno_str = args.pheno_str or os.environ.get("PHENO_STR")

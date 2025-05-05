@@ -5,7 +5,7 @@
 
 import pandas as pd
 import os
-import sys
+import argparse
 
 
 def rename_covar_columns(covarFile):
@@ -18,7 +18,7 @@ def rename_covar_columns(covarFile):
 
 def clean_environmental(data_path):
     #download and clean data
-    df = pd.read_csv('participant_environment.csv')
+    df = pd.read_csv(f'{data_path}/participant_environment.csv')
     return(df)
     
 def create_covar_data(data_path):
@@ -40,8 +40,14 @@ def clean_hla(data_path):
     hla = pd.read_csv(f'{data_path}/hla_participant.csv',index_col='Participant ID')
     header = pd.read_csv(f'{data_path}/ukb_hla_v2.txt',sep='\t')
     
-    #get it into the correct format
-    hla = hla['HLA imputation values'].str.split(",", expand = True)
+    try:
+      #get it into the correct format. Will fail in test run
+      hla = hla['HLA imputation values'].str.split(",", expand = True)
+    
+    except KeyError:
+      pass
+      
+      
     hla = hla.astype(float)
     
     
@@ -76,7 +82,7 @@ def main(data_path,results_path):
     covar_data.to_csv(f'{results_path}/covar.txt', sep=' ', index=False)
     
     env_data = clean_environmental(data_path)
-    env_data.to_csv(f'{results_path}/participant_environmental.txt', sep=' ', index=False)
+    env_data.to_csv(f'{results_path}/participant_environment.csv', index=False)
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="creating hla and covar data file...")

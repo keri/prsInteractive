@@ -49,8 +49,6 @@ if __name__ == '__main__':
     pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
     print(f"[PYTHON] Reading from: {pheno_path}")
 
-    mainfilepath = f'/nfs/scratch/multerke/ukbiobank/{pheno}'
-    #mainfilepath = '/nfs/scratch/multerke/ukbiobank/bulkFiles/cleaned'
 
-    create_column_file(mainfilepath,pheno)
+    create_column_file(data_path,pheno_path)
     
