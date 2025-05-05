@@ -38,12 +38,14 @@ else
     echo "Folder '${PHENO_PATH}' already exists."	
 fi
 
-#create 
-bash "$SCRIPTS_DIR/test/create_simulation_genotype_data.sh"
 
-
+###################  SPECIFIC TO TEST #####################
 # create phenotype data and train test split IDs
 python "$SCRIPTS_DIR/test/create_simulated_participant_covariate_data.py"
+
+#create genotype data in .bed format
+bash "$SCRIPTS_DIR/test/create_simulation_genotype_data.sh"
+
 
 # create phenotype data and train test split IDs
 python "$SCRIPTS_DIR/create_pheno_train_test_split.py"

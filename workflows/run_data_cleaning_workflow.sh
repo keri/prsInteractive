@@ -1,5 +1,11 @@
 #!/bin/bash
 
+################## USE DATA FROM UK BIOBANK ############
+# FILES THAT MUST BE PRESENT:
+#   raw variant calls with bed format : ukb{project_number}_c1_b0_v2
+#   raw hla data in csv format  : hla_participant.csv',index_col='Participant ID') and file with headers : ukb_hla_v2.txt
+#   participant data in csv format with 
+
 pheno=$1
 icd10=$2
 phenoStr=$3
@@ -41,8 +47,12 @@ else
     echo "Folder '${PHENO_PATH}' already exists."	
 fi
 
+
 # create phenotype data and train test split IDs
 python "$SCRIPTS_DIR/create_pheno_train_test_split.py"
+
+# create hla (and environmental data files?)
+python "$SCRIPTS_DIR/clean_environmental_hla_data.py"
 
 # Run the variant call cleaning
 bash "$SCRIPTS_DIR/plink_clean_variant_calls.sh"
