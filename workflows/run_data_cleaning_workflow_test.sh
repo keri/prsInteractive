@@ -60,11 +60,7 @@ bash "$SCRIPTS_DIR/merge_chromosomes.sh"
 #merge separate chromosome files into one
 bash "$SCRIPTS_DIR/plink_convert_merged_to_A_submit.sh"
 
-#run fast epistasis on merged bed files
-bash "$SCRIPTS_DIR/multiprocessing_fast_epistasis_submit.sh"
 
-# create filtered snp list
-#bash "$SCRIPTS_DIR/create_filtered_snp_list_2.sh"
 
 
 

@@ -98,7 +98,7 @@ for measure,thresholds in clinical_measures.items():
     # Set those rows in 'col' to NaN
     environmentalData.loc[nan_indices, measure] = np.nan
 
-environmentalData.to_csv(f"{data_path}/environmental.csv",index=False)
+environmentalData.to_csv(f"{data_path}/participant_environmental.csv",index=False)
 
 ################################ CREATE HLA DATA ######################
 
@@ -122,6 +122,7 @@ participants.columns = [col.replace('PC','Genetic principal components | Array '
 #"Non-cancer illness code, self-reported | Instance 2",
 #"Non-cancer illness code, self-reported | Instance 3","Year of birth",
 #"Sex",
+#"age"
 
 
 participants["Age at recruitment"] = covar['age']
