@@ -2,7 +2,7 @@
 #Keri Multerer October 4022
 #run fast fast-epistasis to generate seed snps
 #
-#SBATCH --job-name=fast_fast-epistasis_tanigawa
+#SBATCH --job-name=fast-epistasis-boost
 #SBATCH -o  /nfs/scratch/multerke/ukbiobank/err_out/%A.out
 #SBATCH -e /nfs/scratch/multerke/ukbiobank/err_out/%A.err
 #SBATCH --partition=bigmem
