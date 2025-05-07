@@ -1,0 +1,18 @@
+name: ukbiobank
+channels:
+    - conda-forge
+    - bioconda
+    - defaults
+dependencies:
+    - python=3.9
+    - scikit-learn
+    - r-base=4.4.1
+    - r-desctools
+    - r-stringr
+    - r-proc
+    - r-domc
+    - r-dplyr
+    - r-data.table
+    - r-glmnet
+    
+

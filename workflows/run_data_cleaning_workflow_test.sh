@@ -17,7 +17,7 @@ export PHENO_PATH="$PHENO_DIR"
 export RESULTS_PATH="$RESULTS_DIR"
 export PHENO="type2Diabetes"
 export PHENO_STR="type 2 diabetes"
-export ICD_CODE="E11"
+export ICD="E11"
 
 
 echo "[WORKFLOW] DATA_PATH is set to: $DATA_PATH"
@@ -25,8 +25,8 @@ echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
 echo "[WORKFLOW] Scripts directory: $SCRIPTS_DIR"
 echo "PHENOTYPE BEING ANALYZED ...: $PHENO"
-echo "ICD 10 BEING ANALYZED ...: $ICD_CODE"
-echo "PHENOTYPE STRING TO FILTER FOR IF ICD CODE NOT PRESENT ...: $PHENO"
+echo "ICD 10 BEING ANALYZED ...: $ICD"
+echo "PHENOTYPE STRING TO FILTER FOR IF ICD CODE NOT PRESENT ...: $PHENO_STR"
 
 
 
@@ -67,8 +67,7 @@ bash "$SCRIPTS_DIR/test/plink_clean_variant_calls_test.sh"
 #merge separate chromosome files into one
 bash "$SCRIPTS_DIR/merge_chromosomes.sh"
 
-
-
+bash "$SCRIPTS_DIR/multiprocessing_fast_epistasis.sh"
 
 
 

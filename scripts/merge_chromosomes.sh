@@ -28,7 +28,7 @@ do
 	
 done
 
-plink --bfile "${DATA_PATH}"/variant_calls/ukb22418_c1_b0_v2 --merge-list "${OUTPUT_FILE}" --keep "${PHENO_PATH}"/holdoutID.txt --pheno "${PHENO_PATH}"/pheno.txt --extract "${PHENO_PATH}"/merged_allChromosomes.snplist --make-bed --out "${PHENO_PATH}"/holdoutCombined
+plink --bfile "${DATA_PATH}"/variant_calls/ukb22418_c1_b0_v2 --merge-list "${OUTPUT_FILE}" --keep "${PHENO_PATH}"/holdoutID.txt --remove "${DATA_PATH}"/withdrawalsID.txt --pheno "${PHENO_PATH}"/pheno.txt --extract "${PHENO_PATH}"/merged_allChromosomes.snplist --make-bed --out "${PHENO_PATH}"/holdoutCombined
 
 rm $OUTPUT_FILE
 

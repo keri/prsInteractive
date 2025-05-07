@@ -10,9 +10,9 @@ Options in effect:
 
 Hostname: SCRI-C8QL3F3.staff.vuw.ac.nz
 Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Mon May  5 20:14:32 2025
+Start time: Tue May  6 12:43:41 2025
 
-Random number seed: 1746432872
+Random number seed: 1746492221
 131072 MB RAM detected; reserving 65536 MB for main workspace.
 Performing single-pass merge (2000 people, 400 variants).
 Merged fileset written to
@@ -30,9 +30,9 @@ Merged fileset written to
 Using 1 thread (no multithreaded calculations invoked).
 Before main variant filters, 200 founders and 0 nonfounders present.
 Calculating allele frequencies... done.
-Total genotyping rate in remaining samples is 0.647288.
+Total genotyping rate in remaining samples is 0.644125.
 400 variants and 200 people pass filters and QC.
-Among remaining phenotypes, 82 are cases and 118 are controls.
+Among remaining phenotypes, 81 are cases and 119 are controls.
 --make-bed to
 /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.bed
 +
@@ -41,4 +41,4 @@ Among remaining phenotypes, 82 are cases and 118 are controls.
 /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.fam
 ... done.
 
-End time: Mon May  5 20:14:32 2025
+End time: Tue May  6 12:43:41 2025

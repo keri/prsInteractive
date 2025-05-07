@@ -4,13 +4,14 @@ Options in effect:
   --make-bed
   --merge-list /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/mergeChromosomeList.txt
   --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes
+  --pheno /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/pheno.txt
   --write-snplist
 
 Hostname: SCRI-C8QL3F3.staff.vuw.ac.nz
 Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Mon May  5 20:14:32 2025
+Start time: Tue May  6 12:43:41 2025
 
-Random number seed: 1746432872
+Random number seed: 1746492221
 131072 MB RAM detected; reserving 65536 MB for main workspace.
 Performing single-pass merge (1800 people, 400 variants).
 Merged fileset written to
@@ -22,13 +23,13 @@ Merged fileset written to
 .
 400 variants loaded from .bim file.
 1800 people (0 males, 1800 females) loaded from .fam.
-1800 phenotype values loaded from .fam.
+1800 phenotype values present after --pheno.
 Using 1 thread (no multithreaded calculations invoked).
 Before main variant filters, 1800 founders and 0 nonfounders present.
 Calculating allele frequencies... done.
-Total genotyping rate is 0.64576.
+Total genotyping rate is 0.644925.
 400 variants and 1800 people pass filters and QC.
-Among remaining phenotypes, 743 are cases and 1057 are controls.
+Among remaining phenotypes, 732 are cases and 1068 are controls.
 List of variant IDs written to
 /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.snplist
 .
@@ -40,4 +41,4 @@ List of variant IDs written to
 /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.fam
 ... done.
 
-End time: Mon May  5 20:14:32 2025
+End time: Tue May  6 12:43:41 2025
