@@ -1,13 +1,13 @@
 #!/bin/bash
 
+source ../testData/config_test.sh  # because you're in prsInteractive/workflows
 
-
-# Set base directories
-WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$WORKFLOW_DIR")"
-SCRIPTS_DIR="$PROJECT_ROOT/scripts"
-DATA_DIR="$PROJECT_ROOT/testData"
-RESULTS_DIR="$PROJECT_ROOT/testResults"
+## Set base directories
+#WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+#PROJECT_ROOT="$(dirname "$WORKFLOW_DIR")"
+#SCRIPTS_DIR="$PROJECT_ROOT/scripts"
+#DATA_DIR="$PROJECT_ROOT/testData"
+#RESULTS_DIR="$PROJECT_ROOT/testResults"
 PHENO_DIR="$RESULTS_DIR/type2Diabetes"
 
 

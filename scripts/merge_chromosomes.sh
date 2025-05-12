@@ -46,11 +46,12 @@ done
 
 ####################### CONVERT TO .RAW FILES TO BE USED IN MODELLING  #############################
 
-plink --bfile "${PHENO_PATH}"/holdoutCombined --recode A --out "${PHENO_PATH}"/holdoutCombinedRaw
+plink --bfile "${PHENO_PATH}"/holdoutCombined --recode A --keep --out "${PHENO_PATH}"/holdoutCombinedRaw
 
 
-plink --bfile "${PHENO_PATH}"/merged_allChromosomes --recode A --out "${PHENO_PATH}"/merged_allChromosomesRaw
+plink --bfile "${PHENO_PATH}"/merged_allChromosomes --recode A --keep "${PHENO_PATH}"/trainingID.txt --out "${PHENO_PATH}"/trainingCombinedRaw
 
+plink --bfile "${PHENO_PATH}"/merged_allChromosomes --recode A --keep "${PHENO_PATH}"/testID.txt --out "${PHENO_PATH}"/testCombinedRaw
 
 
 ####################### CONVERT COLUMNS IN FILES TO REMOVE THE VARIANTS IN ORDER TO MATCH OUTPUT FROM EPISTATIC ANALYSIS  #############################
@@ -69,7 +70,21 @@ awk 'NR==1 {
 	for (i=1; i<=NF; i++) {
 		sub(/_[^_]*$/, "", $i)
 	}
-} { print }' OFS='\t' "${PHENO_PATH}/merged_allChromosomesRaw.raw" > "${PHENO_PATH}/merged_allChromosomes.raw"
+} { print }' OFS='\t' "${PHENO_PATH}/trainingCombinedRaw.raw" > "${PHENO_PATH}/trainingCombined.raw"
 
 
-rm "${PHENO_PATH}/merged_allChromosomesRaw.raw"
+rm "${PHENO_PATH}/trainingCombinedRaw.raw"
+
+
+awk 'NR==1 {
+	for (i=1; i<=NF; i++) {
+		sub(/_[^_]*$/, "", $i)
+	}
+} { print }' OFS='\t' "${PHENO_PATH}/testCombinedRaw.raw" > "${PHENO_PATH}/testCombined.raw"
+
+
+rm "${PHENO_PATH}/testCombinedRaw.raw"
+
+echo "export TRAINING_PATH=${PHENO_PATH}/trainingCombined.raw"
+echo "export TEST_PATH=${PHENO_PATH}/testCombined.raw"
+echo "export HOLDOUT_PATH=${PHENO_PATH}/holdoutCombined.raw"

@@ -6,21 +6,23 @@
 #   raw hla data in csv format  : hla_participant.csv',index_col='Participant ID') and file with headers : ukb_hla_v2.txt
 #   participant data in csv format with 
 
-#pheno=$1
-#icd10=$2
-#phenoStr=$3
+pheno=$1
+icd10=$2
+phenoStr=$3
 
-pheno="myocardialInfarction"
-icd10="I21"
-phenoStr="myocardial infarction"
+#pheno="myocardialInfarction"
+#icd10="I21"
+#phenoStr="myocardial infarction"
+
+source ../config.sh #because you're in workflows directory
 
 
 # Set base directories
-WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$WORKFLOW_DIR")"
-SCRIPTS_DIR="$PROJECT_ROOT/scripts"
-DATA_DIR="$PROJECT_ROOT/data"
-RESULTS_DIR="$PROJECT_ROOT/results"
+#WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+#PROJECT_ROOT="$(dirname "$WORKFLOW_DIR")"
+#SCRIPTS_DIR="$PROJECT_ROOT/scripts"
+#DATA_DIR="$PROJECT_ROOT/data"
+#RESULTS_DIR="$PROJECT_ROOT/results"
 PHENO_DIR="$RESULTS_DIR/$pheno"
 
 
@@ -55,7 +57,7 @@ else
 fi
 
 
-create phenotype data and train test split IDs
+#create phenotype data and train test split IDs
 python "$SCRIPTS_DIR/create_pheno_train_test_split.py"
 
 # create hla (and environmental data files?)

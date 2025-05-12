@@ -56,4 +56,7 @@ done
 
 plink --epistasis-summary-merge $OUTPUT_FILE $N --out "${PHENO_PATH}/epiFiles/trainingCombinedEpi"
 
+echo "export EPI_PATH=${PHENO_PATH}/epiFiles/trainingCombinedEpi" >> "${PROJECT_ROOT}/config.sh"
+
+
 	

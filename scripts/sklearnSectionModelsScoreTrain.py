@@ -16,17 +16,18 @@ import csv
 import sys
 import warnings
 import os
+import argparse
 set_config(transform_output="pandas")
 
 warnings.simplefilter(action='ignore')
 
 # module_path = os.path.abspath(os.path.join('..'))
 # if module_path not in sys.path:
-sys.path.append("/Users/kerimulterer/ukbiobank/")
-from batchScripts.helper.download import *
+#sys.path.append("/Users/kerimulterer/ukbiobank/")
+from scripts.helper.download import get_dataset, get_epi_columns, get_columns
 
 
-def train_models(X,y,trainingPath,pheno,data_type,i):
+def train_models(X,y,modelPath,pheno,data_type,i):
     '''input : X from training dataset and y
     output : pickled model saved to output file'''
 
@@ -35,7 +36,7 @@ def train_models(X,y,trainingPath,pheno,data_type,i):
     imp_mean = SimpleImputer(missing_values=np.nan, strategy='mean').fit(X)
     Ximp = imp_mean.transform(X)
     #model path
-    pickle.dump(imp_mean, open(f'{trainingPath}/models/imp_mean_{data_type}_{i}.pkl', 'wb'))
+    pickle.dump(imp_mean, open(f'{modelPath}/imp_mean_{data_type}_{i}.pkl', 'wb'))
     ##########################
     # Lasso regression
     ##########################
@@ -57,7 +58,7 @@ def train_models(X,y,trainingPath,pheno,data_type,i):
     clfNVB = ComplementNB().fit(Ximp,y)
     en = time.time()
     timenvb = (en-st)/60
-    pickle.dump(clfNVB, open(f'{trainingPath}/models/sklearnNaiveBayes_{data_type}_{i}.pkl', 'wb'))
+    pickle.dump(clfNVB, open(f'{modelPath}/sklearnNaiveBayes_{data_type}_{i}.pkl', 'wb'))
     print('time if took to train naive bayes = ',timenvb,' minutes')
 
     ##########################
@@ -70,13 +71,13 @@ def train_models(X,y,trainingPath,pheno,data_type,i):
     clfHGB = HistGradientBoostingClassifier(early_stopping='auto')
     grid_search_hgb = GridSearchCV(estimator=clfHGB,param_grid=parameters_hgb,scoring='roc_auc',cv=3,n_jobs=50)
     grid_search_hgb.fit(X.to_numpy(),y.to_numpy())
-    pickle.dump(grid_search_hgb, open(f'{trainingPath}/models/sklearnGradBoostHistClassifier_{data_type}_{i}.pkl', 'wb'))
+    pickle.dump(grid_search_hgb, open(f'{modelPath}/sklearnGradBoostHistClassifier_{data_type}_{i}.pkl', 'wb'))
     en = time.time()
     timeHGB = (en-st)/60
     print('time if took to train HGB = ',timeHGB,' minutes')
     return(imp_mean,clfNVB,grid_search_hgb)
 
-def score_models(X,y,featurePath,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB):
+def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB):
     '''load pickled models and score with test set'''
     print('scoring models .....')
 
@@ -151,7 +152,7 @@ def score_models(X,y,featurePath,pheno,data_type,modelFile,i,imp_mean,clfNVB,clf
 
 
 
-def main(pheno,data_type,start,end):
+def main(pheno,pheno_path,trainingPath,testPath,data_type,start,end):
 
     print('starting analysis .....')
 
@@ -160,34 +161,26 @@ def main(pheno,data_type,start,end):
     ####################################################################
     #                      CREATE VARIABLES                            #
     ####################################################################
-#   machinePath = '/nfs/scratch/multerke'
-    # machinePath = '/nesi/nobackup/vuw03336'
-    machinePath = '/Users/kerimulterer'
-    trainingPath = f'{machinePath}/ukbiobank/{pheno}/tanigawaSet'
-    dataPath = f'{trainingPath}/data/'
-    featurePath = f'{trainingPath}/featureScores/'
-    #file = 'test_main.raw'
-    file = 'trainingCombined_final.raw'
-    main_pathway = dataPath + file
-    test_file = 'testCombined_final.raw'
-    #test_file = 'test_main_holdout.raw'
-    test_pathway = dataPath + test_file
-    epi_pathway = dataPath + 'epiFiles/'
+    
+    scoresPath = f'{pheno_path}/scores'
+    modelPath = f'{pheno_path}/models'
+    epiPath =f'{pheno_path}/epiFiles'
 
     # create empty dataframe to capture the scores and snps in each iteration
     models = pd.DataFrame(columns=['model','test score','balanced score','auc','matthews_corrcoef','log_loss','jaccard_score','hamming_loss','f1_score','data_type','iteration'])
 
-#   modelFile = f'{trainingPath}/models/modelScores/sklearnModelScoresSections.csv'
-#
-#   if not os.path.exists(f'{modelFile}'):
-#       with open(modelFile,mode='w',newline='') as f:
-#           models.to_csv(f,index=False)
-#           f.close()
+    modelFile = f'{scoresPath}/sklearnModelScoresSections.csv'
+
+    if not os.path.exists(f'{modelFile}'):
+        print(f'creating model scores file : {modelFile} ...')
+        with open(modelFile,mode='w',newline='') as f:
+            models.to_csv(f,index=False)
+            f.close()
 
 
-    print(main_pathway)
+    print(pheno_path)
 
-    full_columns = get_columns(trainingPath)
+    full_columns = get_columns(pheno_path)
 
     start = int(start)
     end = int(end)
@@ -201,22 +194,25 @@ def main(pheno,data_type,start,end):
     for i in range(start,end+1):
         istart = i*n
         if data_type == 'main':
-            if i == 0:
-                sectionSnps = full_columns[6:istart+n]
-            else:
-                sectionSnps = full_columns[istart:istart+n]
+#           if i == 0:
+#               sectionSnps = full_columns[:istart+n]
+#           else:
+            sectionSnps = full_columns[istart:istart+n]
 
 
         else:
-            epiColumns = get_epi_columns(epi_pathway)
+            epiColumns = get_epi_columns(epiPath)
             sectionPairs = epiColumns[istart:istart+n]
             sectionSnps = get_epi_snps(sectionPairs)
 
 
-        featureScoresFile = f'{featurePath}featureScores.csv'
+        featureScoresFile = f'{scoresPath}/featureScores.csv'
         #save empty dataframe on first run
         allModelFeatures = pd.DataFrame(columns=['log_prob_no_diabetes','log_prob_yes_diabetes','odds_no_diabetes','odds_yes_diabetes','model#','feature', 'model'])
         if not os.path.exists(featureScoresFile):
+            
+            print(f'creating features scores file : {featureScoresFile} ...')
+            
             with open(featureScoresFile,mode='w',newline='') as f:
                 allModelFeatures.to_csv(f,index=False)
                 f.close()
@@ -231,7 +227,7 @@ def main(pheno,data_type,start,end):
 
         #train models and pickle trained models to be used in scoring
 
-        mainArray = get_dataset(main_pathway,sectionSnps,full_columns) #main effect snps so both pathways are the same
+        mainArray = get_dataset(trainingPath,sectionSnps,full_columns) #main effect snps so both pathways are the same
     #     the first columns will be IID, PHENOTYPE
         y = mainArray['PHENOTYPE']
         Xmain = mainArray.drop(columns=["PHENOTYPE"])
@@ -248,10 +244,10 @@ def main(pheno,data_type,start,end):
 
 
         if Xmain.shape[1] > 0:
-            imp_mean,clfNVB,clfHGB = train_models(Xmain,y,trainingPath,pheno,data_type,i)
+            imp_mean,clfNVB,clfHGB = train_models(Xmain,y,modelPath,pheno,data_type,i)
 
 
-            testArray = get_dataset(test_pathway,sectionSnps,full_columns)
+            testArray = get_dataset(testPath,sectionSnps,full_columns)
 
             yTest = testArray["PHENOTYPE"]
             Xtest = testArray.drop(columns=['PHENOTYPE'])
@@ -262,7 +258,7 @@ def main(pheno,data_type,start,end):
 
             print('Test array shape = ',Xtest.shape)
 
-            allModelFeatures = score_models(Xtest,yTest,featurePath,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB)
+            allModelFeatures = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB)
             allModelFeatures['model#'] = i
             allModelFeatures['feature'] = sectionSnps
             allModelFeatures['model'] = data_type
@@ -274,11 +270,63 @@ def main(pheno,data_type,start,end):
 
 
 if __name__ == '__main__':
+    
+    parser = argparse.ArgumentParser(description="running models for wrapper...")
+    parser.add_argument("--pheno_folder", help="Path to the input pheno data folder")
+    parser.add_argument("--training_file", help="Phenotype to analyze")
+    parser.add_argument("--test_file", help="Phenotype to analyze")
+    parser.add_argument("--data_type", help="Phenotype to analyze")
+    parser.add_argument("--start", help="Phenotype to analyze")
+    parser.add_argument("--end", help="Phenotype to analyze")
 
-    pheno = sys.argv[1]
-    start = sys.argv[2]
-    end = sys.argv[3]
-    data_type = sys.argv[4]
+    args = parser.parse_args()
+    
+    # Prefer command-line input if provided; fallback to env var
+    pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
+    print(f"[PYTHON] Reading from: {pheno_path}")
+    
+    pheno = args.pheno or os.environ.get("PHENO")
+    print(f"[PYTHON] Phenotype : {pheno}")
+    
+    data_type = args.icd_code or os.environ.get("DATA_TYPE")
+    print(f"data type : {data_type}")
+    
+    training_path = args.icd_code or os.environ.get("TRAINING_PATH")
+    print(f"training file : {training_path}")
+    
+    test_path = args.icd_code or os.environ.get("TEST_PATH")
+    print(f"test file : {test_path}")
+    
+    start = args.icd_code or os.environ.get("START")
+    print(f"start : {start}")
+    
+    end = args.icd_code or os.environ.get("END")
+    print(f"end : {end}")
+    
+    
+        
+    if not pheno_path:
+        raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
+        
+    if not pheno:
+        raise ValueError("You must provide a phenotype via --pheno or set the PHENO environment variable.")
+        
+    if not data_type:
+        raise ValueError("You must provide a data type code via --data_type or set the DATA_TYPE environment variable.")
+        
+    if not training_path:
+        raise ValueError("You must provide a data type code via --training_path or set the TRAINING_PATH environment variable.")
+        
+    if not test_path:
+        raise ValueError("You must provide a data type code via --test_path or set the TEST_PATH environment variable.")
+        
+    if not start:
+        raise ValueError("You must provide a data type code via --start or set the START environment variable.")
+        
+    if not end:
+        raise ValueError("You must provide a data type code via --end or set the END environment variable.")
+        
 
-    main(pheno,data_type,start,end)
+        
+    main(pheno,pheno_path,training_path,test_path,data_type,start,end)
     
