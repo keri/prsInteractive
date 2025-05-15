@@ -25,7 +25,7 @@ def get_dataset(df_pathway,columns_to_get,full_columns):
     st = time.time()
     
     columns_to_get = ['IID','PHENOTYPE'] + columns_to_get
-    
+    full_columns = ['FID','IID','PAT','MAT','SEX','PHENOTYPE'] + full_columns
     idxColumns = get_column_index(columns_to_get,full_columns)
     
     #take out the people that have withdrawn from study
@@ -83,4 +83,4 @@ def get_epi_columns(epi_filepath):
 if __name__ == "__main__":
     
     trainingPath = '/Users/kerimulterer/prsInteractive/results/myocardialInfarction'
-    df = get_columns(trainingPath)
+    snpList = get_columns(trainingPath)

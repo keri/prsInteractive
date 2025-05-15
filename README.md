@@ -1,6 +1,31 @@
 # OVERVIEW
 
-The prs Insteractive pipeline was developed using genotyped, imputed HLA, and environmental data for UK Biobank participants with a European background. The pipeline is comprised of workflows for the inclusion of inclusion of gene (G), gene-gene (GxGxE), and gene-environment (GxE) interaction weights into polygenic risk (PRS) calculations for complex traits. The pipeline was developed and validated for type 2 diabetes (T2D) and celiac disease (CD) but can be applied to any trait with a ICD10 code and/or substring filter present in the Non-cancer illness code [instances 0-2] fields. Specific G, GxG, and GxGxE cohorts are further analysed to identify underlying features important to each cohorts to identify different molecular pathways driving risk within the cohorts.
+The prs Insteractive pipeline was developed using genotyped, imputed HLA, and environmental data for UK Biobank participants with a European background. The pipeline is comprised of workflows for the inclusion of gene (G), gene-gene (GxGxE), and gene-environment (GxE) interaction weights into polygenic risk (PRS) calculations for complex traits. The pipeline was developed and validated for type 2 diabetes (T2D) and celiac disease (CD) but can be applied to any trait with a ICD10 code and/or substring filter present in the Non-cancer illness code [instances 0-2] fields. Specific G, GxG, and GxGxE cohorts are further analysed to identify underlying features important to each cohorts to identify different molecular pathways driving risk within the cohorts.
+
+
+# FOLDER DIRECTORY
+
+.root (prsInteractive)
+├── data
+│   └── variant_calls
+├── figures
+├── hpc
+├── results
+│   └── phenotype
+│       └── epiFiles
+│           └── preSummaryFiles
+├── scripts
+│   ├── helper
+│   └── test
+├── testData
+│   └── variant_calls
+├── testResults
+│   └── type2Diabetes
+│       └── epiFiles
+│           └── preSummaryFiles
+└── workflows
+
+19 directories
 
 
 # INPUT FILES NEEDED 
@@ -69,9 +94,63 @@ Workflow can use as input any clinical marker which includes blood counts, blood
 
 ## withdrawals.csv
  A list of eid's provided by UK Biobank of people who have opted out of research. File consists of one column with no heading or index.
+  
+  
+  
+# Output files and folder structure:
+
+results (root)
+├── covar.txt
+├── pheno
+│   ├── combinedID.txt
+│   ├── epiFiles
+│   │   └── preSummaryFiles
+│   │       ├── trainingEpi.epi.cc.1
+│   │       ├── trainingEpi.epi.cc..
+│   │       ├── trainingEpi.epi.cc.40
+│   │       ├── trainingEpi.epi.cc.summary.1
+│   │       ├── trainingEpi.epi.cc.summary..
+│   │       ├── trainingEpi.epi.cc.summary.40
+│   │       └── trainingEpi.log
+│   ├── figures
+│   ├── holdoutCombined.bed
+│   ├── holdoutCombined.bim
+│   ├── holdoutCombined.fam
+│   ├── holdoutCombined.log
+│   ├── holdoutCombined.nosex
+│   ├── holdoutCombined.raw
+│   ├── holdoutCombinedRaw.log
+│   ├── holdoutID.txt
+│   ├── merged_allChromosomes.bed
+│   ├── merged_allChromosomes.bim
+│   ├── merged_allChromosomes.fam
+│   ├── merged_allChromosomes.log
+│   ├── merged_allChromosomes.snplist
+│   ├── models
+│   │   ├── imp_mean_main_{i}.pkl
+│   │   ├── sklearnGradBoostHistClassifier_main_{i}.pkl
+│   │   └── sklearnNaiveBayes_main_{i}.pkl
+│   ├── pheno_config.sh
+│   ├── pheno.txt
+│   ├── scores
+│   │   ├── featureScores.csv
+│   │   ├── sklearnModelScoresSections.csv
+│   │   └── importantFeaturesPostShap.csv
+│   ├── testCombined.raw
+│   ├── testCombinedRaw.log
+│   ├── testID.txt
+│   ├── trainingCombined.raw
+│   ├── trainingCombinedRaw.log
+│   └── trainingID.txt
+├── participant_environment.csv
+└── participant_hla.csv
+
+6 directories
+
 
 # WORKFLOW: 
-##G, GxG, and GxGxE Analysis Overview using T2D data as an example
+
+## G, GxG, and GxGxE Analysis Overview using T2D data as an example
 
 ![PRS Pipeline Workflow](figures/combinedGWASWorkflow.png)
 
@@ -81,7 +160,64 @@ Workflow can use as input any clinical marker which includes blood counts, blood
 ![Important Feature Pipeline Workflow](figures/importantFeatureWorkflowSHAP.png)
 
 
-# File Structure needed for running analysis
+# ########################  STEPS IN ANALYSIS  #############################
+
+## 1) check to see if a conda environment has been created in /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
+- if ukb_env is not present, create it with this command:
+  # Create environment from file
+  # Option 1: Create ukb_env environment set in the environment.yml file
+  # this will create a conda "ukb_env" folder with all of the dependencies in the nfs/scratch/projects/ukbiobank/prsInteractive/ directory
+  # run these commands preceded with "$"
+  
+  ``` bash $ cd /nfs/scratch/projects/ukbiobank/prsInteractive
+  $ module load Miniconda3/23.9.0-0```
+  
+  Your command line prompt should look like this:
+  ```bash username@raapoi-login:/nfs/scratch/projects/ukbiobank/prsInteractive$ 
+  
+  $ conda env create --prefix ./ukb_env -f environment.yml```
+  
+  
+## 2) with conda env "ukb_env" present run the workflow:
+
+  pheno = phenotype spelled in camel font and no spaces (i.e. type2Diabetes, myocardialInfarction)
+  icd10 code = substring present in the UK Biobank data
+  pheno substring = will be exact spelling found in UKB data to check for if icd10 not present. this will have spaces so will need to wrap in " "
+  n = number of cores to pass to the epistatic analysis, with 40 cores being the norm and will take approximately 48 hours
+  
+  #run command lines:
+  
+  ```bash $ cd nfs/scratch/projects/ukbiobank/prsInteractive/hpc```
+  
+  ```bash $ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string"} {n} ```
+  
+    i.e. sbatch run_data_cleaning_workflow_submit.sh myocardialInfarction I21 "myocardial infarction" 40
+    
+  #has the following scripts
+  # create phenotype data and train test split IDs
+  ```bash $ python "${SCRIPTS_DIR}/create_pheno_train_test_split.py"```
+  
+  # create hla (and environmental data files?)
+  ```bash $ python "${SCRIPTS_DIR}/clean_environment_hla_covar_data.py"```
+  
+  # Run the variant call cleaning
+  ```bash $ bash "${SCRIPTS_DIR}/plink_clean_variant_calls.sh"```
+  
+  #merge separate chromosome files into one
+  ```bash $ bash "${SCRIPTS_DIR}/merge_chromosomes.sh"```
+  
+  ```bash $ sbatch multiprocessing_fast_epistasis_submit.sh```
+  
+## 3) After epistatic analysis is complete, run the batch models with 
+  from the hpc/directory:
+  pheno = name of folder created and entered in run_data_cleaning_workflow_submit.sh
+  data_type = main (if running single SNPs) or epi (if running with epi-pairs created from epistatic analysis
+  
+  ```bash $ sbatch run_model_model_batches_submit.sh {pheno} {data_type}```
+  
+  
 
 
+
+  
 

@@ -26,6 +26,21 @@ warnings.simplefilter(action='ignore')
 from helper.download import get_dataset, get_epi_columns, get_columns
 from helper.calculate_shap_values import calculate_plot_shap_values
 
+def convert_log_prob_to_odds(df):
+    '''input df columns = ['feature', 'model', 'log_prob_no_pheno', 'log_prob_yes_pheno',
+       'risk_ratio_no_pheno', 'risk_ratio_yes_pheno', 'lasso_coef',
+       'chr_section']
+       output : columns added ['odds_yes_pheno','odds_no_pheno']'''
+    #convert log probabilities to probabilities
+    prob_no_pheno = np.exp(-(df['log_prob_no_pheno']))
+    prob_yes_pheno = np.exp(-(df['log_prob_yes_pheno']))
+    
+    df['odds_yes_pheno'] = (df['log_prob_yes_pheno']/df['log_prob_no_pheno']) / (prob_yes_pheno/prob_no_pheno)
+    df['odds_no_pheno'] = (df['log_prob_no_pheno']/df['log_prob_yes_pheno']) / (prob_no_pheno/prob_yes_pheno)
+    
+    df.sort_values(['odds_yes_pheno'],ascending=False,inplace=True)
+    return(df)
+
 
 def train_models(X,y,modelPath,pheno,data_type,i):
     '''input : X from training dataset and y
@@ -138,8 +153,8 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
 
 
     dfSnps = pd.DataFrame()
-    dfSnps['log_prob_no_diabetes'] = clfNVB.feature_log_prob_[0, :]
-    dfSnps['log_prob_yes_diabetes'] = clfNVB.feature_log_prob_[1, :]
+    dfSnps['log_prob_no_pheno'] = clfNVB.feature_log_prob_[0, :]
+    dfSnps['log_prob_yes_pheno'] = clfNVB.feature_log_prob_[1, :]
     dfSnps2 = convert_log_prob_to_odds(dfSnps)
 
 
@@ -147,7 +162,7 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
     timenvb = (en-st)/60
     print('time if took to score models = ',timenvb,' minutes')
     
-    topFeatures = calculate_plot_shap_values(clfNVB,X,y,i,figPath,data_type)
+    topFeatures = calculate_plot_shap_values(clfHGB,X,y,i,figPath,data_type)
     
     
     return(dfSnps2,topFeatures)
@@ -215,7 +230,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
         if not os.path.exists(featureScoresFile):
             #save empty dataframe on first run
-            allModelFeatures = pd.DataFrame(columns=['log_prob_no_diabetes','log_prob_yes_diabetes','odds_no_diabetes','odds_yes_diabetes','model#','feature', 'model'])
+            allModelFeatures = pd.DataFrame(columns=['log_prob_no_pheno','log_prob_yes_pheno','odds_no_pheno','odds_yes_pheno','model#','feature', 'model'])
             
             print(f'creating features scores file : {featureScoresFile} ...')
             
@@ -226,7 +241,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
         print('number of snps in this section = ',len(sectionSnps))
         
         ### save empty important features df
-        if not os.path.exists(featureScoresFile):
+        if not os.path.exists(importantFeaturesFile):
             #save empty dataframe on first run
             importantFeaturesShap = pd.DataFrame(columns=['feature','iteration','data_type'])
             
@@ -280,6 +295,10 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
             allModelFeatures['model'] = data_type
             with open(featureScoresFile,mode='a',newline='') as f:
                 allModelFeatures.to_csv(f,index=False, header=False)
+                f.close()
+                
+            with open(importantFeaturesFile,mode='a',newline='') as f:
+                topFeatures.to_csv(f,index=False, header=False)
                 f.close()
 
         i += 1

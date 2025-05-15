@@ -20,7 +20,7 @@
 #SBATCH --partition=quicktest
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=2G
-#SBATCH --time=00:30:00
+#SBATCH --time=00:10:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=keri@multerer.com
 #

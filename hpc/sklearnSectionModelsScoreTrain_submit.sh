@@ -6,10 +6,10 @@
 #SBATCH --job-name=train_score_section_models
 #SBATCH -o  /nfs/scratch/projects/ukbiobank/err_out/%A.out
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A.err
-#SBATCH --partition=quicktest
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=2G
-#SBATCH --time=00:15:00
+#SBATCH --partition=bigmem
+#SBATCH --cpus-per-task=50
+#SBATCH --mem=700G
+#SBATCH --time=05:00:00
 #
 
 module load Miniconda3/4.9.2
