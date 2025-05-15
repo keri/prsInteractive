@@ -7,19 +7,12 @@ dependencies:
     - python=3.9
     - matplotlib
     - pandas
-    - numpy
+    - numpy=1.26
     - scikit-learn
-    - r-base=4.4.1
-    - r-desctools
-    - r-stringr
-    - r-proc
-    - r-domc
-    - r-dplyr
-    - r-data.table
-    - r-glmnet
     - shap
     - pip
     - pip:
         - fasttreeshap
+        - ipython
     
 

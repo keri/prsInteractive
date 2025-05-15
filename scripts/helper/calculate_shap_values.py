@@ -3,7 +3,6 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-sns.set(style='darkgrid', context='talk', palette='rainbow')
 import shap
 import fasttreeshap
 shap.initjs()

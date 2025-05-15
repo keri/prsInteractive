@@ -236,12 +236,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
                 importantFeaturesShap.to_csv(f,index=False)
                 f.close()
                 
-        print('number of snps in this section = ',len(importantFeaturesShap))
         
-
-
-
-
         #########################################################################
         #                                TRAINING  / TESTING                    #
         ######################################################################### 

@@ -29,7 +29,7 @@ def get_dataset(df_pathway,columns_to_get,full_columns):
     idxColumns = get_column_index(columns_to_get,full_columns)
     
     #take out the people that have withdrawn from study
-    machinePath = '/'.join(df_pathway.split('/')[:-2])
+    machinePath = '/'.join(df_pathway.split('/')[:-3])
 #   machinePath = '/'.join(df_pathway.split('/')[:-5])
     print(machinePath)
     

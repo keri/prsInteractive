@@ -28,7 +28,7 @@ n=$4
 
 
 
-module load Miniconda3/23.9.0-0
+module load Miniconda3/4.9.2
 source $(conda info --base)/etc/profile.d/conda.sh 
 conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
 #export PATH="/nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env/bin:$PATH"
