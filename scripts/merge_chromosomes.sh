@@ -46,7 +46,7 @@ done
 
 ####################### CONVERT TO .RAW FILES TO BE USED IN MODELLING  #############################
 
-plink --bfile "${PHENO_PATH}"/holdoutCombined --recode A --keep --out "${PHENO_PATH}"/holdoutCombinedRaw
+plink --bfile "${PHENO_PATH}"/holdoutCombined --recode A --keep "${PHENO_PATH}"/holdoutID.txt --out "${PHENO_PATH}"/holdoutCombinedRaw
 
 
 plink --bfile "${PHENO_PATH}"/merged_allChromosomes --recode A --keep "${PHENO_PATH}"/trainingID.txt --out "${PHENO_PATH}"/trainingCombinedRaw
@@ -85,6 +85,25 @@ awk 'NR==1 {
 
 rm "${PHENO_PATH}/testCombinedRaw.raw"
 
-echo "export TRAINING_PATH=${PHENO_PATH}/trainingCombined.raw"
-echo "export TEST_PATH=${PHENO_PATH}/testCombined.raw"
-echo "export HOLDOUT_PATH=${PHENO_PATH}/holdoutCombined.raw"
+
+# Validate pheno_config file exists 
+if [ ! -f "$PHENO_PATH/pheno_config.sh" ]; then
+	echo "Creating pheno_config file '${PHENO_PATH}/pheno_config.sh' ... "
+	touch "$PHENO_PATH/pheno_config.sh"
+	
+else
+	echo "Pheno_config file '${PHENO_PATH}/pheno_config.sh' already exists ... "
+fi
+
+
+echo "export TRAINING_PATH=${PHENO_PATH}/trainingCombined.raw" >> "$PHENO_PATH/pheno_config.sh"
+echo "echo TRAINING_PATH is set to: $TRAINING_PATH" >> "$PHENO_PATH/pheno_config.sh"
+
+echo "export TEST_PATH=${PHENO_PATH}/testCombined.raw" >> "$PHENO_PATH/pheno_config.sh"
+echo "echo TEST_PATH is set to: $TEST_PATH" >> "$PHENO_PATH/pheno_config.sh"
+
+echo "export HOLDOUT_PATH=${PHENO_PATH}/holdoutCombined.raw" >> "$PHENO_PATH/pheno_config.sh"
+echo "echo HOLDOUT_PATH is set to: $HOLDOUT_PATH" >> "$PHENO_PATH/pheno_config.sh"
+
+echo "export PHENO_PATH=$PHENO_PATH" >> "$PHENO_PATH/pheno_config.sh"
+echo "echo PHENO_PATH is set to: $PHENO_PATH" >> "$PHENO_PATH/pheno_config.sh"

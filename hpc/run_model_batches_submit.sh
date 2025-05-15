@@ -27,6 +27,7 @@
 
 source ../config.sh
 
+
 # Function to display usage information
 usage() {
     echo "Usage: $0 [pheno] [data_type] "
@@ -45,13 +46,48 @@ PHENO="$1"
 DATA_TYPE="$2"
 
 
-export DATA_TYPE=$DATA_TYPE
-export PHENO=$PHENO
 
-if [ "$data_type" == "epi" ]; then
+# Validate pheno_config file exists and source if it does
+if [ ! -f "$RESULTS_PATH/$PHENO/pheno_config.sh" ]; then
+    echo "'$RESULTS_PATH/$PHENO/pheno_config.sh' does not exist which means $PHENO data has not been produced ... "
+    echo "You need to back and run run_data_cleaning_workflow_submit.sh "
+    exit 1
+else 
+    #exports PHENO_PATH, EPI_PATH, TRAINING_PATH, TEST_PATH
+    source "$RESULTS_PATH/$PHENO/pheno_config.sh"
+fi
+
+#check that pheno path exists
+if [ ! -d "$PHENO_PATH" ]; then
+    echo "'$PHENO_PATH' does not exist. You need to go back and create the data by running run_data_cleaning_workflow_submit.sh"
+    exit 1
+    
+else
+    echo "Running batch models for '${DATA_TYPE}' data... "	
+fi
+
+# Validate model folders exist in pheno folder
+if [ ! -d "$PHENO_PATH/scores" ]; then
+    echo "creating '$PHENO_PATH/scores' folder ... "
+    mkdir "$PHENO_PATH/scores"
+fi
+
+if [ ! -d "$PHENO_PATH/models" ]; then
+    echo "creating '$PHENO_PATH/models' folder ... "
+    mkdir "$PHENO_PATH/models"
+fi
+
+if [ ! -d "$PHENO_PATH/figures" ]; then
+    echo "creating '$PHENO_PATH/figures' folder ... "
+    mkdir "$PHENO_PATH/figures"
+fi
+
+
+
+if [ "$DATA_TYPE" == "epi" ]; then
     INPUT_FILE=$EPI_PATH
 else
-    INPUT_FILE="${PHENO_PATH}/merged_allChromosomes_columns.snplist"
+    INPUT_FILE="$PHENO_PATH/merged_allChromosomes.snplist"
 fi
 
 
@@ -61,18 +97,9 @@ if [ ! -f "$INPUT_FILE" ]; then
     exit 1
 fi
 
-
-if [ ! -d "${PHENO_DIR}" ]; then
-    echo "${PHENO_DIR} does not exist. You need to go back and create the data by running run_data_cleaning_workflow_submit.sh"
-    exit 1
-        
-else
-    echo "Running batch models for ${DATA_TYPE} data... "	
-fi
-
-# Calculate total number of lines in the file
 TOTAL_LINES=$(wc -l < "$INPUT_FILE")
-echo "Total lines in file: $TOTAL_LINES"
+
+echo "Total lines: $TOTAL_LINES"
 
 # Calculate total number of batches (batch size is 3000)
 BATCH_SIZE=3000
@@ -83,12 +110,14 @@ echo "Total number of 3K batches: $TOTAL_BATCHES"
 BATCHES_PER_JOB=5
 TOTAL_JOBS=$(( (TOTAL_BATCHES + BATCHES_PER_JOB - 1) / BATCHES_PER_JOB ))
 echo "Grouping into $TOTAL_JOBS jobs (5 batches per job)"
-
-for JOB_ID in $(seq 1 $TOTAL_JOBS); do
+    
+for JOB_ID in $(seq 1 2); do
+    echo "job id : $JOB_ID"
     # Calculate batch range for this job
     JOB_START_BATCH=$(( (JOB_ID - 1) * BATCHES_PER_JOB + 1 ))
     JOB_END_BATCH=$(( JOB_ID * BATCHES_PER_JOB ))
     
+    echo "job ending in batch : $JOB_END_BATCH"
     # Ensure end batch doesn't exceed total batches
     if [ $JOB_END_BATCH -gt $TOTAL_BATCHES ]; then
         JOB_END_BATCH=$TOTAL_BATCHES
@@ -98,10 +127,13 @@ for JOB_ID in $(seq 1 $TOTAL_JOBS); do
     
     export START=$JOB_START_BATCH
     export END=$JOB_END_BATCH
+    export DATA_TYPE=$DATA_TYPE
+    export PHENO=$PHENO
+
     # Submit the SLURM job
+    #   --export=START_BATCH=$JOB_START_BATCH,END_BATCH=$JOB_END_BATCH,DATA_TYPE=$DATA_TYPE,PHENO=$PHENO \
     sbatch sklearnSectionModelsScoreTrain_submit.sh
-#   --export=START_BATCH=$JOB_START_BATCH,END_BATCH=$JOB_END_BATCH,DATA_TYPE=$DATA_TYPE,PHENO=$PHENO \
-
+    
 done
-
+    
 echo "Batch job submission complete!"

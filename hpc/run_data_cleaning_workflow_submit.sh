@@ -7,7 +7,7 @@
 #SBATCH --partition=bigmem
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=70G
-#SBATCH --time=3:00:00
+#SBATCH --time=7:00:00
 #
 
 ################## USE DATA FROM UK BIOBANK ############
@@ -29,9 +29,9 @@ n=$4
 
 
 module load Miniconda3/23.9.0-0
-eval "$(conda shell.bash hook)"
+source $(conda info --base)/etc/profile.d/conda.sh 
 conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
-export PATH="/nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env/bin:$PATH"
+#export PATH="/nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env/bin:$PATH"
 
 module load plink/1.90
 

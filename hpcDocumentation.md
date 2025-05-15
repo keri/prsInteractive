@@ -42,16 +42,29 @@
     # Create environment from file
     # Option 1: Create ukb_env environment set in the environment.yml file
     # this will create a conda "ukb_env" folder with all of the dependencies in the nfs/scratch/projects/ukbiobank/prsInteractive/ directory
-    # run this command
+    # run these commands preceded with "$"
     
-    username@raapoi-login:/nfs/scratch/projects/ukbiobank/prsInteractive$ conda env create -f environment.yml
+    $ cd /nfs/scratch/projects/ukbiobank/prsInteractive
+    $ module load Miniconda3/23.9.0-0
+    
+    Your command line prompt should look like this:
+    username@raapoi-login:/nfs/scratch/projects/ukbiobank/prsInteractive$ 
+    
+    $ conda env create --prefix ./ukb_env -f environment.yml
+    
     
 ###2) with conda env "ukb_env" present run the workflow:
+
+    pheno = phenotype spelled in camel font and no spaces (i.e. type2Diabetes, myocardialInfarction)
+    icd10 code = substring present in the UK Biobank data
+    pheno substring = will be exact spelling found in UKB data to check for if icd10 not present. this will have spaces so will need to wrap in " "
+    n = number of cores to pass to the epistatic analysis, with 40 cores being the norm and will take approximately 48 hours
+    
     #run command lines:
     
     $ cd nfs/scratch/projects/ukbiobank/prsInteractive/hpc
     
-    $ sbatch run_data_cleaning_workflow_submit.sh {pheno name you create} {icd10 code} substring present in the UK Biobank data {"sub string"} {n cores for epistatic interaction run, normally used 40} 
+    $ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string"} {n} 
     
         i.e. sbatch run_data_cleaning_workflow_submit.sh myocardialInfarction I21 "myocardial infarction" 40
     
@@ -70,6 +83,14 @@
     
     sbatch multiprocessing_fast_epistasis_submit.sh
     
+####3) After epistatic analysis is complete, run the batch models with 
+    from the hpc/directory:
+    pheno = name of folder created and entered in run_data_cleaning_workflow_submit.sh
+    data_type = main (if running single SNPs) or epi (if running with epi-pairs created from epistatic analysis
+    
+    $ sbatch run_model_model_batches_submit.sh {pheno} {data_type}
+    
 
+    
     
     

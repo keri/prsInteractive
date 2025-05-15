@@ -2,6 +2,7 @@
 
 import pandas as pd
 import numpy as np
+import csv
 import time
 
 
@@ -33,6 +34,7 @@ def get_dataset(df_pathway,columns_to_get,full_columns):
     print(machinePath)
     
     withdrawn = pd.read_csv(f'{machinePath}/data/withdrawals.csv',header=None)
+    print('withdrawals are in path : ',machinePath)
     
     with open(df_pathway,'r') as reader:
         mainArray = np.genfromtxt(df_pathway, delimiter=" ", dtype=float,usecols=idxColumns,skip_header=1)#max_rows=100
@@ -51,12 +53,19 @@ def get_columns(trainingPath):
     #dfColumns = pd.read_csv(df_pathway,sep=' ',nrows=1)
     print('getting columns...')
     print('pathway to file for columns = ',trainingPath)
-    df = pd.read_csv(f'{trainingPath}/merged_allChromosomes_columns.snplist',sep='\t')
-    full_columns = df[0].tolist()
+    
+    snpList = []
+    with open(f'{trainingPath}/merged_allChromosomes.snplist') as f:
+        reader = csv.reader(f,delimiter='\t')
+        for row in reader:
+            if row:  # skip empty rows
+                snpList.append(row[0])
+#   df = pd.read_csv(f'{trainingPath}/merged_allChromosomes.snplist',sep='\t',header=None)
+#   full_columns = df[0].tolist()
 
     print('downloaded columns .....')
     
-    return(full_columns)
+    return(snpList)
 
 
 def get_epi_columns(epi_filepath):
@@ -69,3 +78,9 @@ def get_epi_columns(epi_filepath):
     epiDf = pd.read_csv(epi_filepath, sep='\s+',usecols=['SNP','BEST_SNP'])
     pairList = (epiDf['SNP'] + ',' + epiDf['BEST_SNP']).tolist()
     return (pairList)
+
+
+if __name__ == "__main__":
+    
+    trainingPath = '/Users/kerimulterer/prsInteractive/results/myocardialInfarction'
+    df = get_columns(trainingPath)

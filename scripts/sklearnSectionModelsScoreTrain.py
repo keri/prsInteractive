@@ -13,7 +13,6 @@ from sklearn.impute import SimpleImputer
 from sklearn import set_config
 import pickle
 import csv
-import sys
 import warnings
 import os
 import argparse
@@ -24,7 +23,8 @@ warnings.simplefilter(action='ignore')
 # module_path = os.path.abspath(os.path.join('..'))
 # if module_path not in sys.path:
 #sys.path.append("/Users/kerimulterer/ukbiobank/")
-from scripts.helper.download import get_dataset, get_epi_columns, get_columns
+from helper.download import get_dataset, get_epi_columns, get_columns
+from helper.calculate_shap_values import calculate_plot_shap_values
 
 
 def train_models(X,y,modelPath,pheno,data_type,i):
@@ -48,7 +48,6 @@ def train_models(X,y,modelPath,pheno,data_type,i):
     # timeLasso = (en-st)/60
     # pickle.dump(clfLasso, open(f'{trainingPath}models/sklearnLasso_{data_type}_{i}V2.pkl', 'wb'))
     # print('time if took to train lasso = ',timeLasso,' minutes')
-
 
     ##########################
     # Naive Bayes
@@ -77,7 +76,7 @@ def train_models(X,y,modelPath,pheno,data_type,i):
     print('time if took to train HGB = ',timeHGB,' minutes')
     return(imp_mean,clfNVB,grid_search_hgb)
 
-def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB):
+def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath): 
     '''load pickled models and score with test set'''
     print('scoring models .....')
 
@@ -147,12 +146,15 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB):
     en = time.time()
     timenvb = (en-st)/60
     print('time if took to score models = ',timenvb,' minutes')
+    
+    topFeatures = calculate_plot_shap_values(clfNVB,X,y,i,figPath,data_type)
+    
+    
+    return(dfSnps2,topFeatures)
 
-    return(dfSnps2)
 
 
-
-def main(pheno,pheno_path,trainingPath,testPath,data_type,start,end):
+def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
     print('starting analysis .....')
 
@@ -164,7 +166,7 @@ def main(pheno,pheno_path,trainingPath,testPath,data_type,start,end):
     
     scoresPath = f'{pheno_path}/scores'
     modelPath = f'{pheno_path}/models'
-    epiPath =f'{pheno_path}/epiFiles'
+    figPath = f'{pheno_path}/figures'
 
     # create empty dataframe to capture the scores and snps in each iteration
     models = pd.DataFrame(columns=['model','test score','balanced score','auc','matthews_corrcoef','log_loss','jaccard_score','hamming_loss','f1_score','data_type','iteration'])
@@ -201,15 +203,19 @@ def main(pheno,pheno_path,trainingPath,testPath,data_type,start,end):
 
 
         else:
-            epiColumns = get_epi_columns(epiPath)
+            epiColumns = get_epi_columns(epi_path)
             sectionPairs = epiColumns[istart:istart+n]
             sectionSnps = get_epi_snps(sectionPairs)
 
 
         featureScoresFile = f'{scoresPath}/featureScores.csv'
-        #save empty dataframe on first run
-        allModelFeatures = pd.DataFrame(columns=['log_prob_no_diabetes','log_prob_yes_diabetes','odds_no_diabetes','odds_yes_diabetes','model#','feature', 'model'])
+        importantFeaturesFile = f'{scoresPath}/importantFeaturesPostShap.csv'
+        
+        
+
         if not os.path.exists(featureScoresFile):
+            #save empty dataframe on first run
+            allModelFeatures = pd.DataFrame(columns=['log_prob_no_diabetes','log_prob_yes_diabetes','odds_no_diabetes','odds_yes_diabetes','model#','feature', 'model'])
             
             print(f'creating features scores file : {featureScoresFile} ...')
             
@@ -218,6 +224,21 @@ def main(pheno,pheno_path,trainingPath,testPath,data_type,start,end):
                 f.close()
 
         print('number of snps in this section = ',len(sectionSnps))
+        
+        ### save empty important features df
+        if not os.path.exists(featureScoresFile):
+            #save empty dataframe on first run
+            importantFeaturesShap = pd.DataFrame(columns=['feature','iteration','data_type'])
+            
+            print(f'creating important features file : {importantFeaturesFile} ...')
+            
+            with open(importantFeaturesFile,mode='w',newline='') as f:
+                importantFeaturesShap.to_csv(f,index=False)
+                f.close()
+                
+        print('number of snps in this section = ',len(importantFeaturesShap))
+        
+
 
 
 
@@ -227,7 +248,7 @@ def main(pheno,pheno_path,trainingPath,testPath,data_type,start,end):
 
         #train models and pickle trained models to be used in scoring
 
-        mainArray = get_dataset(trainingPath,sectionSnps,full_columns) #main effect snps so both pathways are the same
+        mainArray = get_dataset(training_path,sectionSnps,full_columns) #main effect snps so both pathways are the same
     #     the first columns will be IID, PHENOTYPE
         y = mainArray['PHENOTYPE']
         Xmain = mainArray.drop(columns=["PHENOTYPE"])
@@ -247,7 +268,7 @@ def main(pheno,pheno_path,trainingPath,testPath,data_type,start,end):
             imp_mean,clfNVB,clfHGB = train_models(Xmain,y,modelPath,pheno,data_type,i)
 
 
-            testArray = get_dataset(testPath,sectionSnps,full_columns)
+            testArray = get_dataset(test_path,sectionSnps,full_columns)
 
             yTest = testArray["PHENOTYPE"]
             Xtest = testArray.drop(columns=['PHENOTYPE'])
@@ -258,7 +279,7 @@ def main(pheno,pheno_path,trainingPath,testPath,data_type,start,end):
 
             print('Test array shape = ',Xtest.shape)
 
-            allModelFeatures = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB)
+            allModelFeatures,topFeatures,shap_df = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,)
             allModelFeatures['model#'] = i
             allModelFeatures['feature'] = sectionSnps
             allModelFeatures['model'] = data_type
@@ -272,12 +293,14 @@ def main(pheno,pheno_path,trainingPath,testPath,data_type,start,end):
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description="running models for wrapper...")
-    parser.add_argument("--pheno_folder", help="Path to the input pheno data folder")
-    parser.add_argument("--training_file", help="Phenotype to analyze")
-    parser.add_argument("--test_file", help="Phenotype to analyze")
-    parser.add_argument("--data_type", help="Phenotype to analyze")
-    parser.add_argument("--start", help="Phenotype to analyze")
-    parser.add_argument("--end", help="Phenotype to analyze")
+    parser.add_argument("--pheno_folder", help="Path to the input pheno folder")
+    parser.add_argument("--training_file", help="data file of training data")
+    parser.add_argument("--epi_file", help="epi file with epi pairs to analyze")
+    parser.add_argument("--test_file", help="data file of test data")
+    parser.add_argument("--data_type", help="data type to analyze")
+    parser.add_argument("--start", help="start job")
+    parser.add_argument("--end", help="end job")
+    parser.add_argument("--pheno", help="Phenotype to analyze")
 
     args = parser.parse_args()
     
@@ -288,19 +311,25 @@ if __name__ == '__main__':
     pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
     
-    data_type = args.icd_code or os.environ.get("DATA_TYPE")
+    data_type = args.data_type or os.environ.get("DATA_TYPE")
     print(f"data type : {data_type}")
     
-    training_path = args.icd_code or os.environ.get("TRAINING_PATH")
+    training_path = args.training_file or os.environ.get("TRAINING_PATH")
     print(f"training file : {training_path}")
     
-    test_path = args.icd_code or os.environ.get("TEST_PATH")
+    test_path = args.test_file or os.environ.get("TEST_PATH")
     print(f"test file : {test_path}")
     
-    start = args.icd_code or os.environ.get("START")
+    if data_type == 'epi':
+        epi_path = args.epi_file or os.environ.get("EPI_PATH")
+        print(f"epi path : {epi_path}")
+    else:
+        epi_path = 'None'
+    
+    start = args.start or os.environ.get("START")
     print(f"start : {start}")
     
-    end = args.icd_code or os.environ.get("END")
+    end = args.end or os.environ.get("END")
     print(f"end : {end}")
     
     
@@ -328,5 +357,5 @@ if __name__ == '__main__':
         
 
         
-    main(pheno,pheno_path,training_path,test_path,data_type,start,end)
+    main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end)
     

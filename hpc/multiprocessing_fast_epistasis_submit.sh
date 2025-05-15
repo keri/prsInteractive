@@ -3,8 +3,8 @@
 #run fast fast-epistasis to generate seed snps
 #
 #SBATCH --job-name=fast-epistasis-boost
-#SBATCH -o  /nfs/scratch/multerke/ukbiobank/err_out/%A.out
-#SBATCH -e /nfs/scratch/multerke/ukbiobank/err_out/%A.err
+#SBATCH -o  /nfs/scratch/projects/ukbiobank/err_out/%A.out
+#SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A.err
 #SBATCH --partition=bigmem
 #SBATCH --cpus-per-task=40
 #SBATCH --mem=200G
@@ -17,8 +17,6 @@ module load plink/1.90
 
 echo "[BASH] Reading from: $PHENO_PATH"
 echo "[WORKFLOW] number of cpus to run epistasis is set to: $N"
-
-
 
 OUT_DIR="${PHENO_PATH}/epiFiles/preSummaryFiles"
 OUTPUT_FILE="${OUT_DIR}/trainingEpi.epi.cc"
@@ -56,7 +54,17 @@ done
 
 plink --epistasis-summary-merge $OUTPUT_FILE $N --out "${PHENO_PATH}/epiFiles/trainingCombinedEpi"
 
-echo "export EPI_PATH=${PHENO_PATH}/epiFiles/trainingCombinedEpi" >> "${PROJECT_ROOT}/config.sh"
+# Validate pheno_config file exists 
+if [ ! -f "$PHENO_PATH/pheno_config.sh" ]; then
+	echo "Creating pheno_config file '${PHENO_PATH}/pheno_config.sh' ... "
+	touch "$PHENO_PATH/pheno_config.sh"
+	
+else
+	echo "Pheno_config file '${PHENO_PATH}/pheno_config.sh' already exists ... "
+fi
+
+echo "export EPI_PATH=${PHENO_PATH}/epiFiles/trainingCombinedEpi.epi.cc.summary" >> "${PHENO_PATH}/pheno_config.sh"
+echo "echo EPI_PATH is set to: $PHENO_PATH/epiFiles/trainingCombinedEpi.epi.cc.summary" >> "${PHENO_PATH}/pheno_config.sh"
 
 
 	
