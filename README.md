@@ -24,21 +24,21 @@ File downloaded from cohort created using cohort browser on DNA nexus platform.
 |----------|
 | Participant ID  |
 | Diagnoses - main ICD10  |
-| Non-cancer illness code, self-reported | Instance 0  |
-| Non-cancer illness code, self-reported | Instance 1  |
-| Non-cancer illness code, self-reported | Instance 2  |
-| Non-cancer illness code, self-reported | Instance 3  |
+| Non-cancer illness code, self-reported \| Instance 0  |
+| Non-cancer illness code, self-reported \| Instance 1  |
+| Non-cancer illness code, self-reported \| Instance 2  |
+| Non-cancer illness code, self-reported \| Instance 3  |
 | Sex  |
-| Genetic principal components | Array 1  |
-| Genetic principal components | Array 2  |
-| Genetic principal components | Array 3  |
-| Genetic principal components | Array 4  |
-| Genetic principal components | Array 5  |
-| Genetic principal components | Array 6  |
-| Genetic principal components | Array 7  |
-| Genetic principal components | Array 8  |
-| Genetic principal components | Array 9  |
-| Genetic principal components | Array 10  |
+| Genetic principal components \| Array 1  |
+| Genetic principal components \| Array 2  |
+| Genetic principal components \| Array 3  |
+| Genetic principal components \| Array 4  |
+| Genetic principal components \| Array 5  |
+| Genetic principal components \| Array 6  |
+| Genetic principal components \| Array 7  |
+| Genetic principal components \| Array 8  |
+| Genetic principal components \| Array 9  |
+| Genetic principal components \| Array 10  |
 | Age at recruitment  |
 
     
