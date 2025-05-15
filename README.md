@@ -5,6 +5,8 @@ The prs Insteractive pipeline was developed using genotyped, imputed HLA, and en
 
 # FOLDER DIRECTORY
 
+```bash
+
 .root (prsInteractive)
 ├── data
 │   └── variant_calls
@@ -27,6 +29,8 @@ The prs Insteractive pipeline was developed using genotyped, imputed HLA, and en
 
 19 directories
 
+```
+
 
 # INPUT FILES NEEDED 
 
@@ -44,6 +48,7 @@ The prs Insteractive pipeline was developed using genotyped, imputed HLA, and en
 File downloaded from cohort created using cohort browser on DNA nexus platform.
 
 ### Fields listed are minimum columns needed: 
+
 
 | Fields | 
 |----------|
@@ -99,7 +104,9 @@ Workflow can use as input any clinical marker which includes blood counts, blood
   
 # Output files and folder structure:
 
-```bash results (root)
+```bash 
+
+results (root)
 ├── covar.txt
 ├── pheno
 │   ├── combinedID.txt
@@ -145,7 +152,9 @@ Workflow can use as input any clinical marker which includes blood counts, blood
 ├── participant_environment.csv
 └── participant_hla.csv
 
-6 directories ```
+6 directories 
+
+```
 
 
 # WORKFLOW: 
@@ -171,11 +180,14 @@ Workflow can use as input any clinical marker which includes blood counts, blood
   
   - In an interactive session run:
   
-  ``` bash 
+  ```bash 
+  
   $ cd /path/to/directory/prsInteractive
   $ module load Miniconda3/4.9.2
   $ source $(conda info --base)/etc/profile.d/conda.sh 
-  $ conda env create --prefix ./ukb_env -f environment.yml```
+  $ conda env create --prefix ./ukb_env -f environment.yml
+  
+  ```
   
   
 ## 2) with conda env "ukb_env" present run the workflow:
@@ -212,14 +224,20 @@ Workflow can use as input any clinical marker which includes blood counts, blood
   #merge separate chromosome files into one
   $ bash "${SCRIPTS_DIR}/merge_chromosomes.sh"
   
-  $ sbatch multiprocessing_fast_epistasis_submit.sh```
+  $ sbatch multiprocessing_fast_epistasis_submit.sh
+  
+  ```
   
 ## 3) After epistatic analysis is complete, run the batch models with 
   from the hpc/directory:
   pheno = name of folder created and entered in run_data_cleaning_workflow_submit.sh
   data_type = main (if running single SNPs) or epi (if running with epi-pairs created from epistatic analysis
   
-  ```bash $ sbatch run_model_model_batches_submit.sh {pheno} {data_type}```
+  ```bash 
+  
+  $ sbatch run_model_model_batches_submit.sh {pheno} {data_type} 
+  
+  ```
   
   
 
