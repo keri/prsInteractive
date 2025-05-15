@@ -99,7 +99,7 @@ Workflow can use as input any clinical marker which includes blood counts, blood
   
 # Output files and folder structure:
 
-results (root)
+```bash results (root)
 ├── covar.txt
 ├── pheno
 │   ├── combinedID.txt
@@ -145,7 +145,7 @@ Workflow can use as input any clinical marker which includes blood counts, blood
 ├── participant_environment.csv
 └── participant_hla.csv
 
-6 directories
+6 directories ```
 
 
 # WORKFLOW: 
@@ -160,53 +160,59 @@ Workflow can use as input any clinical marker which includes blood counts, blood
 ![Important Feature Pipeline Workflow](figures/importantFeatureWorkflowSHAP.png)
 
 
-# ########################  STEPS IN ANALYSIS  #############################
+#   STEPS IN ANALYSIS 
 
 ## 1) check to see if a conda environment has been created in /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
-- if ukb_env is not present, create it with this command:
-  # Create environment from file
-  # Option 1: Create ukb_env environment set in the environment.yml file
-  # this will create a conda "ukb_env" folder with all of the dependencies in the nfs/scratch/projects/ukbiobank/prsInteractive/ directory
-  # run these commands preceded with "$"
+- if ukb_env is not present, create ukb_env in root directory prsInteractive:
+  Create environment from environment.yml file
+  This will create a conda "ukb_env" folder with all of the dependencies in the prsInteractive/ directory
+
+  - If on the raapoi hpc path/to/prsInteractive, 
   
-  ``` bash $ cd /nfs/scratch/projects/ukbiobank/prsInteractive
-  $ module load Miniconda3/23.9.0-0```
+  - In an interactive session run:
   
-  Your command line prompt should look like this:
-  ```bash username@raapoi-login:/nfs/scratch/projects/ukbiobank/prsInteractive$ 
-  
+  ``` bash 
+  $ cd /path/to/directory/prsInteractive
+  $ module load Miniconda3/4.9.2
+  $ source $(conda info --base)/etc/profile.d/conda.sh 
   $ conda env create --prefix ./ukb_env -f environment.yml```
   
   
 ## 2) with conda env "ukb_env" present run the workflow:
 
-  pheno = phenotype spelled in camel font and no spaces (i.e. type2Diabetes, myocardialInfarction)
-  icd10 code = substring present in the UK Biobank data
-  pheno substring = will be exact spelling found in UKB data to check for if icd10 not present. this will have spaces so will need to wrap in " "
-  n = number of cores to pass to the epistatic analysis, with 40 cores being the norm and will take approximately 48 hours
+  * pheno = phenotype spelled in camel font and no spaces (i.e. type2Diabetes, myocardialInfarction)
+  * icd10 code = substring present in the UK Biobank data
+  * pheno substring = will be exact spelling found in UKB data to check for if icd10 not present. this will have spaces so will need to wrap in " "
+  * n = number of cores to pass to the epistatic analysis, with 40 cores being the norm and will take approximately 48 hours
   
   #run command lines:
   
-  ```bash $ cd nfs/scratch/projects/ukbiobank/prsInteractive/hpc```
+  ```bash 
   
-  ```bash $ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string"} {n} ```
+  $ cd nfs/scratch/projects/ukbiobank/prsInteractive/hpc
   
-    i.e. sbatch run_data_cleaning_workflow_submit.sh myocardialInfarction I21 "myocardial infarction" 40
+  $ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string"} {n}
+  #i.e. sbatch run_data_cleaning_workflow_submit.sh myocardialInfarction I21 "myocardial infarction" 40
+  
+  ````
     
-  #has the following scripts
+  #### sbatch run_data_cleaning_workflow_submit.sh has the following scripts
+  
+  ```bash
+  
   # create phenotype data and train test split IDs
-  ```bash $ python "${SCRIPTS_DIR}/create_pheno_train_test_split.py"```
+  $ python "${SCRIPTS_DIR}/create_pheno_train_test_split.py"
   
   # create hla (and environmental data files?)
-  ```bash $ python "${SCRIPTS_DIR}/clean_environment_hla_covar_data.py"```
+  $ python "${SCRIPTS_DIR}/clean_environment_hla_covar_data.py"
   
   # Run the variant call cleaning
-  ```bash $ bash "${SCRIPTS_DIR}/plink_clean_variant_calls.sh"```
+  $ bash "${SCRIPTS_DIR}/plink_clean_variant_calls.sh"
   
   #merge separate chromosome files into one
-  ```bash $ bash "${SCRIPTS_DIR}/merge_chromosomes.sh"```
+  $ bash "${SCRIPTS_DIR}/merge_chromosomes.sh"
   
-  ```bash $ sbatch multiprocessing_fast_epistasis_submit.sh```
+  $ sbatch multiprocessing_fast_epistasis_submit.sh```
   
 ## 3) After epistatic analysis is complete, run the batch models with 
   from the hpc/directory:
