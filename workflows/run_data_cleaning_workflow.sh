@@ -9,26 +9,19 @@
 pheno=$1
 icd10=$2
 phenoStr=$3
+n=$4
 
 #pheno="myocardialInfarction"
 #icd10="I21"
 #phenoStr="myocardial infarction"
+#n=40
 
 source ../config.sh #because you're in workflows directory
 
 
 # Set base directories
-#WORKFLOW_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-#PROJECT_ROOT="$(dirname "$WORKFLOW_DIR")"
-#SCRIPTS_DIR="$PROJECT_ROOT/scripts"
-#DATA_DIR="$PROJECT_ROOT/data"
-#RESULTS_DIR="$PROJECT_ROOT/results"
 PHENO_DIR="$RESULTS_DIR/$pheno"
 
-
-# Set environment variable
-export DATA_PATH="$DATA_DIR"
-export RESULTS_PATH="$RESULTS_DIR"
 export PHENO_PATH="$PHENO_DIR"
 export PHENO="$pheno"
 export PHENO_STR="$phenoStr"
@@ -71,6 +64,8 @@ bash "$SCRIPTS_DIR/merge_chromosomes.sh"
 
 bash "$SCRIPTS_DIR/multiprocessing_fast_epistasis.sh"
 
+export DATA_TYPE="main"
+bash run_model_batches.sh
 
 
 

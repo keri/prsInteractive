@@ -1,0 +1,28 @@
+PLINK v1.90b6.26 64-bit (2 Apr 2022)
+Options in effect:
+  --bfile /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes
+  --keep /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testID.txt
+  --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombinedRaw
+  --recode A
+
+Hostname: Mac.localdomain
+Working directory: /Users/kerimulterer/prsInteractive/workflows
+Start time: Sat May 17 22:05:37 2025
+
+Random number seed: 1747476337
+131072 MB RAM detected; reserving 65536 MB for main workspace.
+399 variants loaded from .bim file.
+1797 people (0 males, 1797 females) loaded from .fam.
+1797 phenotype values loaded from .fam.
+--keep: 400 people remaining.
+Using 1 thread (no multithreaded calculations invoked).
+Before main variant filters, 400 founders and 0 nonfounders present.
+Calculating allele frequencies... done.
+Total genotyping rate in remaining samples is exactly 1.
+399 variants and 400 people pass filters and QC.
+Among remaining phenotypes, 165 are cases and 235 are controls.
+--recode A to
+/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombinedRaw.raw
+... done.
+
+End time: Sat May 17 22:05:37 2025

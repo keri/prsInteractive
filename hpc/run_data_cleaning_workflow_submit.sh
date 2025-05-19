@@ -83,6 +83,9 @@ bash "${SCRIPTS_DIR}/merge_chromosomes.sh"
 
 sbatch multiprocessing_fast_epistasis_submit.sh
 
+export DATA_TYPE="main"
+sbatch run_model_model_batches_submit.sh
+
 
 
 

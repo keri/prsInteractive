@@ -17,9 +17,12 @@ def rename_covar_columns(covarFile):
     return(covarFile)
 
 def clean_environmental(data_path):
+    
     #download and clean data
     df = pd.read_csv(f'{data_path}/participant_environment.csv')
-    return(df)
+    
+    
+    return(df_filtered)
     
 def create_covar_data(data_path):
     df = pd.read_csv(f'{data_path}/participant.csv')

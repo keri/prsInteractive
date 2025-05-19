@@ -1,0 +1,7 @@
+       SNP  CHR         BP NTAG       LEFT      RIGHT   KBSPAN TAGS
+  nullB_78    1        179    0        179        179    0.001 NONE
+disease_24    1        325    0        325        325    0.001 NONE
+disease_29    1        330    0        330        330    0.001 NONE
+disease_66    1        367    0        367        367    0.001 NONE
+disease_68    1        369    0        369        369    0.001 NONE
+disease_88    1        389    0        389        389    0.001 NONE

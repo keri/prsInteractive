@@ -221,21 +221,43 @@ Workflow can use as input any clinical marker which includes blood counts, blood
   # Run the variant call cleaning
   $ bash "${SCRIPTS_DIR}/plink_clean_variant_calls.sh"
   
-  #merge separate chromosome files into one
+  # merge separate chromosome files into one
   $ bash "${SCRIPTS_DIR}/merge_chromosomes.sh"
   
+  # run epistatic interaction analysis
   $ sbatch multiprocessing_fast_epistasis_submit.sh
+  
+  # start the queues of batch runs for single SNPs
+  $ sbatch run_model_model_batches_submit.sh {pheno} main 
   
   ```
   
 ## 3) After epistatic analysis is complete, run the batch models with 
-  from the hpc/directory:
+  
   pheno = name of folder created and entered in run_data_cleaning_workflow_submit.sh
   data_type = main (if running single SNPs) or epi (if running with epi-pairs created from epistatic analysis
   
+  input files include:
+  * $PHENO_FOLDER/trainingCombined.raw
+  * $PHENO_FOLDER/testCombined.raw
+  * $PHENO_FOLDER/epiFiles/trainingCombinedEpi.epi.cc.summary 
+  
+  output files include: 
+  * $PHENO_PATH/scores/featureScores.csv
+  * $PHENO_PATH/scores/importantFeaturesPostShap.csv
+  * $PHENO_PATH/pheno_config.sh
+  * sklearnModelScoresSection.csv
+  
+  
+  batch script generates a number of hpc jobs running 5 models with of 3K epi features each
+  
   ```bash 
   
-  $ sbatch run_model_model_batches_submit.sh {pheno} {data_type} 
+  $ cd $ROOT_DIRECTORY/hpc/
+  
+  #scripts removes redundant epi pairs and creates a filtered summary file
+  #each hpc job takes approximately 6 hours using 800GB of RAM and 50 cpus
+  $ sbatch run_model_epi_models.sh pheno
   
   ```
   

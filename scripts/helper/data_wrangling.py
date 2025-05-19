@@ -15,3 +15,42 @@ def create_epi_df(epiDf,pairList):
     epiArrayFinal.columns = pairList 
     
     return(epiArrayFinal)
+
+def get_epi_snps(epiFeatures):
+    '''input : list[str:pair1,str:pair2..str:pairN]
+    output : list : unique[str:snp1,str:snp2...str:snpN]'''
+    epiSnps = []
+    for pair in epiFeatures:
+        epiSnps = epiSnps + pair.split(',')
+    epiSnps = list(set(epiSnps))
+    return(epiSnps)
+
+def scale_cardio_training_data(df):
+    # Initialize the StandardScaler
+    scaler = StandardScaler()
+    
+    # Fit the scaler to your data (compute the mean and standard deviation)
+    scaler.fit(df)
+    
+    # Transform the data using the fitted scaler
+    scaled_data = scaler.transform(df)
+    
+    # Create a new DataFrame with the scaled data
+    scaled_df = pd.DataFrame(scaled_data, columns=df.columns,index=df.index)
+    
+    return(scaled_df,scaler)
+
+
+
+
+
+#   
+#   
+#
+#
+#if __name__ == '__main__':
+#   
+#   main('/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles')
+
+
+    

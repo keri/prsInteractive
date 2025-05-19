@@ -8,8 +8,8 @@
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A.err
 #SBATCH --partition=bigmem
 #SBATCH --cpus-per-task=50
-#SBATCH --mem=700G
-#SBATCH --time=05:00:00
+#SBATCH --mem=800G
+#SBATCH --time=06:00:00
 #
 
 module load Miniconda3/4.9.2

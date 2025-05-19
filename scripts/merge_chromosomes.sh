@@ -96,14 +96,49 @@ else
 fi
 
 
-echo "export TRAINING_PATH=${PHENO_PATH}/trainingCombined.raw" >> "$PHENO_PATH/pheno_config.sh"
-echo "echo TRAINING_PATH is set to: $TRAINING_PATH" >> "$PHENO_PATH/pheno_config.sh"
+PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
 
-echo "export TEST_PATH=${PHENO_PATH}/testCombined.raw" >> "$PHENO_PATH/pheno_config.sh"
-echo "echo TEST_PATH is set to: $TEST_PATH" >> "$PHENO_PATH/pheno_config.sh"
+TEST_PATH="${PHENO_PATH}/testCombined.raw"
+export TEST_PATH
+# Replace line if TEST_PATH exists, else append it
+if grep -q "^TEST_PATH=" "$PHENO_CONFIG"; then
+	sed -i '' "s|^TEST_PATH=.*|TEST_PATH=${TEST_PATH}|" "$PHENO_CONFIG"
+else
+	echo "TEST_PATH=${TEST_PATH}" >> "$PHENO_CONFIG"
+	echo "export TEST_PATH" >> "$PHENO_CONFIG"
 
-echo "export HOLDOUT_PATH=${PHENO_PATH}/holdoutCombined.raw" >> "$PHENO_PATH/pheno_config.sh"
-echo "echo HOLDOUT_PATH is set to: $HOLDOUT_PATH" >> "$PHENO_PATH/pheno_config.sh"
+fi
 
-echo "export PHENO_PATH=$PHENO_PATH" >> "$PHENO_PATH/pheno_config.sh"
-echo "echo PHENO_PATH is set to: $PHENO_PATH" >> "$PHENO_PATH/pheno_config.sh"
+TRAINING_PATH="${PHENO_PATH}/trainingCombined.raw"
+export TRAINING_PATH
+# Replace line if TRAINING_PATH exists, else append it
+if grep -q "^TRAINING_PATH=" "$PHENO_CONFIG"; then
+	if [[ "$(uname)" == "Darwin" ]]; then
+		# macOS sed syntax (requires '' for in-place)
+		sed -i '' "s|^TRAINING_PATH=.*|TRAINING_PATH=${TRAINING_PATH}|" "$PHENO_CONFIG"
+	else
+		# Linux sed syntax
+		sed -i "s|^TRAINING_PATH=.*|TRAINING_PATH=${TRAINING_PATH}|" "$PHENO_CONFIG"
+	fi
+else
+	echo "TRAINING_PATH=${TEST_PATH}" >> "$PHENO_CONFIG"
+	echo "export TRAINING_PATH" >> "$PHENO_CONFIG"
+fi
+
+HOLDOUT_PATH="${PHENO_PATH}/holdoutCombined.raw"
+export HOLDOUT_PATH
+# Replace line if HOLDOUT_PATH exists, else append it
+if grep -q "^HOLDOUT_PATH=" "$PHENO_CONFIG"; then
+	if [[ "$(uname)" == "Darwin" ]]; then
+		# macOS sed syntax (requires '' for in-place)
+		sed -i '' "s|^HOLDOUT_PATH=.*|HOLDOUT_PATH=${HOLDOUT_PATH}|" "$PHENO_CONFIG"
+	else
+		# Linux sed syntax
+		sed -i "s|^HOLDOUT_PATH=.*|HOLDOUT_PATH=${HOLDOUT_PATH}|" "$PHENO_CONFIG"
+	fi
+else
+	echo "HOLDOUT_PATH=${HOLDOUT_PATH}" >> "$PHENO_CONFIG"
+	echo "export HOLDOUT_PATH" >> "$PHENO_CONFIG"
+
+fi
+

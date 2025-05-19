@@ -3,7 +3,8 @@
 
 
 # Set fixed project root directory
-PROJECT_ROOT="/nfs/scratch/projects/ukbiobank/prsInteractive"
+#PROJECT_ROOT="/nfs/scratch/projects/ukbiobank/prsInteractive"
+PROJECT_ROOT="$(dirname "$(pwd)")"
 
 
 # Set base directories
@@ -12,15 +13,15 @@ SCRIPTS_DIR="$PROJECT_ROOT/scripts"
 DATA_DIR="$PROJECT_ROOT/data"
 RESULTS_DIR="$PROJECT_ROOT/results"
 HPC_DIR="$PROJECT_ROOT/hpc"
-ENV_PATH="${PROJECT_ROOT}/ukb_env"
+ENV_PATH="$PROJECT_ROOT/ukb_env"
 
 # Set environment variable
 export DATA_PATH="$DATA_DIR"
 export RESULTS_PATH="$RESULTS_DIR"
-export ENV_PATH=$ENV_PATH
-export SCRIPTS_DIR=$SCRIPTS_DIR
-export HPC_DIR=$HPC_DIR
-export PROJECT_ROOT=$PROJECT_ROOT
+export ENV_PATH
+export SCRIPTS_DIR
+export HPC_DIR
+export PROJECT_ROOT
 
 
 echo "[WORKFLOW] DATA_PATH is set to: $DATA_PATH"

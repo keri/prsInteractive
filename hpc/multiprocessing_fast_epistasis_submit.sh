@@ -54,17 +54,35 @@ done
 
 plink --epistasis-summary-merge $OUTPUT_FILE $N --out "${PHENO_PATH}/epiFiles/trainingCombinedEpi"
 
+PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
+
 # Validate pheno_config file exists 
-if [ ! -f "$PHENO_PATH/pheno_config.sh" ]; then
-	echo "Creating pheno_config file '${PHENO_PATH}/pheno_config.sh' ... "
-	touch "$PHENO_PATH/pheno_config.sh"
+if [ ! -f "$PHENO_CONFIG" ]; then
+	echo "Creating pheno_config file '$PHENO_CONFIG' ... "
+	touch "$PHENO_CONFIG"
 	
 else
-	echo "Pheno_config file '${PHENO_PATH}/pheno_config.sh' already exists ... "
+	echo "Pheno_config file '$PHENO_CONFIG' already exists ... "
 fi
 
-echo "export EPI_PATH=${PHENO_PATH}/epiFiles/trainingCombinedEpi.epi.cc.summary" >> "${PHENO_PATH}/pheno_config.sh"
-echo "echo EPI_PATH is set to: $PHENO_PATH/epiFiles/trainingCombinedEpi.epi.cc.summary" >> "${PHENO_PATH}/pheno_config.sh"
+EPI_PATH="$PHENO_PATH/epiFiles/trainingCombinedEpi.epi.cc.summary"
+export EPI_PATH
+#check to see if EPI_PATH is already present
+if grep -q "^EPI_PATH=" "$PHENO_CONFIG"; then
+	if [[ "$(uname)" == "Darwin" ]]; then
+		# macOS sed syntax (requires '' for in-place)
+		sed -i '' "s|^EPI_PATH=.*|EPI_PATH=${EPI_PATH}|" "$PHENO_CONFIG"
+	else
+		# Linux sed syntax
+		sed -i "s|^EPI_PATH=.*|EPI_PATH=${EPI_PATH}|" "$PHENO_CONFIG"
+	fi
+else
+	echo "EPI_PATH=$EPI_PATH" >> "$PHENO_CONFIG"
+	echo "export EPI_PATH" >> "$PHENO_CONFIG"
+	echo "echo EPI_PATH is set to: $EPI_PATH" >> "$PHENO_CONFIG"
+
+fi
+
 
 
 	

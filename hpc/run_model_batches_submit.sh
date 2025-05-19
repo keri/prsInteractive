@@ -29,27 +29,28 @@ source ../config.sh
 
 
 # Function to display usage information
-usage() {
-    echo "Usage: $0 [pheno] [data_type] "
-    echo "  input_file  : File containing data to be processed in batches and epi or main for data_type"
-    echo ""
-    echo "Example: $0 type2Diabetes epi"
-    exit 1
-}
+#usage() {
+#   echo "Usage: $0 [pheno] [data_type] "
+#   echo "  input_file  : File containing data to be processed in batches and epi or main for data_type"
+#   echo ""
+#   echo "Example: $0 type2Diabetes epi"
+#   exit 1
+#}
+#
+## Check for minimum required arguments
+#if [ $# -lt 2 ]; then
+#   usage
+#fi
 
-# Check for minimum required arguments
-if [ $# -lt 2 ]; then
-    usage
-fi
-
-PHENO="$1"
-DATA_TYPE="$2"
-
+#PHENO="$1"
+echo "PHENO is set to : $PHENO"
+#DATA_TYPE="$2"
+echo "DATA_TYPE is set to : $DATA_TYPE"
 
 
 # Validate pheno_config file exists and source if it does
 if [ ! -f "$RESULTS_PATH/$PHENO/pheno_config.sh" ]; then
-    echo "'$RESULTS_PATH/$PHENO/pheno_config.sh' does not exist which means $PHENO data has not been produced ... "
+    echo "'$RESULTS_PATH/$PHENO/pheno_config.sh' does not exist which means pheno_config.sh has not been produced ... "
     echo "You need to back and run run_data_cleaning_workflow_submit.sh "
     exit 1
 else 
@@ -86,6 +87,7 @@ fi
 
 if [ "$DATA_TYPE" == "epi" ]; then
     INPUT_FILE=$EPI_PATH
+    echo "epi path is set to : $EPI_PATH"
 else
     INPUT_FILE="$PHENO_PATH/merged_allChromosomes.snplist"
 fi
@@ -111,7 +113,7 @@ BATCHES_PER_JOB=5
 TOTAL_JOBS=$(( (TOTAL_BATCHES + BATCHES_PER_JOB - 1) / BATCHES_PER_JOB ))
 echo "Grouping into $TOTAL_JOBS jobs (5 batches per job)"
     
-for JOB_ID in $(seq 1 2); do
+for JOB_ID in $(seq 3 $TOTAL_JOBS); do
     echo "job id : $JOB_ID"
     # Calculate batch range for this job
     JOB_START_BATCH=$(( (JOB_ID - 1) * BATCHES_PER_JOB + 1 ))

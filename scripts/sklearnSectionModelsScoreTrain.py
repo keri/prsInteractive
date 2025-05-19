@@ -24,7 +24,10 @@ warnings.simplefilter(action='ignore')
 # if module_path not in sys.path:
 #sys.path.append("/Users/kerimulterer/ukbiobank/")
 from helper.download import get_dataset, get_epi_columns, get_columns
-from helper.calculate_shap_values import calculate_plot_shap_values
+from helper.calculate_shap_values import *
+from helper.data_wrangling import *
+
+
 
 def convert_log_prob_to_odds(df):
     '''input df columns = ['feature', 'model', 'log_prob_no_pheno', 'log_prob_yes_pheno',
@@ -134,7 +137,9 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
 
 #    model = pickle.load(open(f'{trainingPath}/models/sklearnNaiveBayes_{data_type}_{i}.pkl', 'rb'))
 #    clfNVB = pickle.load(model)
-
+    if auc > .51:
+        rank_features = True
+    
     score = clfNVB.score(Ximp, y)
     yHat = clfNVB.predict(Ximp)
     balanced_score = balanced_accuracy_score(y,yHat)
@@ -162,7 +167,8 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
     timenvb = (en-st)/60
     print('time if took to score models = ',timenvb,' minutes')
     
-    topFeatures = calculate_plot_shap_values(clfHGB,X,y,i,figPath,data_type)
+    if rank_features or auc > .51:
+        topFeatures,featuresZscores = calculate_plot_shap_values(clfHGB,X,y,i,figPath,data_type)
     
     
     return(dfSnps2,topFeatures)
@@ -209,7 +215,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
 
     for i in range(start,end+1):
-        istart = i*n
+        istart = (i-1)*n
         if data_type == 'main':
 #           if i == 0:
 #               sectionSnps = full_columns[:istart+n]
@@ -218,6 +224,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
 
         else:
+            print('epi_path to get filtered epi pairs ..',epi_path)
             epiColumns = get_epi_columns(epi_path)
             sectionPairs = epiColumns[istart:istart+n]
             sectionSnps = get_epi_snps(sectionPairs)
@@ -243,7 +250,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
         ### save empty important features df
         if not os.path.exists(importantFeaturesFile):
             #save empty dataframe on first run
-            importantFeaturesShap = pd.DataFrame(columns=['feature','iteration','data_type'])
+            importantFeaturesShap = pd.DataFrame(columns=['feature','shap_zscore','data_type'])
             
             print(f'creating important features file : {importantFeaturesFile} ...')
             
@@ -289,16 +296,23 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
             print('Test array shape = ',Xtest.shape)
 
-            allModelFeatures,topFeatures,shap_df = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,)
+            allModelFeatures,topFeatures = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,)
             allModelFeatures['model#'] = i
             allModelFeatures['feature'] = sectionSnps
             allModelFeatures['model'] = data_type
+            
+            if topFeatures.empty:
+                pass
+            else:
+                topFeatures = topFeatures.reset_index()
+                topFeatures['data_type'] = data_type
+
+                with open(importantFeaturesFile,mode='a',newline='') as f:
+                    topFeatures.to_csv(f,index=False, header=False)
+                    f.close()
+                    
             with open(featureScoresFile,mode='a',newline='') as f:
                 allModelFeatures.to_csv(f,index=False, header=False)
-                f.close()
-                
-            with open(importantFeaturesFile,mode='a',newline='') as f:
-                topFeatures.to_csv(f,index=False, header=False)
                 f.close()
 
         i += 1
@@ -319,35 +333,47 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     # Prefer command-line input if provided; fallback to env var
+#   pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
     pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
     print(f"[PYTHON] Reading from: {pheno_path}")
     
+#   pheno = 'type2Diabetes'
     pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
     
+#   data_type = 'epi'
     data_type = args.data_type or os.environ.get("DATA_TYPE")
     print(f"data type : {data_type}")
     
+#   training_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw'
     training_path = args.training_file or os.environ.get("TRAINING_PATH")
     print(f"training file : {training_path}")
     
+#   test_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombined.raw'
     test_path = args.test_file or os.environ.get("TEST_PATH")
     print(f"test file : {test_path}")
     
+    
+    
     if data_type == 'epi':
         epi_path = args.epi_file or os.environ.get("EPI_PATH")
+#       epi_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary'
+        if not epi_path:
+            raise ValueError("You must provide a data type code via --epi_path or set the EPI_PATH environment variable.")
         print(f"epi path : {epi_path}")
     else:
         epi_path = 'None'
     
+#   start = 1
     start = args.start or os.environ.get("START")
     print(f"start : {start}")
     
+#   end = 1
     end = args.end or os.environ.get("END")
     print(f"end : {end}")
     
     
-        
+    
     if not pheno_path:
         raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
         
@@ -369,6 +395,16 @@ if __name__ == '__main__':
     if not end:
         raise ValueError("You must provide a data type code via --end or set the END environment variable.")
         
+    
+    #check to see that scores, models, and figures folder has been created
+    dir_path = f"{pheno_path}/models"
+    os.makedirs(dir_path, exist_ok=True)
+    
+    dir_path = f"{pheno_path}/scores"
+    os.makedirs(dir_path, exist_ok=True)
+    
+    dir_path = f"{pheno_path}/figures"
+    os.makedirs(dir_path, exist_ok=True)
 
         
     main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end)
