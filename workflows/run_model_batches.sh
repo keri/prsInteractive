@@ -4,9 +4,9 @@
 #
 # This script calculates the number of 3K-sized batches needed for processing
 # and submits jobs for all batches.
-
-
-source ../config.sh
+if [ "$DATA_TYPE" == "main" ]; then
+    source ../config.sh
+fi
 
 #PHENO="$1"
 echo "PHENO is set to : $PHENO"

@@ -73,44 +73,44 @@ fi
 #export DATA_TYPE="main"
 #bash run_model_batches_test.sh 
 
-PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
-source $PHENO_CONFIG
-
-EPI_PATH="$PHENO_PATH/epiFiles"
-export EPI_PATH
-
-python "${SCRIPTS_DIR}/filter_redundant_epi_pairs.py"
-
-NEW_EPI_PATH="$PHENO_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary"
-
-echo "Epi path is now set to ... $NEW_EPI_PATH"
-
-#check to see if EPI_PATH exists
-if grep -q "^EPI_PATH=" "$PHENO_CONFIG"; then
-    if [[ "$(uname)" == "Darwin" ]]; then
-        # macOS sed syntax (requires '' for in-place)
-        sed -i '' "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
-    else
-        # Linux sed syntax
-        sed -i "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
-    fi
-else
-    echo "EPI_PATH=${NEW_EPI_PATH}" >> "$PHENO_CONFIG"
-    echo "export EPI_PATH" >> "$PHENO_CONFIG"	
-fi
-
-
-#run the epi batch models on the hpc
-export DATA_TYPE="epi"
-bash run_model_batches_test.sh
+#PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
+#source $PHENO_CONFIG
+#
+#EPI_PATH="$PHENO_PATH/epiFiles"
+#export EPI_PATH
+#
+#python "${SCRIPTS_DIR}/filter_redundant_epi_pairs.py"
+#
+#NEW_EPI_PATH="$PHENO_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary"
+#
+#echo "Epi path is now set to ... $NEW_EPI_PATH"
+#
+##check to see if EPI_PATH exists
+#if grep -q "^EPI_PATH=" "$PHENO_CONFIG"; then
+#   if [[ "$(uname)" == "Darwin" ]]; then
+#       # macOS sed syntax (requires '' for in-place)
+#       sed -i '' "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
+#   else
+#       # Linux sed syntax
+#       sed -i "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
+#   fi
+#else
+#   echo "EPI_PATH=${NEW_EPI_PATH}" >> "$PHENO_CONFIG"
+#   echo "export EPI_PATH" >> "$PHENO_CONFIG"	
+#fi
+#
+#
+##run the epi batch models on the hpc
+#export DATA_TYPE="epi"
+#bash run_model_batches_test.sh
 
 #add 4 lines of epi interactions with significance not present after feature ranking step
-python "$SCRIPTS_DIR/test/add_epi_importantFeatures_for_test.py"
+#python "$SCRIPTS_DIR/test/add_epi_importantFeatures_for_test.py"
 
 
 #run the GxGxE analysis
-export ENV_TYPE='cardioMetabolic'
-python "$SCRIPTS_DIR/gene_environment_feature_discovery.py"
+#export ENV_TYPE='cardioMetabolic'
+#python "$SCRIPTS_DIR/gene_environment_feature_discovery.py"
 
 #run 
 bash "$SCRIPTS_DIR/run_plink_LD.sh"

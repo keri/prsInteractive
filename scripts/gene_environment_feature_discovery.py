@@ -272,28 +272,28 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     # Prefer command-line input if provided; fallback to env var
-    pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
-#   pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
+#   pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
+    pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
     print(f"[PYTHON] Reading from: {pheno_path}")
     
-    pheno = 'type2Diabetes'
-#   pheno = args.pheno or os.environ.get("PHENO")
+#   pheno = 'type2Diabetes'
+    pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
     
-    env_type = 'cardioMetabolic'
-#   env_type = args.env_type or os.environ.get("ENV_TYPE")
+#   env_type = 'cardioMetabolic'
+    env_type = args.env_type or os.environ.get("ENV_TYPE")
     print(f"data type : {env_type}")
     
-    training_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw'
-#   training_path = args.training_file or os.environ.get("TRAINING_PATH")
+#   training_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw'
+    training_path = args.training_file or os.environ.get("TRAINING_PATH")
     print(f"training file : {training_path}")
     
-    test_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombined.raw'
-#   test_path = args.test_file or os.environ.get("TEST_PATH")
+#   test_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombined.raw'
+    test_path = args.test_file or os.environ.get("TEST_PATH")
     print(f"test file : {test_path}")
     
-    results_path = '/Users/kerimulterer/prsInteractive/testResults'
-#   results_path = args.results_path or os.environ.get("RESULTS_PATH")
+#   results_path = '/Users/kerimulterer/prsInteractive/testResults'
+    results_path = args.results_path or os.environ.get("RESULTS_PATH")
     print(f"results path : {results_path}")
     
 
@@ -307,7 +307,7 @@ if __name__ == '__main__':
         raise ValueError("You must provide a phenotype via --pheno or set the PHENO environment variable.")
         
     if not env_type:
-        raise ValueError("You must provide a env type code via --data_type or set the ENV_TYPE environment variable.")
+        raise ValueError("You must provide a env type code via --env_type or set the ENV_TYPE environment variable.")
         
     if not training_path:
         raise ValueError("You must provide a training path via --training_path or set the TRAINING_PATH environment variable.")

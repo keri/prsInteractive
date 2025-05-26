@@ -10,10 +10,6 @@
 #
 # Example: ./calculate_batches.sh my_data.txt
 
-#!/bin/bash
-#Keri Multerer October 2025
-#iterate over batches
-#
 #SBATCH --job-name=model_batches
 #SBATCH -o  /nfs/scratch/projects/ukbiobank/err_out/%A.out
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A.err
@@ -25,7 +21,14 @@
 #SBATCH --mail-user=keri@multerer.com
 #
 
-source ../config.sh
+
+pheno=$1
+DATA_TYPE=$2
+
+if [ "$DATA_TYPE" == "main" ]; then
+    source ../config.sh
+
+fi
 
 
 # Function to display usage information
@@ -42,29 +45,34 @@ source ../config.sh
 #   usage
 #fi
 
-#PHENO="$1"
+PHENO=$pheno
 echo "PHENO is set to : $PHENO"
 #DATA_TYPE="$2"
 echo "DATA_TYPE is set to : $DATA_TYPE"
 
+CONFIG_PATH="$RESULTS_PATH/$PHENO/pheno_config.sh"
+echo "config path is set to : $CONFIG_PATH"
+
+PHENO_PATH="$RESULTS_PATH/$PHENO"
+
 
 # Validate pheno_config file exists and source if it does
-if [ ! -f "$RESULTS_PATH/$PHENO/pheno_config.sh" ]; then
-    echo "'$RESULTS_PATH/$PHENO/pheno_config.sh' does not exist which means pheno_config.sh has not been produced ... "
+if [ ! -f "${CONFIG_PATH}" ]; then
+    echo "${CONFIG_PATH} does not exist which means pheno_config.sh has not been produced ... "
     echo "You need to back and run run_data_cleaning_workflow_submit.sh "
     exit 1
 else 
     #exports PHENO_PATH, EPI_PATH, TRAINING_PATH, TEST_PATH
-    source "$RESULTS_PATH/$PHENO/pheno_config.sh"
+    source "${CONFIG_PATH}"
 fi
 
 #check that pheno path exists
 if [ ! -d "$PHENO_PATH" ]; then
-    echo "'$PHENO_PATH' does not exist. You need to go back and create the data by running run_data_cleaning_workflow_submit.sh"
+    echo "$PHENO_PATH does not exist. You need to go back and create the data by running run_data_cleaning_workflow_submit.sh"
     exit 1
     
 else
-    echo "Running batch models for '${DATA_TYPE}' data... "	
+    echo "Running batch models for $DATA_TYPE data... "	
 fi
 
 # Validate model folders exist in pheno folder
@@ -113,7 +121,8 @@ BATCHES_PER_JOB=5
 TOTAL_JOBS=$(( (TOTAL_BATCHES + BATCHES_PER_JOB - 1) / BATCHES_PER_JOB ))
 echo "Grouping into $TOTAL_JOBS jobs (5 batches per job)"
     
-for JOB_ID in $(seq 3 $TOTAL_JOBS); do
+#for JOB_ID in $(seq 3 $TOTAL_JOBS); do
+for JOB_ID in $(seq 1 2); do
     echo "job id : $JOB_ID"
     # Calculate batch range for this job
     JOB_START_BATCH=$(( (JOB_ID - 1) * BATCHES_PER_JOB + 1 ))
@@ -131,6 +140,7 @@ for JOB_ID in $(seq 3 $TOTAL_JOBS); do
     export END=$JOB_END_BATCH
     export DATA_TYPE=$DATA_TYPE
     export PHENO=$PHENO
+    export PHENO_PATH=$PHENO_PATH
 
     # Submit the SLURM job
     #   --export=START_BATCH=$JOB_START_BATCH,END_BATCH=$JOB_END_BATCH,DATA_TYPE=$DATA_TYPE,PHENO=$PHENO \

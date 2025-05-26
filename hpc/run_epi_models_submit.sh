@@ -1,9 +1,9 @@
 #!/bin/bash
 
 #
-#SBATCH --job-name=prs_score_development
-#SBATCH -o  /nfs/scratch/projects/ukbiobank/err_out/%A_score_development.out
-#SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_score_development.err
+#SBATCH --job-name=epi_model_run
+#SBATCH -o  /nfs/scratch/projects/ukbiobank/err_out/%A.out
+#SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A.err
 #SBATCH --partition=quicktest
 #SBATCH --cpus-per-task=2
 #SBATCH --mem=30G
@@ -18,14 +18,8 @@
 #   $PHENO_PATH/testCombined.raw
 
 
-
-
-
-#pheno="myocardialInfarction"
-#icd10="I21"
-#phenoStr="myocardial infarction"
-
-
+# Make sure we're in the correct directory when the script runs
+# This ensures relative paths work correctly regardless of where sbatch is called from
 
 module load Miniconda3/4.9.2
 source $(conda info --base)/etc/profile.d/conda.sh 
@@ -38,8 +32,16 @@ pheno=$1
 
 ##############  SET UP ENV VARIABLES FOR JOB #################
 
-# Source config
-source ../config.sh  # because you're in prsInteractive/hpc
+# Source config with error handling
+if [ ! -f "../config.sh" ]; then
+    echo "ERROR: ../config.sh not found!"
+    echo "Current directory: $(pwd)"
+    echo "Looking for: $(realpath ../config.sh 2>/dev/null || echo '../config.sh')"
+    exit 1
+fi
+
+source ../config.sh
+
 
 PHENO_DIR="$RESULTS_DIR/$pheno"
 
@@ -72,6 +74,12 @@ export EPI_PATH
 
 python "${SCRIPTS_DIR}/filter_redundant_epi_pairs.py"
 
+TIMEOUT=600
+
+conda deactivate
+
+TIMEOUT=15
+
 NEW_EPI_PATH="$PHENO_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary"
 export EPI_PATH=$NEW_EPI_PATH
 echo "Epi path is now set to ... $NEW_EPI_PATH"
@@ -92,9 +100,8 @@ fi
 
 
 #run the epi batch models on the hpc
-export DATA_TYPE="epi"
-python run_model_batches_submit.sh
 
+sbatch run_model_batches_submit.sh $PHENO 'epi'
 
 
 

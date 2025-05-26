@@ -96,7 +96,8 @@ BATCHES_PER_JOB=1
 TOTAL_JOBS=$(( (TOTAL_BATCHES + BATCHES_PER_JOB - 1) / BATCHES_PER_JOB ))
 echo "Grouping into $TOTAL_JOBS jobs (5 batches per job)"
     
-for JOB_ID in $(seq 1 $TOTAL_BATCHES); do
+#for JOB_ID in $(seq 1 $TOTAL_BATCHES); do
+for JOB_ID in $(seq 1 2); do
     echo "job id : $JOB_ID"
     # Calculate batch range for this job
     JOB_START_BATCH=$(( (JOB_ID - 1) * BATCHES_PER_JOB + 1 ))

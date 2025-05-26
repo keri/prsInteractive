@@ -137,6 +137,9 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
 
 #    model = pickle.load(open(f'{trainingPath}/models/sklearnNaiveBayes_{data_type}_{i}.pkl', 'rb'))
 #    clfNVB = pickle.load(model)
+        
+    rank_features = False
+    
     if auc > .51:
         rank_features = True
     
@@ -170,7 +173,8 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
     if rank_features or auc > .51:
         topFeatures,featuresZscores = calculate_plot_shap_values(clfHGB,X,y,i,figPath,data_type)
     
-    
+    else:
+        topFeatures = pd.DataFrame()
     return(dfSnps2,topFeatures)
 
 
@@ -221,7 +225,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 #               sectionSnps = full_columns[:istart+n]
 #           else:
             sectionSnps = full_columns[istart:istart+n]
-
+            sectionPairs = sectionSnps
 
         else:
             print('epi_path to get filtered epi pairs ..',epi_path)
@@ -298,7 +302,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
             allModelFeatures,topFeatures = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,)
             allModelFeatures['model#'] = i
-            allModelFeatures['feature'] = sectionSnps
+            allModelFeatures['feature'] = sectionPairs
             allModelFeatures['model'] = data_type
             
             if topFeatures.empty:

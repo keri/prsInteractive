@@ -11,7 +11,6 @@ def main(pheno_path):
     
     df = pd.DataFrame()
     df['feature'] = ['disease_66,disease_88','disease_88,disease_66','nullB_78,disease_68','disease_24,disease_29']
-    df['iteration'] = 1
     df['shap_zscore'] = [2.5,2.5,3.0,7.5]
     df['data_type'] = 'epi'
     

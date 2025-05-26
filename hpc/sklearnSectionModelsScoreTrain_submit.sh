@@ -35,7 +35,7 @@ echo "[HPC WORKFLOW] TEST_PATH is set: $TEST_PATH"
 
 python "${SCRIPTS_DIR}/sklearnSectionModelsScoreTrain.py"
 
-
+conda deactivate
 
 
 
