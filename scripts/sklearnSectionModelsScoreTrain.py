@@ -27,39 +27,6 @@ from helper.download import get_dataset, get_epi_columns, get_columns, get_colum
 from helper.calculate_shap_values import *
 from helper.data_wrangling import *
 
-def get_dataset(df_pathway,columns_to_get):
-    '''input : epi snps column_list = ['SNP','BEST_SNP','CHR','BEST_CHR']
-    mainfilepath = filepath to raw file
-    output: dataframe space separated .raw, values: 0,1,2 for values, columns: rsID_MA'''
-#   st = time.time()
-    
-    columns_to_get = ['IID','PHENOTYPE'] + columns_to_get
-#   full_columns = ['FID','IID','PAT','MAT','SEX','PHENOTYPE'] + full_columns
-#   idxColumns = get_column_index(columns_to_get,full_columns)
-    
-    #take out the people that have withdrawn from study
-    machinePath = '/'.join(df_pathway.split('/')[:-3])
-    
-#   machinePath = '/'.join(df_pathway.split('/')[:-5])
-    print(machinePath)
-    
-    withdrawn = pd.read_csv(f'{machinePath}/data/withdrawals.csv',header=None)
-    print('withdrawals are in path : ',machinePath)
-    
-    with open(df_pathway,'r') as reader:
-        df = pd.read_csv(df_pathway, delimiter=" ",usecols=columns_to_get)#max_rows=100
-#   en = time.time()
-    
-    
-#   df = pd.DataFrame(data=mainArray,columns=columns_to_get)
-    df2 = df[~df['IID'].isin(withdrawn[0])]
-    
-    
-    df2.set_index(['IID'],inplace=True)
-    
-#   print(f'time it took to download entire dataset is ',(en-st)/60, ' minutes')
-    return (df2)
-
 
 
 def convert_log_prob_to_odds(df):
