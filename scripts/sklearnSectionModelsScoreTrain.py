@@ -23,9 +23,42 @@ warnings.simplefilter(action='ignore')
 # module_path = os.path.abspath(os.path.join('..'))
 # if module_path not in sys.path:
 #sys.path.append("/Users/kerimulterer/ukbiobank/")
-from helper.download import get_dataset, get_epi_columns, get_columns
+from helper.download import get_dataset, get_epi_columns, get_columns, get_column_index
 from helper.calculate_shap_values import *
 from helper.data_wrangling import *
+
+def get_dataset(df_pathway,columns_to_get):
+    '''input : epi snps column_list = ['SNP','BEST_SNP','CHR','BEST_CHR']
+    mainfilepath = filepath to raw file
+    output: dataframe space separated .raw, values: 0,1,2 for values, columns: rsID_MA'''
+#   st = time.time()
+    
+    columns_to_get = ['IID','PHENOTYPE'] + columns_to_get
+#   full_columns = ['FID','IID','PAT','MAT','SEX','PHENOTYPE'] + full_columns
+#   idxColumns = get_column_index(columns_to_get,full_columns)
+    
+    #take out the people that have withdrawn from study
+    machinePath = '/'.join(df_pathway.split('/')[:-3])
+    
+#   machinePath = '/'.join(df_pathway.split('/')[:-5])
+    print(machinePath)
+    
+    withdrawn = pd.read_csv(f'{machinePath}/data/withdrawals.csv',header=None)
+    print('withdrawals are in path : ',machinePath)
+    
+    with open(df_pathway,'r') as reader:
+        df = pd.read_csv(df_pathway, delimiter=" ",usecols=columns_to_get)#max_rows=100
+#   en = time.time()
+    
+    
+#   df = pd.DataFrame(data=mainArray,columns=columns_to_get)
+    df2 = df[~df['IID'].isin(withdrawn[0])]
+    
+    
+    df2.set_index(['IID'],inplace=True)
+    
+#   print(f'time it took to download entire dataset is ',(en-st)/60, ' minutes')
+    return (df2)
 
 
 
@@ -269,7 +302,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
         #train models and pickle trained models to be used in scoring
 
-        mainArray = get_dataset(training_path,sectionSnps,full_columns) #main effect snps so both pathways are the same
+        mainArray = get_dataset(training_path,sectionSnps) #main effect snps so both pathways are the same
     #     the first columns will be IID, PHENOTYPE
         y = mainArray['PHENOTYPE']
         Xmain = mainArray.drop(columns=["PHENOTYPE"])
@@ -289,7 +322,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
             imp_mean,clfNVB,clfHGB = train_models(Xmain,y,modelPath,pheno,data_type,i)
 
 
-            testArray = get_dataset(test_path,sectionSnps,full_columns)
+            testArray = get_dataset(test_path,sectionSnps)
 
             yTest = testArray["PHENOTYPE"]
             Xtest = testArray.drop(columns=['PHENOTYPE'])
@@ -337,43 +370,43 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     # Prefer command-line input if provided; fallback to env var
-#   pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
-    pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
+    pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
+#   pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
     print(f"[PYTHON] Reading from: {pheno_path}")
     
-#   pheno = 'type2Diabetes'
-    pheno = args.pheno or os.environ.get("PHENO")
+    pheno = 'type2Diabetes'
+#   pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
     
-#   data_type = 'epi'
-    data_type = args.data_type or os.environ.get("DATA_TYPE")
+    data_type = 'main'
+#   data_type = args.data_type or os.environ.get("DATA_TYPE")
     print(f"data type : {data_type}")
     
-#   training_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw'
-    training_path = args.training_file or os.environ.get("TRAINING_PATH")
+    training_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw'
+#   training_path = args.training_file or os.environ.get("TRAINING_PATH")
     print(f"training file : {training_path}")
     
-#   test_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombined.raw'
-    test_path = args.test_file or os.environ.get("TEST_PATH")
+    test_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombined.raw'
+#   test_path = args.test_file or os.environ.get("TEST_PATH")
     print(f"test file : {test_path}")
     
     
     
     if data_type == 'epi':
-        epi_path = args.epi_file or os.environ.get("EPI_PATH")
-#       epi_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary'
+#       epi_path = args.epi_file or os.environ.get("EPI_PATH")
+        epi_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary'
         if not epi_path:
             raise ValueError("You must provide a data type code via --epi_path or set the EPI_PATH environment variable.")
         print(f"epi path : {epi_path}")
     else:
         epi_path = 'None'
     
-#   start = 1
-    start = args.start or os.environ.get("START")
+    start = 1
+#   start = args.start or os.environ.get("START")
     print(f"start : {start}")
     
-#   end = 1
-    end = args.end or os.environ.get("END")
+    end = 1
+#   end = args.end or os.environ.get("END")
     print(f"end : {end}")
     
     

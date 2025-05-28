@@ -1,0 +1,15 @@
+FROM ukb-base:V1
+
+# Install PLINK and other data processing tools
+# RUN apt-get update && apt-get install -y \
+# plink1.9 \
+# && rm -rf /var/lib/apt/lists/*
+
+# Or install via conda if preferred
+RUN conda install -n ukb_env -c bioconda plink
+    
+# Copy data preprocessing scripts
+#COPY scripts/ /opt/scripts/
+#RUN chmod +x /opt/scripts/*.py /opt/scripts/*.sh
+
+ENV STAGE="data_preprocessing"

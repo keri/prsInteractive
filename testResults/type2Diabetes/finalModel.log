@@ -1,40 +1,40 @@
-PLINK v1.90b6.26 64-bit (2 Apr 2022)
+PLINK v1.9.0-b.8 64-bit (22 Oct 2024)
 Options in effect:
-  --bfile /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes
-  --extract /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/finalModelLDSnps.txt
+  --bfile /prsInteractive/testResults/type2Diabetes/merged_allChromosomes
+  --extract /prsInteractive/testResults/type2Diabetes/finalModelLDSnps.txt
   --indep-pairwise 100kb 1 .6
-  --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/finalModel
+  --out /prsInteractive/testResults/type2Diabetes/finalModel
   --r2
   --show-tags all
 
-Hostname: Mac.localdomain
-Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Sun May 18 13:03:03 2025
+Hostname: 1dd793270a2e
+Working directory: /prsInteractive/workflows
+Start time: Wed May 28 07:17:22 2025
 
-Random number seed: 1747530183
-131072 MB RAM detected; reserving 65536 MB for main workspace.
+Random number seed: 1748416642
+7834 MB RAM detected; reserving 3917 MB for main workspace.
 399 variants loaded from .bim file.
 1797 people (0 males, 1797 females) loaded from .fam.
 1797 phenotype values loaded from .fam.
---extract: 6 variants remaining.
+--extract: 24 variants remaining.
 Using up to 19 threads (change this with --threads).
 Before main variant filters, 1797 founders and 0 nonfounders present.
 Calculating allele frequencies... done.
 Total genotyping rate is exactly 1.
-6 variants and 1797 people pass filters and QC.
+24 variants and 1797 people pass filters and QC.
 Among remaining phenotypes, 741 are cases and 1056 are controls.
 --show-tags all: Report written to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/finalModel.tags.list
-.
-Pruned 0 variants from chromosome 1, leaving 6.
-Pruning complete.  0 of 6 variants removed.
+/prsInteractive/testResults/type2Diabetes/finalModel.tags.list .
+Pruned 0 variants from chromosome 1, leaving 24.
+Pruning complete.  0 of 24 variants removed.
 Marker lists written to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/finalModel.prune.in
-and
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/finalModel.prune.out
-.
---r2 to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/finalModel.ld ...
+/prsInteractive/testResults/type2Diabetes/finalModel.prune.in and
+/prsInteractive/testResults/type2Diabetes/finalModel.prune.out .
+Running --r2 with the following filters:
+  --ld-window: 10
+  --ld-window-kb: 1000
+  --ld-window-r2: 0.2
+--r2 to /prsInteractive/testResults/type2Diabetes/finalModel.ld ...
 done.
 
-End time: Sun May 18 13:03:03 2025
+End time: Wed May 28 07:17:23 2025

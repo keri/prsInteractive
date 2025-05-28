@@ -9,11 +9,11 @@ Options in effect:
   --pheno /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/pheno.txt
   --remove /Users/kerimulterer/prsInteractive/testData/withdrawalsID.txt
 
-Hostname: Mac.localdomain
+Hostname: FENG-8FV41F3.staff.vuw.ac.nz
 Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Sat May 17 22:05:37 2025
+Start time: Wed May 28 22:09:15 2025
 
-Random number seed: 1747476337
+Random number seed: 1748426955
 131072 MB RAM detected; reserving 65536 MB for main workspace.
 Performing single-pass merge (2000 people, 400 variants).
 Merged fileset written to
@@ -26,14 +26,14 @@ Merged fileset written to
 400 variants loaded from .bim file.
 2000 people (0 males, 2000 females) loaded from .fam.
 2000 phenotype values present after --pheno.
---extract: 399 variants remaining.
+--extract: 400 variants remaining.
 --keep: 200 people remaining.
 --remove: 200 people remaining.
 Using 1 thread (no multithreaded calculations invoked).
 Before main variant filters, 200 founders and 0 nonfounders present.
 Calculating allele frequencies... done.
-Total genotyping rate in remaining samples is exactly 1.
-399 variants and 200 people pass filters and QC.
+Total genotyping rate in remaining samples is 0.6583.
+400 variants and 200 people pass filters and QC.
 Among remaining phenotypes, 82 are cases and 118 are controls.
 --make-bed to
 /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.bed
@@ -43,4 +43,4 @@ Among remaining phenotypes, 82 are cases and 118 are controls.
 /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.fam
 ... done.
 
-End time: Sat May 17 22:05:37 2025
+End time: Wed May 28 22:09:15 2025

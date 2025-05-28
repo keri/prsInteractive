@@ -44,76 +44,78 @@ fi
 ###################  SPECIFIC TO TEST #####################
 
 #create genotype data in .bed format
-#bash "$SCRIPTS_DIR/test/create_simulation_genotype_data.sh"
+bash "$SCRIPTS_DIR/test/create_simulation_genotype_data.sh"
 
 
 # create phenotype data and train test split IDs
-#python3 "$SCRIPTS_DIR/test/create_simulated_participant_covariate_data.py"
+python3 "$SCRIPTS_DIR/test/create_simulated_participant_covariate_data.py"
 
 
 # create phenotype data and train test split IDs
-#python "$SCRIPTS_DIR/create_pheno_train_test_split.py"
+python "$SCRIPTS_DIR/create_pheno_train_test_split.py"
 
 
 # create hla (and environmental data files?)
-#python "$SCRIPTS_DIR/clean_environment_hla_covar_data.py"
+python "$SCRIPTS_DIR/clean_environment_hla_covar_data.py"
 
 # Run the variant call cleaning
 # test script to handle special SNPs in chr 6
-#bash "$SCRIPTS_DIR/test/plink_clean_variant_calls_test.sh"
+bash "$SCRIPTS_DIR/test/plink_clean_variant_calls_test.sh"
 
 #merge separate chromosome files into one
-#bash "$SCRIPTS_DIR/merge_chromosomes.sh"
+bash "$SCRIPTS_DIR/merge_chromosomes.sh"
 
-#bash "$SCRIPTS_DIR/multiprocessing_fast_epistasis.sh"
+bash "$SCRIPTS_DIR/multiprocessing_fast_epistasis.sh"
 
 #only done for test as the IID needs to be numeric and simulation creates IID as string
-#python "$SCRIPTS_DIR/test/change_test_data_IID_to_number.py"
+python "$SCRIPTS_DIR/test/change_test_data_IID_to_number.py"
 
-#export DATA_TYPE="main"
-#bash run_model_batches_test.sh 
+export DATA_TYPE="main"
+bash run_model_batches_test.sh 
 
-#PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
-#source $PHENO_CONFIG
+PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
+source $PHENO_CONFIG
 #
 #EPI_PATH="$PHENO_PATH/epiFiles"
 #export EPI_PATH
 #
-#python "${SCRIPTS_DIR}/filter_redundant_epi_pairs.py"
+python "${SCRIPTS_DIR}/filter_redundant_epi_pairs.py"
 #
-#NEW_EPI_PATH="$PHENO_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary"
+NEW_EPI_PATH="$PHENO_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary"
 #
-#echo "Epi path is now set to ... $NEW_EPI_PATH"
+echo "Epi path is now set to ... $NEW_EPI_PATH"
 #
-##check to see if EPI_PATH exists
-#if grep -q "^EPI_PATH=" "$PHENO_CONFIG"; then
-#   if [[ "$(uname)" == "Darwin" ]]; then
-#       # macOS sed syntax (requires '' for in-place)
-#       sed -i '' "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
-#   else
-#       # Linux sed syntax
-#       sed -i "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
-#   fi
-#else
-#   echo "EPI_PATH=${NEW_EPI_PATH}" >> "$PHENO_CONFIG"
-#   echo "export EPI_PATH" >> "$PHENO_CONFIG"	
-#fi
+#check to see if EPI_PATH exists
+if grep -q "^EPI_PATH=" "$PHENO_CONFIG"; then
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS sed syntax (requires '' for in-place)
+        sed -i '' "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
+    else
+        # Linux sed syntax
+        sed -i "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
+    fi
+else
+    echo "EPI_PATH=${NEW_EPI_PATH}" >> "$PHENO_CONFIG"
+    echo "export EPI_PATH" >> "$PHENO_CONFIG"	
+fi
 #
 #
 ##run the epi batch models on the hpc
-#export DATA_TYPE="epi"
+export DATA_TYPE="epi"
 #bash run_model_batches_test.sh
 
 #add 4 lines of epi interactions with significance not present after feature ranking step
-#python "$SCRIPTS_DIR/test/add_epi_importantFeatures_for_test.py"
+python "$SCRIPTS_DIR/test/add_epi_importantFeatures_for_test.py"
 
 
 #run the GxGxE analysis
-#export ENV_TYPE='cardioMetabolic'
-#python "$SCRIPTS_DIR/gene_environment_feature_discovery.py"
+export ENV_TYPE='cardioMetabolic'
+python "$SCRIPTS_DIR/gene_environment_feature_discovery.py"
 
 #run 
-bash "$SCRIPTS_DIR/run_plink_LD.sh"
+#bash "$SCRIPTS_DIR/run_plink_LD.sh"
+
+
 
 
 

@@ -4,5 +4,5 @@ TRAINING_PATH=/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/train
 export TRAINING_PATH
 HOLDOUT_PATH=/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.raw
 export HOLDOUT_PATH
-EPI_PATH=/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary
+EPI_PATH=/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary
 export EPI_PATH

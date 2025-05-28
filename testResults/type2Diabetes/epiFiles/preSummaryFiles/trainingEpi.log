@@ -6,27 +6,28 @@ Options in effect:
   --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/preSummaryFiles/trainingEpi
   --parallel 18 18
 
-Hostname: Mac.localdomain
+Hostname: FENG-8FV41F3.staff.vuw.ac.nz
 Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Sat May 17 22:05:38 2025
+Start time: Wed May 28 22:09:16 2025
 
-Random number seed: 1747476338
+Random number seed: 1748426956
 131072 MB RAM detected; reserving 65536 MB for main workspace.
-399 variants loaded from .bim file.
+400 variants loaded from .bim file.
 1797 people (0 males, 1797 females) loaded from .fam.
 1797 phenotype values loaded from .fam.
 --keep: 1397 people remaining.
 Using up to 19 threads (change this with --threads).
 Before main variant filters, 1397 founders and 0 nonfounders present.
 Calculating allele frequencies... done.
-Total genotyping rate in remaining samples is exactly 1.
-399 variants and 1397 people pass filters and QC.
-Among remaining phenotypes, 576 are cases and 821 are controls.
+Total genotyping rate in remaining samples is 0.657301.
+400 variants and 1397 people pass filters and QC.
+Among remaining phenotypes, 571 are cases and 826 are controls.
+--fast-epistasis: Skipping 16 monomorphic/non-autosomal sites.
 --fast-epistasis boost to
 /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/preSummaryFiles/trainingEpi.epi.cc.18
 ... done.
-4465 valid tests performed, summary written to
+3910 valid tests performed, summary written to
 /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/preSummaryFiles/trainingEpi.epi.cc.summary.18
 .
 
-End time: Sat May 17 22:05:38 2025
+End time: Wed May 28 22:09:16 2025
