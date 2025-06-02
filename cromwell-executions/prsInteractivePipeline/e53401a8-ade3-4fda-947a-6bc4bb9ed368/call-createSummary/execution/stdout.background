@@ -1,0 +1,22 @@
+19165
+Processing phenotype: type2Diabetes
+Using pheno string: type 2 diabetes
+With icd10: E11
+Current working directory: 
+Current user: 
+total 20
+drwxr-xrwx 10 root root  320 Jun  1 01:46 .
+drwxr-xrwx  4 root root  128 Jun  1 01:46 ..
+-rw-r--r--  1 root root 2774 Jun  1 01:46 script
+-rw-r--r--  1 root root  427 Jun  1 01:46 script.background
+-rw-r--r--  1 root root  473 Jun  1 01:46 script.submit
+-rw-r--r--  1 root root    0 Jun  1 01:46 stderr
+-rw-r--r--  1 root root    0 Jun  1 01:46 stderr.background
+-rw-r--r--  1 root root  131 Jun  1 01:46 stdout
+-rw-r--r--  1 root root  137 Jun  1 01:46 stdout.background
+drwxrwxrwx  4 root root  128 Jun  1 01:46 tmp.yUxu6p
+Summary file contents:
+timestamp of analysis: 20250601_014635
+phenotype analyzed: type2Diabetes
+phenotype substring filtered in participant.csv: type 2 diabetes
+icd 10 code used to define phenotype: E11

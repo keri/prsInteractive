@@ -96,4 +96,4 @@ if __name__ == "__main__":
     snpList = get_columns(phenoPath)
     columns_to_get = snpList
 #   
-    mainArray = get_dataset(trainingPath,columns_to_get,snpList)
+    mainArray = get_dataset(trainingPath,columns_to_get)

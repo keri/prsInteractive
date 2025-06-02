@@ -337,43 +337,43 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     # Prefer command-line input if provided; fallback to env var
-    pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
-#   pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
+#   pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
+    pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
     print(f"[PYTHON] Reading from: {pheno_path}")
     
-    pheno = 'type2Diabetes'
-#   pheno = args.pheno or os.environ.get("PHENO")
+#   pheno = 'type2Diabetes'
+    pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
     
-    data_type = 'main'
-#   data_type = args.data_type or os.environ.get("DATA_TYPE")
+#   data_type = 'main'
+    data_type = args.data_type or os.environ.get("DATA_TYPE")
     print(f"data type : {data_type}")
     
-    training_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw'
-#   training_path = args.training_file or os.environ.get("TRAINING_PATH")
+#   training_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw'
+    training_path = args.training_file or os.environ.get("TRAINING_PATH")
     print(f"training file : {training_path}")
     
-    test_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombined.raw'
-#   test_path = args.test_file or os.environ.get("TEST_PATH")
+#   test_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombined.raw'
+    test_path = args.test_file or os.environ.get("TEST_PATH")
     print(f"test file : {test_path}")
     
     
     
     if data_type == 'epi':
-#       epi_path = args.epi_file or os.environ.get("EPI_PATH")
-        epi_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary'
+        epi_path = args.epi_file or os.environ.get("EPI_PATH")
+#       epi_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary'
         if not epi_path:
             raise ValueError("You must provide a data type code via --epi_path or set the EPI_PATH environment variable.")
         print(f"epi path : {epi_path}")
     else:
         epi_path = 'None'
     
-    start = 1
-#   start = args.start or os.environ.get("START")
+#   start = 1
+    start = args.start or os.environ.get("START")
     print(f"start : {start}")
     
-    end = 1
-#   end = args.end or os.environ.get("END")
+#   end = 1
+    end = args.end or os.environ.get("END")
     print(f"end : {end}")
     
     

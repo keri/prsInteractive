@@ -102,7 +102,13 @@ TEST_PATH="${PHENO_PATH}/testCombined.raw"
 export TEST_PATH
 # Replace line if TEST_PATH exists, else append it
 if grep -q "^TEST_PATH=" "$PHENO_CONFIG"; then
-	sed -i '' "s|^TEST_PATH=.*|TEST_PATH=${TEST_PATH}|" "$PHENO_CONFIG"
+	if [[ "$(uname)" == "Darwin" ]]; then
+		# macOS sed syntax (requires '' for in-place)
+		sed -i '' "s|^TEST_PATH=.*|TEST_PATH=${TEST_PATH}|" "$PHENO_CONFIG"
+	else
+		# Linux sed syntax
+		sed -i "s|^TEST_PATH=.*|TEST_PATH=${TEST_PATH}|" "$PHENO_CONFIG"
+	fi
 else
 	echo "TEST_PATH=${TEST_PATH}" >> "$PHENO_CONFIG"
 	echo "export TEST_PATH" >> "$PHENO_CONFIG"

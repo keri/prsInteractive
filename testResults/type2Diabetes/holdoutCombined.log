@@ -1,46 +1,39 @@
-PLINK v1.90b6.26 64-bit (2 Apr 2022)
+PLINK v1.9.0-b.8 64-bit (22 Oct 2024)
 Options in effect:
-  --bfile /Users/kerimulterer/prsInteractive/testData/variant_calls/ukb22418_c1_b0_v2
-  --extract /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.snplist
-  --keep /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutID.txt
+  --bfile /prsInteractive/testData/variant_calls/ukb22418_c1_b0_v2
+  --extract /prsInteractive/testResults/type2Diabetes/merged_allChromosomes.snplist
+  --keep /prsInteractive/testResults/type2Diabetes/holdoutID.txt
   --make-bed
-  --merge-list /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/mergeChromosomeList.txt
-  --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined
-  --pheno /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/pheno.txt
-  --remove /Users/kerimulterer/prsInteractive/testData/withdrawalsID.txt
+  --merge-list /prsInteractive/testResults/type2Diabetes/mergeChromosomeList.txt
+  --out /prsInteractive/testResults/type2Diabetes/holdoutCombined
+  --pheno /prsInteractive/testResults/type2Diabetes/pheno.txt
+  --remove /prsInteractive/testData/withdrawalsID.txt
 
-Hostname: FENG-8FV41F3.staff.vuw.ac.nz
-Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Wed May 28 22:09:15 2025
+Hostname: a2fdad7eed42
+Working directory: /prsInteractive/workflows
+Start time: Thu May 29 00:22:19 2025
 
-Random number seed: 1748426955
-131072 MB RAM detected; reserving 65536 MB for main workspace.
+Random number seed: 1748478139
+7834 MB RAM detected; reserving 3917 MB for main workspace.
 Performing single-pass merge (2000 people, 400 variants).
 Merged fileset written to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined-merge.bed
-+
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined-merge.bim
-+
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined-merge.fam
-.
+/prsInteractive/testResults/type2Diabetes/holdoutCombined-merge.bed +
+/prsInteractive/testResults/type2Diabetes/holdoutCombined-merge.bim +
+/prsInteractive/testResults/type2Diabetes/holdoutCombined-merge.fam .
 400 variants loaded from .bim file.
 2000 people (0 males, 2000 females) loaded from .fam.
 2000 phenotype values present after --pheno.
 --extract: 400 variants remaining.
 --keep: 200 people remaining.
---remove: 200 people remaining.
+--remove: 199 people remaining.
 Using 1 thread (no multithreaded calculations invoked).
-Before main variant filters, 200 founders and 0 nonfounders present.
+Before main variant filters, 199 founders and 0 nonfounders present.
 Calculating allele frequencies... done.
-Total genotyping rate in remaining samples is 0.6583.
-400 variants and 200 people pass filters and QC.
-Among remaining phenotypes, 82 are cases and 118 are controls.
---make-bed to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.bed
-+
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.bim
-+
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.fam
-... done.
+Total genotyping rate in remaining samples is 0.650289.
+400 variants and 199 people pass filters and QC.
+Among remaining phenotypes, 82 are cases and 117 are controls.
+--make-bed to /prsInteractive/testResults/type2Diabetes/holdoutCombined.bed +
+/prsInteractive/testResults/type2Diabetes/holdoutCombined.bim +
+/prsInteractive/testResults/type2Diabetes/holdoutCombined.fam ... done.
 
-End time: Wed May 28 22:09:15 2025
+End time: Thu May 29 00:22:19 2025

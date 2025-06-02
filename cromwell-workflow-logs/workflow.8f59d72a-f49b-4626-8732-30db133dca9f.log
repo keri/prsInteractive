@@ -1,0 +1,2 @@
+2025-06-01 09:55:17,566 INFO  - MaterializeWorkflowDescriptorActor [UUID(8f59d72a)]: Parsing workflow as WDL 1.0
+2025-06-01 09:55:17,781 INFO  - MaterializeWorkflowDescriptorActor [UUID(8f59d72a)]: Call-to-Backend assignments: prsInteractivePipeline.createSummary -> Local

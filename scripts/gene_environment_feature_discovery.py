@@ -125,11 +125,11 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
     modelFeatures2 = get_epi_snps(modelFeatures['feature'].tolist())
     
     full_columns = get_columns(phenoPath)
-    trainingData = get_dataset(trainingPath,modelFeatures2,full_columns)
+    trainingData = get_dataset(trainingPath,modelFeatures2)
     y = trainingData['PHENOTYPE']
     trainingData = create_epi_df(trainingData,modelFeatures['feature'].tolist())
     #
-    testData = get_dataset(testPath,modelFeatures2,full_columns)
+    testData = get_dataset(testPath,modelFeatures2)
     yTest = testData['PHENOTYPE']
     testData = create_epi_df(testData,modelFeatures['feature'].tolist())
     

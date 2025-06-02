@@ -1,28 +1,27 @@
-PLINK v1.90b6.26 64-bit (2 Apr 2022)
+PLINK v1.9.0-b.8 64-bit (22 Oct 2024)
 Options in effect:
-  --bfile /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined
-  --keep /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutID.txt
-  --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombinedRaw
+  --bfile /prsInteractive/testResults/type2Diabetes/holdoutCombined
+  --keep /prsInteractive/testResults/type2Diabetes/holdoutID.txt
+  --out /prsInteractive/testResults/type2Diabetes/holdoutCombinedRaw
   --recode A
 
-Hostname: FENG-8FV41F3.staff.vuw.ac.nz
-Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Wed May 28 22:09:15 2025
+Hostname: a2fdad7eed42
+Working directory: /prsInteractive/workflows
+Start time: Thu May 29 00:22:19 2025
 
-Random number seed: 1748426955
-131072 MB RAM detected; reserving 65536 MB for main workspace.
+Random number seed: 1748478139
+7834 MB RAM detected; reserving 3917 MB for main workspace.
 400 variants loaded from .bim file.
-200 people (0 males, 200 females) loaded from .fam.
-200 phenotype values loaded from .fam.
---keep: 200 people remaining.
+199 people (0 males, 199 females) loaded from .fam.
+199 phenotype values loaded from .fam.
+--keep: 199 people remaining.
 Using 1 thread (no multithreaded calculations invoked).
-Before main variant filters, 200 founders and 0 nonfounders present.
+Before main variant filters, 199 founders and 0 nonfounders present.
 Calculating allele frequencies... done.
-Total genotyping rate is 0.6583.
-400 variants and 200 people pass filters and QC.
-Among remaining phenotypes, 82 are cases and 118 are controls.
---recode A to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombinedRaw.raw
+Total genotyping rate is 0.650289.
+400 variants and 199 people pass filters and QC.
+Among remaining phenotypes, 82 are cases and 117 are controls.
+--recode A to /prsInteractive/testResults/type2Diabetes/holdoutCombinedRaw.raw
 ... done.
 
-End time: Wed May 28 22:09:15 2025
+End time: Thu May 29 00:22:19 2025

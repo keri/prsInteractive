@@ -7,9 +7,7 @@ FROM ukb-base:V1
 
 # Or install via conda if preferred
 RUN conda install -n ukb_env -c bioconda plink
-    
-# Copy data preprocessing scripts
-#COPY scripts/ /opt/scripts/
-#RUN chmod +x /opt/scripts/*.py /opt/scripts/*.sh
+
+bash run_data_cleaning_workflow.sh
 
 ENV STAGE="data_preprocessing"

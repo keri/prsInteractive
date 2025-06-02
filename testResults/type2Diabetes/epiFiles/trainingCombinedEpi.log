@@ -1,16 +1,16 @@
-PLINK v1.90b6.26 64-bit (2 Apr 2022)
+PLINK v1.9.0-b.8 64-bit (22 Oct 2024)
 Options in effect:
-  --epistasis-summary-merge /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/preSummaryFiles/trainingEpi.epi.cc 18
-  --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi
+  --epistasis-summary-merge /prsInteractive/testResults/type2Diabetes/epiFiles/preSummaryFiles/trainingEpi.epi.cc 18
+  --out /prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi
 
-Hostname: FENG-8FV41F3.staff.vuw.ac.nz
-Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Wed May 28 22:09:16 2025
+Hostname: a2fdad7eed42
+Working directory: /prsInteractive/workflows
+Start time: Thu May 29 00:22:20 2025
 
-Random number seed: 1748426956
-131072 MB RAM detected; reserving 65536 MB for main workspace.
+Random number seed: 1748478140
+7834 MB RAM detected; reserving 3917 MB for main workspace.
 --epistasis-summary-merge: Merged summary written to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary
+/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary
 .
 
-End time: Wed May 28 22:09:16 2025
+End time: Thu May 29 00:22:20 2025

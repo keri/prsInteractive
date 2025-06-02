@@ -1,28 +1,27 @@
-PLINK v1.90b6.26 64-bit (2 Apr 2022)
+PLINK v1.9.0-b.8 64-bit (22 Oct 2024)
 Options in effect:
-  --bfile /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes
-  --keep /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testID.txt
-  --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombinedRaw
+  --bfile /prsInteractive/testResults/type2Diabetes/merged_allChromosomes
+  --keep /prsInteractive/testResults/type2Diabetes/testID.txt
+  --out /prsInteractive/testResults/type2Diabetes/testCombinedRaw
   --recode A
 
-Hostname: FENG-8FV41F3.staff.vuw.ac.nz
-Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Wed May 28 22:09:15 2025
+Hostname: a2fdad7eed42
+Working directory: /prsInteractive/workflows
+Start time: Thu May 29 00:22:19 2025
 
-Random number seed: 1748426955
-131072 MB RAM detected; reserving 65536 MB for main workspace.
+Random number seed: 1748478139
+7834 MB RAM detected; reserving 3917 MB for main workspace.
 400 variants loaded from .bim file.
-1797 people (0 males, 1797 females) loaded from .fam.
-1797 phenotype values loaded from .fam.
+1798 people (0 males, 1798 females) loaded from .fam.
+1798 phenotype values loaded from .fam.
 --keep: 400 people remaining.
 Using 1 thread (no multithreaded calculations invoked).
 Before main variant filters, 400 founders and 0 nonfounders present.
 Calculating allele frequencies... done.
-Total genotyping rate in remaining samples is 0.658212.
+Total genotyping rate in remaining samples is 0.648256.
 400 variants and 400 people pass filters and QC.
-Among remaining phenotypes, 164 are cases and 236 are controls.
---recode A to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombinedRaw.raw
-... done.
+Among remaining phenotypes, 165 are cases and 235 are controls.
+--recode A to /prsInteractive/testResults/type2Diabetes/testCombinedRaw.raw ...
+done.
 
-End time: Wed May 28 22:09:15 2025
+End time: Thu May 29 00:22:19 2025

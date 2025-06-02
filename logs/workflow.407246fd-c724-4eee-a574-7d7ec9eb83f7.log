@@ -1,0 +1,77 @@
+2025-06-01 14:47:34,707 INFO  - MaterializeWorkflowDescriptorActor [UUID(407246fd)]: Parsing workflow as WDL 1.0
+2025-06-01 14:47:34,923 INFO  - MaterializeWorkflowDescriptorActor [UUID(407246fd)]: Call-to-Backend assignments: prsInteractivePipeline.createSummary -> Local
+2025-06-01 14:47:34,992 WARN  - Local [UUID(407246fd)]: Key/s [memory, cpu] is/are not supported by backend. Unsupported attributes will not be part of job executions.
+2025-06-01 14:47:37,067 INFO  - WorkflowExecutionActor-407246fd-c724-4eee-a574-7d7ec9eb83f7 [UUID(407246fd)]: Starting prsInteractivePipeline.createSummary
+2025-06-01 14:47:47,528 WARN  - BackendPreparationActor_for_407246fd:prsInteractivePipeline.createSummary:-1:1 [UUID(407246fd)]: Docker lookup failed
+java.lang.Exception: Unauthorized to get docker hash ukb-base:V1
+	at cromwell.engine.workflow.WorkflowDockerLookupActor.cromwell$engine$workflow$WorkflowDockerLookupActor$$handleLookupFailure(WorkflowDockerLookupActor.scala:279)
+	at cromwell.engine.workflow.WorkflowDockerLookupActor$$anonfun$3.applyOrElse(WorkflowDockerLookupActor.scala:93)
+	at cromwell.engine.workflow.WorkflowDockerLookupActor$$anonfun$3.applyOrElse(WorkflowDockerLookupActor.scala:78)
+	at scala.runtime.AbstractPartialFunction.apply(AbstractPartialFunction.scala:35)
+	at akka.actor.FSM.processEvent(FSM.scala:707)
+	at akka.actor.FSM.processEvent$(FSM.scala:704)
+	at cromwell.engine.workflow.WorkflowDockerLookupActor.akka$actor$LoggingFSM$$super$processEvent(WorkflowDockerLookupActor.scala:45)
+	at akka.actor.LoggingFSM.processEvent(FSM.scala:847)
+	at akka.actor.LoggingFSM.processEvent$(FSM.scala:829)
+	at cromwell.engine.workflow.WorkflowDockerLookupActor.processEvent(WorkflowDockerLookupActor.scala:45)
+	at akka.actor.FSM.akka$actor$FSM$$processMsg(FSM.scala:701)
+	at akka.actor.FSM$$anonfun$receive$1.applyOrElse(FSM.scala:695)
+	at scala.runtime.AbstractPartialFunction.apply(AbstractPartialFunction.scala:35)
+	at cromwell.docker.DockerClientHelper$$anonfun$dockerResponseReceive$1.applyOrElse(DockerClientHelper.scala:16)
+	at scala.PartialFunction$OrElse.applyOrElse(PartialFunction.scala:269)
+	at scala.PartialFunction$OrElse.applyOrElse(PartialFunction.scala:270)
+	at akka.actor.Actor.aroundReceive(Actor.scala:539)
+	at akka.actor.Actor.aroundReceive$(Actor.scala:537)
+	at cromwell.engine.workflow.WorkflowDockerLookupActor.aroundReceive(WorkflowDockerLookupActor.scala:45)
+	at akka.actor.ActorCell.receiveMessage(ActorCell.scala:614)
+	at akka.actor.ActorCell.invoke(ActorCell.scala:583)
+	at akka.dispatch.Mailbox.processMailbox(Mailbox.scala:268)
+	at akka.dispatch.Mailbox.run(Mailbox.scala:229)
+	at akka.dispatch.Mailbox.exec(Mailbox.scala:241)
+	at akka.dispatch.forkjoin.ForkJoinTask.doExec(ForkJoinTask.java:260)
+	at akka.dispatch.forkjoin.ForkJoinPool$WorkQueue.runTask(ForkJoinPool.java:1339)
+	at akka.dispatch.forkjoin.ForkJoinPool.runWorker(ForkJoinPool.java:1979)
+	at akka.dispatch.forkjoin.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:107)
+2025-06-01 14:47:47,562 INFO  - 407246fd-c724-4eee-a574-7d7ec9eb83f7-BackendJobExecutionActor-prsInteractivePipeline.createSummary:NA:1 [UUID(407246fd)prsInteractivePipeline.createSummary:NA:1]: AN-436 About to instantiate class
+2025-06-01 14:47:47,566 WARN  - BackgroundConfigAsyncJobExecutionActor [UUID(407246fd)prsInteractivePipeline.createSummary:NA:1]: Unrecognized runtime attribute keys: cpu, memory
+2025-06-01 14:47:47,610 INFO  - BackgroundConfigAsyncJobExecutionActor [UUID(407246fd)prsInteractivePipeline.createSummary:NA:1]: `set -e
+
+echo "Processing phenotype: type2Diabetes"
+echo "Using pheno string: type 2 diabetes"
+echo "With icd10: E11"
+
+# Debug information
+echo "Current working directory: $(pwd)"
+echo "Current user: $(whoami)"
+ls -la . || true
+
+# Create the summary file to capture time stamp, phenotype substring, and icd10 code
+ts=$(date +%Y%m%d_%H%M%S)
+
+
+# Create summary file in working directory
+summaryFile="summary.txt"
+touch "${summaryFile}"
+echo "timestamp of analysis: ${ts}" >> "${summaryFile}"
+echo "phenotype analyzed: type2Diabetes" >> "${summaryFile}"
+echo "phenotype substring filtered in participant.csv: type 2 diabetes" >> "${summaryFile}"
+echo "icd 10 code used to define phenotype: E11" >> "${summaryFile}"
+echo "user running workflow: $(whoami)" >> "${summaryFile}"
+
+# Verify file was created
+echo "Summary file contents:"
+cat $summaryFile`
+2025-06-01 14:47:47,627 INFO  - BackgroundConfigAsyncJobExecutionActor [UUID(407246fd)prsInteractivePipeline.createSummary:NA:1]: executing: docker run \
+  --rm -i \
+  -v /Users/kerimulterer/prsInteractive/./cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary:/cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary \
+  -v $PRS_INTERACTIVE_HOME:/prsInteractive \
+  -w /cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary \
+  ukb-base:V1 /bin/bash execution/script
+2025-06-01 14:47:49,359 INFO  - BackgroundConfigAsyncJobExecutionActor [UUID(407246fd)prsInteractivePipeline.createSummary:NA:1]: job id: 20256
+2025-06-01 14:47:49,361 INFO  - BackgroundConfigAsyncJobExecutionActor [UUID(407246fd)prsInteractivePipeline.createSummary:NA:1]: Status change from - to WaitingForReturnCode
+2025-06-01 14:47:50,045 INFO  - BackgroundConfigAsyncJobExecutionActor [UUID(407246fd)prsInteractivePipeline.createSummary:NA:1]: Status change from WaitingForReturnCode to Done
+2025-06-01 14:47:50,339 INFO  - WorkflowExecutionActor-407246fd-c724-4eee-a574-7d7ec9eb83f7 [UUID(407246fd)]: Workflow prsInteractivePipeline complete. Final Outputs:
+{
+  "prsInteractivePipeline.createSummary.summary_file": "/Users/kerimulterer/prsInteractive/./cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution/summary.txt"
+}
+2025-06-01 14:47:50,365 INFO  - $a [UUID(407246fd)]: Copying workflow logs from /Users/kerimulterer/prsInteractive/cromwell-workflow-logs/workflow.407246fd-c724-4eee-a574-7d7ec9eb83f7.log to ./logs/workflow.407246fd-c724-4eee-a574-7d7ec9eb83f7.log

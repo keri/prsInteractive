@@ -1,0 +1,66 @@
+#!/bin/bash
+
+cd /cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution
+tmpDir=$(mktemp -d "$PWD"/tmp.XXXXXX)
+chmod 777 "$tmpDir"
+export _JAVA_OPTIONS=-Djava.io.tmpdir="$tmpDir"
+export TMPDIR="$tmpDir"
+
+
+(
+cd /cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution
+
+)
+
+
+out407246fd="${tmpDir}/out.$$" err407246fd="${tmpDir}/err.$$"
+mkfifo "$out407246fd" "$err407246fd"
+trap 'rm "$out407246fd" "$err407246fd"' EXIT
+touch '/cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution/stdout' '/cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution/stderr'
+tee '/cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution/stdout' < "$out407246fd" &
+tee '/cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution/stderr' < "$err407246fd" >&2 &
+(
+cd /cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution
+
+
+set -e
+
+echo "Processing phenotype: type2Diabetes"
+echo "Using pheno string: type 2 diabetes"
+echo "With icd10: E11"
+
+# Debug information
+echo "Current working directory: $(pwd)"
+echo "Current user: $(whoami)"
+ls -la . || true
+
+# Create the summary file to capture time stamp, phenotype substring, and icd10 code
+ts=$(date +%Y%m%d_%H%M%S)
+
+
+# Create summary file in working directory
+summaryFile="summary.txt"
+touch "${summaryFile}"
+echo "timestamp of analysis: ${ts}" >> "${summaryFile}"
+echo "phenotype analyzed: type2Diabetes" >> "${summaryFile}"
+echo "phenotype substring filtered in participant.csv: type 2 diabetes" >> "${summaryFile}"
+echo "icd 10 code used to define phenotype: E11" >> "${summaryFile}"
+echo "user running workflow: $(whoami)" >> "${summaryFile}"
+
+# Verify file was created
+echo "Summary file contents:"
+cat $summaryFile
+)  > "$out407246fd" 2> "$err407246fd"
+echo $? > /cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution/rc.tmp
+(
+# add a .file in every empty directory to facilitate directory delocalization on the cloud
+cd /cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution
+find . -type d -exec sh -c '[ -z "$(ls -A '"'"'{}'"'"')" ] && touch '"'"'{}'"'"'/.file' \;
+)
+(
+cd /cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution
+sync
+
+
+)
+mv /cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution/rc.tmp /cromwell-executions/prsInteractivePipeline/407246fd-c724-4eee-a574-7d7ec9eb83f7/call-createSummary/execution/rc

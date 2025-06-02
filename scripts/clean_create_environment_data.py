@@ -224,7 +224,7 @@ def main(resultsPath,cardioEpiFeatureFile,trainingPath,testPath,holdoutPath,env_
     #expand the features into a list and filter redundant features
     expandedSnps = get_epi_snps(set(epiFeatures))
     
-    trainingDf = get_dataset(trainingDf, expandedSnps, full_columns)
+    trainingDf = get_dataset(trainingDf, expandedSnps)
     
     #create combined GxG and G dataset
     trainingDf = create_epi_df(trainingDf,epiFeatures)
@@ -238,7 +238,7 @@ def main(resultsPath,cardioEpiFeatureFile,trainingPath,testPath,holdoutPath,env_
     del geneEnvTrainingData
     
     #use trained models for imputation, centering and scaling validation and holdout sets
-    testDf = get_dataset(testPath, expandedSnps, full_columns)
+    testDf = get_dataset(testPath, expandedSnps)
     imputedDf = impute_model
     
     

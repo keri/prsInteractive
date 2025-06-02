@@ -76,8 +76,8 @@ bash run_model_batches_test.sh
 PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
 source $PHENO_CONFIG
 #
-#EPI_PATH="$PHENO_PATH/epiFiles"
-#export EPI_PATH
+EPI_PATH="$PHENO_PATH/epiFiles"
+export EPI_PATH
 #
 python "${SCRIPTS_DIR}/filter_redundant_epi_pairs.py"
 #

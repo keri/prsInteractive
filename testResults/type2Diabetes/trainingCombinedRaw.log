@@ -1,28 +1,27 @@
-PLINK v1.90b6.26 64-bit (2 Apr 2022)
+PLINK v1.9.0-b.8 64-bit (22 Oct 2024)
 Options in effect:
-  --bfile /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes
-  --keep /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingID.txt
-  --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombinedRaw
+  --bfile /prsInteractive/testResults/type2Diabetes/merged_allChromosomes
+  --keep /prsInteractive/testResults/type2Diabetes/trainingID.txt
+  --out /prsInteractive/testResults/type2Diabetes/trainingCombinedRaw
   --recode A
 
-Hostname: FENG-8FV41F3.staff.vuw.ac.nz
-Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Wed May 28 22:09:15 2025
+Hostname: a2fdad7eed42
+Working directory: /prsInteractive/workflows
+Start time: Thu May 29 00:22:19 2025
 
-Random number seed: 1748426955
-131072 MB RAM detected; reserving 65536 MB for main workspace.
+Random number seed: 1748478139
+7834 MB RAM detected; reserving 3917 MB for main workspace.
 400 variants loaded from .bim file.
-1797 people (0 males, 1797 females) loaded from .fam.
-1797 phenotype values loaded from .fam.
---keep: 1397 people remaining.
+1798 people (0 males, 1798 females) loaded from .fam.
+1798 phenotype values loaded from .fam.
+--keep: 1398 people remaining.
 Using 1 thread (no multithreaded calculations invoked).
-Before main variant filters, 1397 founders and 0 nonfounders present.
+Before main variant filters, 1398 founders and 0 nonfounders present.
 Calculating allele frequencies... done.
-Total genotyping rate in remaining samples is 0.657301.
-400 variants and 1397 people pass filters and QC.
-Among remaining phenotypes, 571 are cases and 826 are controls.
---recode A to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombinedRaw.raw
+Total genotyping rate in remaining samples is 0.647979.
+400 variants and 1398 people pass filters and QC.
+Among remaining phenotypes, 577 are cases and 821 are controls.
+--recode A to /prsInteractive/testResults/type2Diabetes/trainingCombinedRaw.raw
 ... done.
 
-End time: Wed May 28 22:09:15 2025
+End time: Thu May 29 00:22:19 2025

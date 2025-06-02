@@ -1,44 +1,37 @@
-PLINK v1.90b6.26 64-bit (2 Apr 2022)
+PLINK v1.9.0-b.8 64-bit (22 Oct 2024)
 Options in effect:
-  --bfile /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/chr1_cleaned
+  --bfile /prsInteractive/testResults/type2Diabetes/chr1_cleaned
   --make-bed
-  --merge-list /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/mergeChromosomeList.txt
-  --out /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes
-  --pheno /Users/kerimulterer/prsInteractive/testResults/type2Diabetes/pheno.txt
+  --merge-list /prsInteractive/testResults/type2Diabetes/mergeChromosomeList.txt
+  --out /prsInteractive/testResults/type2Diabetes/merged_allChromosomes
+  --pheno /prsInteractive/testResults/type2Diabetes/pheno.txt
   --write-snplist
 
-Hostname: FENG-8FV41F3.staff.vuw.ac.nz
-Working directory: /Users/kerimulterer/prsInteractive/workflows
-Start time: Wed May 28 22:09:14 2025
+Hostname: a2fdad7eed42
+Working directory: /prsInteractive/workflows
+Start time: Thu May 29 00:22:19 2025
 
-Random number seed: 1748426954
-131072 MB RAM detected; reserving 65536 MB for main workspace.
-Performing single-pass merge (1797 people, 400 variants).
+Random number seed: 1748478139
+7834 MB RAM detected; reserving 3917 MB for main workspace.
+Performing single-pass merge (1798 people, 400 variants).
 Merged fileset written to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes-merge.bed
-+
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes-merge.bim
-+
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes-merge.fam
-.
+/prsInteractive/testResults/type2Diabetes/merged_allChromosomes-merge.bed +
+/prsInteractive/testResults/type2Diabetes/merged_allChromosomes-merge.bim +
+/prsInteractive/testResults/type2Diabetes/merged_allChromosomes-merge.fam .
 400 variants loaded from .bim file.
-1797 people (0 males, 1797 females) loaded from .fam.
-1797 phenotype values present after --pheno.
+1798 people (0 males, 1798 females) loaded from .fam.
+1798 phenotype values present after --pheno.
 Using 1 thread (no multithreaded calculations invoked).
-Before main variant filters, 1797 founders and 0 nonfounders present.
+Before main variant filters, 1798 founders and 0 nonfounders present.
 Calculating allele frequencies... done.
-Total genotyping rate is 0.657504.
-400 variants and 1797 people pass filters and QC.
-Among remaining phenotypes, 735 are cases and 1062 are controls.
+Total genotyping rate is 0.648041.
+400 variants and 1798 people pass filters and QC.
+Among remaining phenotypes, 742 are cases and 1056 are controls.
 List of variant IDs written to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.snplist
-.
+/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.snplist .
 --make-bed to
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.bed
-+
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.bim
-+
-/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.fam
-... done.
+/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.bed +
+/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.bim +
+/prsInteractive/testResults/type2Diabetes/merged_allChromosomes.fam ... done.
 
-End time: Wed May 28 22:09:15 2025
+End time: Thu May 29 00:22:19 2025

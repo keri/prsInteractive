@@ -1,0 +1,78 @@
+2025-06-01 10:48:16,043 INFO  - MaterializeWorkflowDescriptorActor [UUID(b970bdd1)]: Parsing workflow as WDL 1.0
+2025-06-01 10:48:16,276 INFO  - MaterializeWorkflowDescriptorActor [UUID(b970bdd1)]: Call-to-Backend assignments: prsInteractivePipeline.createSummary -> Local
+2025-06-01 10:48:16,346 WARN  - Local [UUID(b970bdd1)]: Key/s [memory, cpu] is/are not supported by backend. Unsupported attributes will not be part of job executions.
+2025-06-01 10:48:18,438 INFO  - WorkflowExecutionActor-b970bdd1-fd09-4040-be99-16031a553111 [UUID(b970bdd1)]: Starting prsInteractivePipeline.createSummary
+2025-06-01 10:48:28,256 WARN  - BackendPreparationActor_for_b970bdd1:prsInteractivePipeline.createSummary:-1:1 [UUID(b970bdd1)]: Docker lookup failed
+java.lang.Exception: Unauthorized to get docker hash ukb-base:V1
+	at cromwell.engine.workflow.WorkflowDockerLookupActor.cromwell$engine$workflow$WorkflowDockerLookupActor$$handleLookupFailure(WorkflowDockerLookupActor.scala:279)
+	at cromwell.engine.workflow.WorkflowDockerLookupActor$$anonfun$3.applyOrElse(WorkflowDockerLookupActor.scala:93)
+	at cromwell.engine.workflow.WorkflowDockerLookupActor$$anonfun$3.applyOrElse(WorkflowDockerLookupActor.scala:78)
+	at scala.runtime.AbstractPartialFunction.apply(AbstractPartialFunction.scala:35)
+	at akka.actor.FSM.processEvent(FSM.scala:707)
+	at akka.actor.FSM.processEvent$(FSM.scala:704)
+	at cromwell.engine.workflow.WorkflowDockerLookupActor.akka$actor$LoggingFSM$$super$processEvent(WorkflowDockerLookupActor.scala:45)
+	at akka.actor.LoggingFSM.processEvent(FSM.scala:847)
+	at akka.actor.LoggingFSM.processEvent$(FSM.scala:829)
+	at cromwell.engine.workflow.WorkflowDockerLookupActor.processEvent(WorkflowDockerLookupActor.scala:45)
+	at akka.actor.FSM.akka$actor$FSM$$processMsg(FSM.scala:701)
+	at akka.actor.FSM$$anonfun$receive$1.applyOrElse(FSM.scala:695)
+	at scala.runtime.AbstractPartialFunction.apply(AbstractPartialFunction.scala:35)
+	at cromwell.docker.DockerClientHelper$$anonfun$dockerResponseReceive$1.applyOrElse(DockerClientHelper.scala:16)
+	at scala.PartialFunction$OrElse.applyOrElse(PartialFunction.scala:269)
+	at scala.PartialFunction$OrElse.applyOrElse(PartialFunction.scala:270)
+	at akka.actor.Actor.aroundReceive(Actor.scala:539)
+	at akka.actor.Actor.aroundReceive$(Actor.scala:537)
+	at cromwell.engine.workflow.WorkflowDockerLookupActor.aroundReceive(WorkflowDockerLookupActor.scala:45)
+	at akka.actor.ActorCell.receiveMessage(ActorCell.scala:614)
+	at akka.actor.ActorCell.invoke(ActorCell.scala:583)
+	at akka.dispatch.Mailbox.processMailbox(Mailbox.scala:268)
+	at akka.dispatch.Mailbox.run(Mailbox.scala:229)
+	at akka.dispatch.Mailbox.exec(Mailbox.scala:241)
+	at akka.dispatch.forkjoin.ForkJoinTask.doExec(ForkJoinTask.java:260)
+	at akka.dispatch.forkjoin.ForkJoinPool$WorkQueue.runTask(ForkJoinPool.java:1339)
+	at akka.dispatch.forkjoin.ForkJoinPool.runWorker(ForkJoinPool.java:1979)
+	at akka.dispatch.forkjoin.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:107)
+2025-06-01 10:48:28,288 INFO  - b970bdd1-fd09-4040-be99-16031a553111-BackendJobExecutionActor-prsInteractivePipeline.createSummary:NA:1 [UUID(b970bdd1)prsInteractivePipeline.createSummary:NA:1]: AN-436 About to instantiate class
+2025-06-01 10:48:28,292 WARN  - BackgroundConfigAsyncJobExecutionActor [UUID(b970bdd1)prsInteractivePipeline.createSummary:NA:1]: Unrecognized runtime attribute keys: cpu, memory
+2025-06-01 10:48:28,337 INFO  - BackgroundConfigAsyncJobExecutionActor [UUID(b970bdd1)prsInteractivePipeline.createSummary:NA:1]: `set -e
+
+echo "Processing phenotype: type2Diabetes"
+echo "Using pheno string: type 2 diabetes"
+echo "With icd10: E11"
+
+# Debug information
+echo "Current working directory: $(pwd)"
+echo "Current user: $(whoami)"
+ls -la . || true
+
+# Create the summary file to capture time stamp, phenotype substring, and icd10 code
+ts=$(date +%Y%m%d_%H%M%S)
+
+# Create summary file in working directory
+summaryFile="summary.txt"
+touch "${summaryFile}"
+echo "timestamp of analysis: ${ts}" >> "${summaryFile}"
+echo "phenotype analyzed: type2Diabetes" >> "${summaryFile}"
+echo "phenotype substring filtered in participant.csv: type 2 diabetes" >> "${summaryFile}"
+echo "icd 10 code used to define phenotype: E11" >> "${summaryFile}"
+
+# Verify file was created
+echo "Summary file contents:"
+cat "${summaryFile}"`
+2025-06-01 10:48:28,356 INFO  - BackgroundConfigAsyncJobExecutionActor [UUID(b970bdd1)prsInteractivePipeline.createSummary:NA:1]: executing: echo "=== DEBUG INFO ===" && \
+echo "cwd: /Users/kerimulterer/prsInteractive/./cromwell-executions/prsInteractivePipeline/b970bdd1-fd09-4040-be99-16031a553111/call-createSummary" && \
+echo "docker_cwd: /cromwell-executions/prsInteractivePipeline/b970bdd1-fd09-4040-be99-16031a553111/call-createSummary" && \
+echo "script: /Users/kerimulterer/prsInteractive/./cromwell-executions/prsInteractivePipeline/b970bdd1-fd09-4040-be99-16031a553111/call-createSummary/execution/script" && \
+echo "docker: ukb-base:V1" && \
+ls -la /Users/kerimulterer/prsInteractive/./cromwell-executions/prsInteractivePipeline/b970bdd1-fd09-4040-be99-16031a553111/call-createSummary && \
+echo "=== END DEBUG ===" && \
+docker run \
+  --rm -i \
+  --entrypoint /bin/bash \
+  -v /Users/kerimulterer/prsInteractive/./cromwell-executions/prsInteractivePipeline/b970bdd1-fd09-4040-be99-16031a553111/call-createSummary:/cromwell-executions/prsInteractivePipeline/b970bdd1-fd09-4040-be99-16031a553111/call-createSummary \
+  -v $PRS_INTERACTIVE_HOME:/prsInteractive \
+  -w /cromwell-executions/prsInteractivePipeline/b970bdd1-fd09-4040-be99-16031a553111/call-createSummary \
+  ukb-base:V1 /Users/kerimulterer/prsInteractive/./cromwell-executions/prsInteractivePipeline/b970bdd1-fd09-4040-be99-16031a553111/call-createSummary/execution/script
+2025-06-01 10:48:30,715 INFO  - BackgroundConfigAsyncJobExecutionActor [UUID(b970bdd1)prsInteractivePipeline.createSummary:NA:1]: job id: 17564
+2025-06-01 10:48:30,718 INFO  - BackgroundConfigAsyncJobExecutionActor [UUID(b970bdd1)prsInteractivePipeline.createSummary:NA:1]: Status change from - to Done
+2025-06-01 10:48:31,719 INFO  - $a [UUID(b970bdd1)]: Copying workflow logs from /Users/kerimulterer/prsInteractive/cromwell-workflow-logs/workflow.b970bdd1-fd09-4040-be99-16031a553111.log to ./logs/workflow.b970bdd1-fd09-4040-be99-16031a553111.log
