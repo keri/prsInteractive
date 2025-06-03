@@ -281,6 +281,33 @@ Workflow can use as input any clinical marker which includes blood counts, blood
   
   ```
   
+  # Running analysis with WDL workflow
+  
+  ### These instructions use the cromwell backend to compile .wdl workflow
+  ###
+  ### cromwell specific features include a cromwell.config file and command line instruction to start run
+  ###
+  
+  ### Input
+  
+  All inputs are required for from the root directory and annotated in the pipelineInputs.json file
+  Phenotype specific inputs are updated in first step
+  ###
+  
+  ### Download cromwell 
+  
+  Instructions are found here: [cromwell download] (https://cromwell.readthedocs.io/en/latest/tutorials/FiveMinuteIntro/)
+  
+  
+  #### Step 1: cd into root directory
+  
+  ```
+  cd /prsInteractive
+  ./envSetUp.sh <phenotype> <icd10> <phenotype string used in search> <n cores to run epistatic analysis>
+  
+  ```
+  
+  
   
 
 

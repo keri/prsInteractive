@@ -24,9 +24,32 @@ ICD10=$2
 PHENO_STRING=$3
 N_VALUE=$4
 
+
 # Get the project root directory
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PIPELINE_INPUTS_FILE="$PROJECT_ROOT/pipelineInputs.json"
+
+
+#create pheno config and .env files for workflow
+PHENO_DIR="$PROJECT_ROOT/results/$PHENOTYPE"
+
+echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_DIR"
+echo "PHENOTYPE BEING ANALYZED ...: $PHENOTYPE"
+echo "PHENOTYPE STRING USED IN ANALYSIS ...: $PHENO_STRING"
+echo "ICD10 USED IN ANALYSIS ...: $ICD10"
+
+
+#check to see if PHENO_PATH is already present
+#create a phenotype env for later use
+# Create a .env file for future reference
+cat > "${PHENO_DIR}/pheno_config.sh" << EOF
+#pheno environment variables
+PHENO="${pheno}"
+PHENO_PATH=$PHENO_DIR
+PHENO_STR="${phenoStr}"
+ICD10=$icd10
+N=$n
+EOF
 
 echo "Updating pipeline inputs for phenotype: $PHENOTYPE"
 echo "ICD10 code: $ICD10"
@@ -46,6 +69,7 @@ cat > "$PIPELINE_INPUTS_FILE" << EOF
     "prsInteractivePipeline.icd10": "$ICD10",
     "prsInteractivePipeline.pheno_str": "$PHENO_STRING",
     "prsInteractivePipeline.n": $N_VALUE,
+    "prsInteractivePipeline.pheno_path": "/prsInteractive/results/$PHENOTYPE",
     "prsInteractivePipeline.raw_variant_calls": [
         "/prsInteractive/data/variant_calls/ukb22418_c1_b0_v2",
         "/prsInteractive/data/variant_calls/ukb22418_c2_b0_v2",
@@ -84,14 +108,14 @@ EOF
 
 echo "✓ pipelineInputs.json updated successfully"
 
-# Now run the environment setup
-echo "Running environment setup..."
-if [ -f "$PROJECT_ROOT/envSetUp.sh" ]; then
-    chmod +x "$PROJECT_ROOT/envSetUp.sh"
-    "$PROJECT_ROOT/envSetUp.sh" "$PHENOTYPE" "$ICD10" "$PHENO_STRING" "$N_VALUE"
-    echo "✓ Environment setup completed"
-else
-    echo "Warning: envSetUp.sh not found in $PROJECT_ROOT"
-fi
+## Now run the environment setup
+#echo "Running environment setup..."
+#if [ -f "$PROJECT_ROOT/envSetUp.sh" ]; then
+#   chmod +x "$PROJECT_ROOT/envSetUp.sh"
+#   "$PROJECT_ROOT/envSetUp.sh" "$PHENOTYPE" "$ICD10" "$PHENO_STRING" "$N_VALUE"
+#   echo "✓ Environment setup completed"
+#else
+#   echo "Warning: envSetUp.sh not found in $PROJECT_ROOT"
+#fi
 
 echo "Pipeline configuration updated for phenotype: $PHENOTYPE"

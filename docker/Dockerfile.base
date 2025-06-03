@@ -11,12 +11,9 @@ RUN apt-get update && apt-get install -y \
 
 # Copy the environment file
 COPY environment.yml /tmp/environment.yml
-RUN conda install -n ukb_env -c bioconda plink
 
 #COPY workflows/* /prsInteractive/workflows/
 #RUN find /prsInteractive/workflows -type f \( -name "*.py" -o -name "*.sh" \) -exec chmod +x {} +
-//
-//
 # COPY scripts/ /prsInteractive/scripts/
 # COPY scripts/helper/ /prsInteractive/scripts/helper/
 # RUN find /prsInteractive/scripts -type f \( -name "*.py" -o -name "*.sh" \) -exec chmod +x {} +

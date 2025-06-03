@@ -5,6 +5,11 @@ workflow prsInteractivePipeline {
         String pheno
         String icd10
         String pheno_str
+        String PRS_INTERACTIVE_HOME
+        String RESULTS_PATH
+        String SCRIPTS_DIR
+        String DATA_PATH
+        String pheno_path
         Int n
         Array[File] raw_variant_calls
         File hla_participant_csv
@@ -15,6 +20,7 @@ workflow prsInteractivePipeline {
         File participant_hla
         File withdrawals
         File config_file
+        
     }
     
     # Set up the environment variables and create pheno folder
@@ -25,6 +31,8 @@ workflow prsInteractivePipeline {
             pheno_str = pheno_str,
             config_file = config_file
     }
+    
+
     
 }
 
@@ -48,6 +56,17 @@ task createSummary {
         echo "Current working directory: $(pwd)"
         echo "Current user: $(whoami)"
         ls -la . || true
+        
+        #create config files
+        # At the beginning of createSummary
+        if [ ! -f "$PRS_INTERACTIVE_HOME/config/default.config" ]; then
+            echo "The environment for the workflow needs to be set up..."
+            echo "Run envSetup.sh in the root directory (/prsInteractive) command :"
+            echo "./envSetUp.sh <pheno> <icd10> <pheno string to search clinical records> <backend using: hpc,local,DNAnexus>"
+            exit 1
+        fi
+
+        
         
         # Create the summary file to capture time stamp, phenotype substring, and icd10 code
         ts=$(date +%Y%m%d_%H%M%S)
@@ -75,6 +94,8 @@ task createSummary {
     
     output {
         File summary_file = "summary.txt"
+        File env_file = ".env"
+
     }
 
 }

@@ -125,7 +125,7 @@ def main(df2, pheno, icd_code="E11",pheno_str="type 2 diabetes"):
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="creating phenotype file...")
-    parser.add_argument("--data_folder", help="Path to the input data folder")
+    parser.add_argument("--prs_interactive_home", help="Path to the prsInteractive data folder")
     parser.add_argument("--pheno_folder", help="Path to the input pheno data folder")
     parser.add_argument("--pheno", help="Phenotype to analyze")
     parser.add_argument("--pheno_str", help="Phenotype string used in Non-cancer illness code, self-reported field")
@@ -135,8 +135,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     # Prefer command-line input if provided; fallback to env var
-    data_path = args.data_folder or os.environ.get("DATA_PATH")
-    print(f"[PYTHON] Reading from: {data_path}")
+    prs_interactive_home = args.prs_interactive_home or os.environ.get("PRS_INTERACTIVE_HOME")
+    print(f"[PYTHON] Reading from: {prs_interactive_home}")
     
     pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
     print(f"[PYTHON] Reading from: {pheno_path}")
@@ -144,14 +144,14 @@ if __name__ == "__main__":
     pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
     
-    icd = args.icd_code or os.environ.get("ICD")
-    print(f"[PYTHON] icd code : {icd}")
+    icd = args.icd10 or os.environ.get("ICD10")
+    print(f"[PYTHON] icd code : {icd10}")
     
     pheno_str = args.pheno_str or os.environ.get("PHENO_STR")
     print(f"[PYTHON] Phenotype string to filter for : {pheno_str}")
     
     if not data_path:
-        raise ValueError("You must provide a data path via --data_folder or set the DATA_PATH environment variable.")
+        raise ValueError("You must provide a data path via --prs_interactive_home directory or set the PRS_INTERACTIVE_HOME environment variable.")
         
     if not pheno_path:
         raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
@@ -167,7 +167,7 @@ if __name__ == "__main__":
         
     
     #############################  DOWNLOAD PARTICIPANT DATASET  ###################
-    df = pd.read_csv(f'{data_path}/participant.csv')
+    df = pd.read_csv(f'{prs_interactive_home}/participant.csv')
     df2 = df.fillna('')
     
     main(df2,pheno, icd_code=icd,pheno_str=pheno_str)

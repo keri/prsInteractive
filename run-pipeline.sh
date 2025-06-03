@@ -12,11 +12,21 @@ cd "$SCRIPT_DIR"
 if [ -f ".env" ]; then
     source .env
     echo "Loaded environment from .env"
+    
+    # EXPORT the variables you need in Docker
+    export PRS_INTERACTIVE_HOME
+    export RESULTS_PATH
+    export SCRIPTS_DIR
+    export DATA_PATH
+
+    
 else
     echo "No .env file found, running setup..."
     echo "create environment by running envSetUp.sh <pheno> <icd10> <pheno string> <n cores for epistatic analysis> "
     exit 1
 fi
+
+
 
 
 # Set default cromwell jar location if not specified
@@ -29,8 +39,6 @@ if [ ! -f "$CROMWELL_JAR" ]; then
     exit 1
 fi
 
-# Export the project root for Docker mounting
-export PRS_INTERACTIVE_HOME="$SCRIPT_DIR"
 
 echo "Running prsInteractive pipeline..."
 echo "Project root: $PRS_INTERACTIVE_HOME"

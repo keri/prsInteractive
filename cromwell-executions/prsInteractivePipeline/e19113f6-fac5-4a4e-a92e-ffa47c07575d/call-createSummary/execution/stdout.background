@@ -1,0 +1,23 @@
+41511
+Processing phenotype: type2Diabetes
+Using pheno string: type 2 diabetes
+With icd10: E11
+Current working directory: /cromwell-executions/prsInteractivePipeline/e19113f6-fac5-4a4e-a92e-ffa47c07575d/call-createSummary/execution
+Current user: root
+total 20
+drwxr-xrwx 10 root root  320 Jun  2 22:12 .
+drwxr-xrwx  4 root root  128 Jun  2 22:12 ..
+-rw-r--r--  1 root root 2837 Jun  2 22:12 script
+-rw-r--r--  1 root root  427 Jun  2 22:12 script.background
+-rw-r--r--  1 root root  473 Jun  2 22:12 script.submit
+-rw-r--r--  1 root root    0 Jun  2 22:12 stderr
+-rw-r--r--  1 root root    0 Jun  2 22:12 stderr.background
+-rw-r--r--  1 root root  244 Jun  2 22:12 stdout
+-rw-r--r--  1 root root  250 Jun  2 22:12 stdout.background
+drwxrwxrwx  4 root root  128 Jun  2 22:12 tmp.QHmuul
+Summary file contents:
+timestamp of analysis: 20250602_221230
+phenotype analyzed: type2Diabetes
+phenotype substring filtered in participant.csv: type 2 diabetes
+icd 10 code used to define phenotype: E11
+user running workflow: root
