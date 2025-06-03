@@ -1,0 +1,21 @@
+.
+├── data
+│   └── variant_calls
+├── figures
+├── hpc
+├── results
+│   └── phenotype
+│       └── epiFiles
+│           └── preSummaryFiles
+├── scripts
+│   ├── helper
+│   └── test
+├── testData
+│   └── variant_calls
+├── testResults
+│   └── type2Diabetes
+│       └── epiFiles
+│           └── preSummaryFiles
+└── workflows
+
+19 directories

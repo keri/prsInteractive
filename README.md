@@ -296,14 +296,33 @@ Workflow can use as input any clinical marker which includes blood counts, blood
   
   ### Download cromwell 
   
-  Instructions are found here: [cromwell download] (https://cromwell.readthedocs.io/en/latest/tutorials/FiveMinuteIntro/)
+  Instructions for download can be found here: [cromwell download] (https://cromwell.readthedocs.io/en/latest/tutorials/FiveMinuteIntro/)
   
   
-  #### Step 1: cd into root directory
+  
+  #### Step 1: Setup Environment needed to run workflow
+  
+  #### inputs:
+    * config/default.config
+    * data/
+      - covar.txt
+      - hla_participant.csv
+      - participant.csv
+      - participant_environment.csv
+      - ukb_hla_V2.txt
+      - withdrawals.csv
+  
+  #### this step creates:
+  * .env 
+  * pipelineInputs.json
+  * directories for the phenotype
+    - results/<pheno>
+  * results/<pheno>/summary.txt #file of inputs used
+  * results/<pheno>/pheno_config.sh file
   
   ```
   cd /prsInteractive
-  ./envSetUp.sh <phenotype> <icd10> <phenotype string used in search> <n cores to run epistatic analysis>
+  ./envSetUp.sh <phenotype> <icd10> <phenotype string used in search> <n cores for epistatic analysis> <platform: hpc,local,DNAnexus to run analysis>
   
   ```
   
