@@ -1,2 +1,0 @@
-2025-06-01 13:55:26,120 INFO  - MaterializeWorkflowDescriptorActor [UUID(25f2121d)]: Parsing workflow as WDL 1.0
-2025-06-01 13:55:26,312 INFO  - $a [UUID(25f2121d)]: Copying workflow logs from /Users/kerimulterer/prsInteractive/cromwell-workflow-logs/workflow.25f2121d-eb19-4ab9-8123-49a56d14d9cb.log to ./logs/workflow.25f2121d-eb19-4ab9-8123-49a56d14d9cb.log
