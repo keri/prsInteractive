@@ -161,7 +161,7 @@ Workflow can use as input any clinical marker which includes blood counts, blood
 
 ## G, GxG, and GxGxE Analysis Overview using T2D data as an example
 
-![PRS Pipeline Workflow](READMEfigures/combinedGWASWorkflow.png)
+![PRS Pipeline Workflow](READMEfigures/simplifiedWorkflow.png)
 
 
 # Important Underlying Feature Analysis using T2D data as an example
