@@ -15,3 +15,4 @@ documents/
 results/
 cromwell-executions/
 cromwell-workflow-logs/
+logs/
