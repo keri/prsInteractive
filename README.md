@@ -322,7 +322,10 @@ Workflow can use as input any clinical marker which includes blood counts, blood
   
   ```
   cd /prsInteractive
-  ./envSetUp.sh <phenotype> <icd10> <phenotype string used in search> <n cores for epistatic analysis> <platform: hpc,local,DNAnexus to run analysis>
+  
+  tar -czf scripts.tar.gz scripts
+  
+  ./envSetUp.sh <phenotype> <icd10> <phenotype string used in search> <n cores for epistatic analysis> <platform: (hpc,local,dnanexus) to run analysis>
   
   ```
   

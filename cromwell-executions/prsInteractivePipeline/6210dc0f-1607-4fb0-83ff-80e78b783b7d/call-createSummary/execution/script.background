@@ -1,3 +1,0 @@
-#!/bin/bash
-'/bin/bash' '/Users/kerimulterer/prsInteractive/cromwell-executions/prsInteractivePipeline/6210dc0f-1607-4fb0-83ff-80e78b783b7d/call-createSummary/execution/script.submit' < /dev/null || { rc=$?; if [ "$rc" -gt "128" ]; then echo $rc; else echo -1; fi } > /Users/kerimulterer/prsInteractive/./cromwell-executions/prsInteractivePipeline/6210dc0f-1607-4fb0-83ff-80e78b783b7d/call-createSummary/execution/rc &
-echo $!

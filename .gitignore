@@ -13,6 +13,7 @@ documents/
 *.DS_Store
 *.RDataTmp
 results/
+cromwell/
 cromwell-executions/
 cromwell-workflow-logs/
 logs/

@@ -8,8 +8,7 @@
   "delete_intermediate_output_files": false,
   "workflow_failure_mode": "ContinueWhilePossible",
   "default_runtime_attributes": {
-    "docker": "ukb-base:V1",
-    "docker_user": "root"
+    "docker": "ukb-base:V1"
   },
   "workflow_log_level": "INFO"
 }

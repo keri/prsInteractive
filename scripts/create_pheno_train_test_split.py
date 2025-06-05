@@ -1,14 +1,12 @@
-#!/bin/bash
+#!/usr/bin/env python3
 
 import pandas as pd
 import numpy as np
 import os
 import argparse
+import sys
 
-
-
-
-def main(df2, pheno, icd_code="E11",pheno_str="type 2 diabetes"):
+def main(df2, pheno, pheno_path, icd_code="E11", pheno_str="type 2 diabetes"):
     '''
     input:
         df2 : pandas.DataFrame() with 
@@ -21,153 +19,226 @@ def main(df2, pheno, icd_code="E11",pheno_str="type 2 diabetes"):
 
     output:
         Four .txt files space delimited
-             traininingID.txt, testID.txt, holdoutID.txt, pheno.txt
+             trainingID.txt, testID.txt, holdoutID.txt, pheno.txt
     '''
     
+    print(f"Processing phenotype: {pheno}")
+    print(f"Using ICD code: {icd_code}")
+    print(f"Using phenotype string: {pheno_str}")
+    print(f"Output path: {pheno_path}")
+    print(f"Input dataframe shape: {df2.shape}")
+    
+    # Print column names for debugging
+    print("Available columns:")
+    for i, col in enumerate(df2.columns):
+        print(f"  {i}: {col}")
+    
+    # Initialize phenotype column with controls (1)
+    df2['phenotype'] = 1
     
     ###########################  DEFINE PHENOTYPE  #######################
-    if pheno == "type2Diabetes":
-        phenoDf = df2[(df2['Date E11 first reported (non-insulin-dependent diabetes mellitus)'] != '') | 
-            (df2['Source of report of E11 (non-insulin-dependent diabetes mellitus)'] != '') |
-            (df2['Non-cancer illness code, self-reported | Instance 0'].str.contains('type 2 diabetes')) | 
-            (df2['Non-cancer illness code, self-reported | Instance 1'].str.contains('type 2 diabetes')) | 
-            (df2['Non-cancer illness code, self-reported | Instance 2'].str.contains('type 2 diabetes')) | 
-            (df2['Non-cancer illness code, self-reported | Instance 3'].str.contains('type 2 diabetes')) | 
-            (df2['Diagnoses - main ICD10'].str.contains('E11'))]
-    elif pheno == 'celiacDisease':
-        phenoDf = df2[(df2['Date K90 first reported (intestinal malabsorption)'] != '') | 
-            (df2['Source of report of K90 (intestinal malabsorption)'] != '') |
-            (df2['Non-cancer illness code, self-reported | Instance 0'].str.contains('coeliac disease')) | 
-            (df2['Non-cancer illness code, self-reported | Instance 1'].str.contains('coeliac disease')) | 
-            (df2['Non-cancer illness code, self-reported | Instance 2'].str.contains('coeliac disease')) | 
-            (df2['Non-cancer illness code, self-reported | Instance 3'].str.contains('coeliac disease')) | 
-            (df2['Diagnoses - main ICD10'].str.contains('K90'))]
+    try:
+        if pheno == "type2Diabetes":
+            # Create boolean mask for cases
+            mask = (
+                (df2['Date E11 first reported (non-insulin-dependent diabetes mellitus)'].notna() & 
+                 (df2['Date E11 first reported (non-insulin-dependent diabetes mellitus)'] != '')) |
+                (df2['Source of report of E11 (non-insulin-dependent diabetes mellitus)'].notna() & 
+                 (df2['Source of report of E11 (non-insulin-dependent diabetes mellitus)'] != '')) |
+                (df2['Non-cancer illness code, self-reported | Instance 0'].str.contains('type 2 diabetes', na=False)) |
+                (df2['Non-cancer illness code, self-reported | Instance 1'].str.contains('type 2 diabetes', na=False)) |
+                (df2['Non-cancer illness code, self-reported | Instance 2'].str.contains('type 2 diabetes', na=False)) |
+                (df2['Non-cancer illness code, self-reported | Instance 3'].str.contains('type 2 diabetes', na=False)) |
+                (df2['Diagnoses - main ICD10'].str.contains('E11', na=False))
+            )
+        elif pheno == 'celiacDisease':
+            mask = (
+                (df2['Date K90 first reported (intestinal malabsorption)'].notna() & 
+                 (df2['Date K90 first reported (intestinal malabsorption)'] != '')) |
+                (df2['Source of report of K90 (intestinal malabsorption)'].notna() & 
+                 (df2['Source of report of K90 (intestinal malabsorption)'] != '')) |
+                (df2['Non-cancer illness code, self-reported | Instance 0'].str.contains('coeliac disease', na=False)) |
+                (df2['Non-cancer illness code, self-reported | Instance 1'].str.contains('coeliac disease', na=False)) |
+                (df2['Non-cancer illness code, self-reported | Instance 2'].str.contains('coeliac disease', na=False)) |
+                (df2['Non-cancer illness code, self-reported | Instance 3'].str.contains('coeliac disease', na=False)) |
+                (df2['Diagnoses - main ICD10'].str.contains('K90', na=False))
+            )
+        else:
+            # Generic phenotype matching
+            mask = (
+                (df2['Non-cancer illness code, self-reported | Instance 0'].str.contains(pheno_str, na=False)) |
+                (df2['Non-cancer illness code, self-reported | Instance 1'].str.contains(pheno_str, na=False)) |
+                (df2['Non-cancer illness code, self-reported | Instance 2'].str.contains(pheno_str, na=False)) |
+                (df2['Non-cancer illness code, self-reported | Instance 3'].str.contains(pheno_str, na=False)) |
+                (df2['Diagnoses - main ICD10'].str.contains(icd_code, na=False))
+            )
         
-    else:
-        phenoDf = df2[(df2['Non-cancer illness code, self-reported | Instance 0'].str.contains(pheno_str)) | 
-            (df2['Non-cancer illness code, self-reported | Instance 1'].str.contains(pheno_str)) | 
-            (df2['Non-cancer illness code, self-reported | Instance 2'].str.contains(pheno_str)) | 
-            (df2['Non-cancer illness code, self-reported | Instance 3'].str.contains(pheno_str)) | 
-            (df2['Diagnoses - main ICD10'].str.contains(icd_code))]
-    
-    #create a phenotype column with name of pheno and create binary phenotype
-    df2.loc[phenoDf.index, 'phenotype'] = 2
-    df2.fillna(1,inplace=True)
-    
-    
-    print('phenotype prevalence in total = ',phenoDf.shape[0]/df2.shape[0])
+        # Set cases to 2
+        df2.loc[mask, 'phenotype'] = 2
+        
+        # Count cases and controls
+        case_count = (df2['phenotype'] == 2).sum()
+        control_count = (df2['phenotype'] == 1).sum()
+        
+        print(f'Total cases found: {case_count}')
+        print(f'Total controls: {control_count}')
+        print(f'Phenotype prevalence: {case_count/df2.shape[0]:.4f}')
+        
+        if case_count == 0:
+            print("ERROR: No cases found! Check phenotype definition.")
+            print("Sample of relevant columns:")
+            relevant_cols = [col for col in df2.columns if any(term in col.lower() for term in ['illness', 'icd10', 'diagnos'])]
+            if relevant_cols:
+                print(df2[relevant_cols[:5]].head())
+            return False
+            
+    except KeyError as e:
+        print(f"ERROR: Missing column {e}")
+        print("Available columns that might be relevant:")
+        relevant_cols = [col for col in df2.columns if any(term in col.lower() for term in ['illness', 'icd', 'diagnos', 'diabetes'])]
+        for col in relevant_cols:
+            print(f"  - {col}")
+        return False
     
     ##################### SPLIT DATA INTO TRAIN/TEST/HOLDOUT  #################################
     
-    #filter 20% test set with same frequency of celiac and type 2 diabetes
-    #filter 10% holdout set
-    #filter cases and controls separately
+    # Ensure we have both cases and controls for splitting
+    cases = df2[df2['phenotype'] == 2]
+    controls = df2[df2['phenotype'] == 1]
     
-    training = df2.groupby("phenotype").sample(frac=.70,random_state=1)
-    print('training data consists of ',training.shape,' # of people')
+    if len(cases) < 10:
+        print(f"WARNING: Very few cases ({len(cases)}). Consider adjusting phenotype definition.")
     
-    #get new dataset without rows in training dataset
-    df3 = df2[~df2.index.isin(training.index)]
+    # Split data maintaining class proportions
+    training_cases = cases.sample(frac=0.70, random_state=1)
+    training_controls = controls.sample(frac=0.70, random_state=1)
+    training = pd.concat([training_cases, training_controls])
     
-    #proportion of remaining dataset to test set = 66%
-    test = df3.groupby("phenotype").sample(frac=.6666,random_state=1)
-    print('test data consists of ',test.shape,' # of people')
+    print(f'Training data consists of {training.shape[0]} people')
     
-    holdout = df3[~df3.index.isin(test.index)]
-    print('holdout data consists of ',holdout.shape,' # of people')
+    # Get remaining data
+    remaining_cases = cases[~cases.index.isin(training_cases.index)]
+    remaining_controls = controls[~controls.index.isin(training_controls.index)]
     
+    # Split remaining data between test and holdout (roughly 2:1 ratio)
+    test_cases = remaining_cases.sample(frac=0.6666, random_state=1)
+    test_controls = remaining_controls.sample(frac=0.6666, random_state=1)
+    test = pd.concat([test_cases, test_controls])
     
-    #statistics on datasets
-    #training
-    controls = training.groupby('phenotype').count().loc[1]['Participant ID']
-    cases = training.groupby('phenotype').count().loc[2]['Participant ID']
-    print('% of cases in training set : ',(cases / training.shape[0])*100)
-    print('total cases in training set : ',cases)
-    print('total controls in training set : ',controls)
-    print()
+    print(f'Test data consists of {test.shape[0]} people')
     
-    #holdout data
-    controls = holdout.groupby('phenotype').count().loc[1]['Participant ID']
-    cases = holdout.groupby('phenotype').count().loc[2]['Participant ID']
-    print('% of cases in holdout set : ',(cases / holdout.shape[0])*100)
-    print('total cases in holdout set : ',cases)
-    print('total controls in holdout set : ',controls)
-    print()
+    # Holdout is the remainder
+    holdout_cases = remaining_cases[~remaining_cases.index.isin(test_cases.index)]
+    holdout_controls = remaining_controls[~remaining_controls.index.isin(test_controls.index)]
+    holdout = pd.concat([holdout_cases, holdout_controls])
     
-    #test data
-    controls = test.groupby('phenotype').count().loc[1]['Participant ID']
-    cases = test.groupby('phenotype').count().loc[2]['Participant ID']
-    print('% of cases in test set : ',(cases / test.shape[0])*100)
-    print('total cases in test set : ',cases)
-    print('total controls in test set : ',controls)
+    print(f'Holdout data consists of {holdout.shape[0]} people')
     
-    #training IDs
-    trainingID = training[['Participant ID']]
+    # Print statistics for each split
+    for split_name, split_data in [('training', training), ('test', test), ('holdout', holdout)]:
+        cases_in_split = (split_data['phenotype'] == 2).sum()
+        controls_in_split = (split_data['phenotype'] == 1).sum()
+        case_percentage = (cases_in_split / len(split_data)) * 100
+        
+        print(f'\n{split_name.capitalize()} set statistics:')
+        print(f'  Cases: {cases_in_split}')
+        print(f'  Controls: {controls_in_split}')
+        print(f'  Case percentage: {case_percentage:.2f}%')
+    
+    # Create output DataFrames
+    trainingID = training[['Participant ID']].copy()
     trainingID['IID'] = training['Participant ID']
-    #holdout IDs
-    holdoutID = holdout[['Participant ID']]
+    
+    holdoutID = holdout[['Participant ID']].copy()
     holdoutID['IID'] = holdout['Participant ID']
-    #test IDs
-    testID = test[['Participant ID']]
+    
+    testID = test[['Participant ID']].copy()
     testID['IID'] = test['Participant ID']
-    #phenotype for all individuals
-    phenotype = df2[['Participant ID']]
+    
+    phenotype = df2[['Participant ID']].copy()
     phenotype['IID'] = df2['Participant ID']
     phenotype['phenotype'] = df2['phenotype']
     
+    # Ensure output directory exists
+    os.makedirs(pheno_path, exist_ok=True)
     
-    #save to directory
-    testID.to_csv(f'{pheno_path}/testID.txt',sep=' ',header=None,index=False)
-    holdoutID.to_csv(f'{pheno_path}/holdoutID.txt',sep=' ',header=None,index=False)
-    trainingID.to_csv(f'{pheno_path}/trainingID.txt',sep=' ',header=None,index=False)
-    phenotype.to_csv(f'{pheno_path}/pheno.txt',sep=' ',header=None,index=False)
+    # Save files
+    try:
+        testID.to_csv(f'{pheno_path}/testID.txt', sep=' ', header=False, index=False)
+        holdoutID.to_csv(f'{pheno_path}/holdoutID.txt', sep=' ', header=False, index=False)
+        trainingID.to_csv(f'{pheno_path}/trainingID.txt', sep=' ', header=False, index=False)
+        phenotype.to_csv(f'{pheno_path}/pheno.txt', sep=' ', header=False, index=False)
+        
+        print(f"\nSuccessfully saved files to {pheno_path}:")
+        for filename in ['testID.txt', 'holdoutID.txt', 'trainingID.txt', 'pheno.txt']:
+            filepath = os.path.join(pheno_path, filename)
+            if os.path.exists(filepath):
+                print(f"  ✅ {filename} ({os.path.getsize(filepath)} bytes)")
+            else:
+                print(f"  ❌ {filename} (not found)")
+                
+        return True
+        
+    except Exception as e:
+        print(f"ERROR saving files: {e}")
+        return False
 
 if __name__ == "__main__":
     
-    parser = argparse.ArgumentParser(description="creating phenotype file...")
-    parser.add_argument("--prs_interactive_home", help="Path to the prsInteractive data folder")
-    parser.add_argument("--pheno_folder", help="Path to the input pheno data folder")
-    parser.add_argument("--pheno", help="Phenotype to analyze")
-    parser.add_argument("--pheno_str", help="Phenotype string used in Non-cancer illness code, self-reported field")
-    parser.add_argument("--icd_code", help="ICD 10 code of phenotype")
-    
+    parser = argparse.ArgumentParser(description="Creating phenotype file and train/test/holdout splits")
+    parser.add_argument("--data_path", required=True, help="Path to the prsInteractive data folder")
+    parser.add_argument("--pheno_path", required=True, help="Path to the output phenotype results folder")
+    parser.add_argument("--pheno", required=True, help="Phenotype to analyze")
+    parser.add_argument("--pheno_str", required=True, help="Phenotype string used in Non-cancer illness code, self-reported field")
+    parser.add_argument("--icd10", required=True, help="ICD 10 code of phenotype")
     
     args = parser.parse_args()
     
-    # Prefer command-line input if provided; fallback to env var
-    prs_interactive_home = args.prs_interactive_home or os.environ.get("PRS_INTERACTIVE_HOME")
-    print(f"[PYTHON] Reading from: {prs_interactive_home}")
+    print(f"[PYTHON] Reading from: {args.data_path}")
+    print(f"[PYTHON] Output to: {args.pheno_path}")
+    print(f"[PYTHON] Phenotype: {args.pheno}")
+    print(f"[PYTHON] ICD code: {args.icd10}")
+    print(f"[PYTHON] Phenotype string: {args.pheno_str}")
     
-    pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
-    print(f"[PYTHON] Reading from: {pheno_path}")
+    # Check if data path exists
+    if not os.path.exists(args.data_path):
+        print(f"ERROR: Data path {args.data_path} does not exist!")
+        sys.exit(1)
     
-    pheno = args.pheno or os.environ.get("PHENO")
-    print(f"[PYTHON] Phenotype : {pheno}")
+    # Check if participant.csv exists
+    participant_file = os.path.join(args.data_path, 'participant.csv')
+    if not os.path.exists(participant_file):
+        print(f"ERROR: participant.csv not found at {participant_file}")
+        print(f"Available files in {args.data_path}:")
+        try:
+            for f in os.listdir(args.data_path):
+                print(f"  - {f}")
+        except:
+            print("  (cannot list directory)")
+        sys.exit(1)
     
-    icd = args.icd10 or os.environ.get("ICD10")
-    print(f"[PYTHON] icd code : {icd10}")
+    print(f"Loading data from {participant_file}...")
     
-    pheno_str = args.pheno_str or os.environ.get("PHENO_STR")
-    print(f"[PYTHON] Phenotype string to filter for : {pheno_str}")
-    
-    if not data_path:
-        raise ValueError("You must provide a data path via --prs_interactive_home directory or set the PRS_INTERACTIVE_HOME environment variable.")
+    try:
+        # Read participant dataset
+        df = pd.read_csv(participant_file)
+        print(f"Loaded dataset with shape: {df.shape}")
         
-    if not pheno_path:
-        raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
+        # Fill NaN values with empty strings for string operations
+        df2 = df.fillna('')
         
-    if not pheno:
-        raise ValueError("You must provide a phenotype via --pheno or set the PHENO environment variable.")
+        # Run main processing
+        success = main(df2, args.pheno, args.pheno_path, icd_code=args.icd10, pheno_str=args.pheno_str)
         
-    if not pheno_str:
-        raise ValueError("You must provide a phenotype string used in Non-cancer illness code via --pheno_str or set the PHENO_STR environment variable.")
-        
-    if not icd:
-        raise ValueError("You must provide a ICD 10 code via --icd_code or set the ICD_CODE environment variable.")
-        
-    
-    #############################  DOWNLOAD PARTICIPANT DATASET  ###################
-    df = pd.read_csv(f'{prs_interactive_home}/participant.csv')
-    df2 = df.fillna('')
-    
-    main(df2,pheno, icd_code=icd,pheno_str=pheno_str)
+        if success:
+            print("\n✅ Phenotype processing completed successfully!")
+            sys.exit(0)
+        else:
+            print("\n❌ Phenotype processing failed!")
+            sys.exit(1)
+            
+    except Exception as e:
+        print(f"ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)

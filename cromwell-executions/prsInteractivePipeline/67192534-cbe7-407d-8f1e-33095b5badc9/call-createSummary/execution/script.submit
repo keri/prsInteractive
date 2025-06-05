@@ -1,7 +1,0 @@
-#!/bin/bash
-docker run \
-  --rm -i \
-  -v /Users/kerimulterer/prsInteractive/./cromwell-executions/prsInteractivePipeline/67192534-cbe7-407d-8f1e-33095b5badc9/call-createSummary:/cromwell-executions/prsInteractivePipeline/67192534-cbe7-407d-8f1e-33095b5badc9/call-createSummary \
-  -v $PRS_INTERACTIVE_HOME:/prsInteractive \
-  -w /cromwell-executions/prsInteractivePipeline/67192534-cbe7-407d-8f1e-33095b5badc9/call-createSummary \
-  ukb-base:V1 /bin/bash execution/script

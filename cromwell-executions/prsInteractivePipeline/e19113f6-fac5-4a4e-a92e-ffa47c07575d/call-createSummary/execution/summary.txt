@@ -1,5 +1,0 @@
-timestamp of analysis: 20250602_221230
-phenotype analyzed: type2Diabetes
-phenotype substring filtered in participant.csv: type 2 diabetes
-icd 10 code used to define phenotype: E11
-user running workflow: root

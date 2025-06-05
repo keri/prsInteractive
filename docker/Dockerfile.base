@@ -1,6 +1,5 @@
 FROM continuumio/miniconda3:latest
 
-
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
     build-essential \
@@ -12,25 +11,27 @@ RUN apt-get update && apt-get install -y \
 # Copy the environment file
 COPY environment.yml /tmp/environment.yml
 
-#COPY workflows/* /prsInteractive/workflows/
-#RUN find /prsInteractive/workflows -type f \( -name "*.py" -o -name "*.sh" \) -exec chmod +x {} +
-# COPY scripts/ /prsInteractive/scripts/
-# COPY scripts/helper/ /prsInteractive/scripts/helper/
-# RUN find /prsInteractive/scripts -type f \( -name "*.py" -o -name "*.sh" \) -exec chmod +x {} +
-# RUN find /prsInteractive/scripts/helper -type f \( -name "*.py" -o -name "*.sh" \) -exec chmod +x {} +
-
-
 # Create the conda environment
 RUN conda env create -f /tmp/environment.yml
 
-
+# Activate environment in .bashrc
 RUN echo "source activate ukb_env" >> ~/.bashrc
 
 # Make it the default environment
-
-
 ENV PATH="/opt/conda/envs/ukb_env/bin:$PATH"
 ENV CONDA_DEFAULT_ENV="ukb_env"
 
+# Create the working directory
+WORKDIR /prsInteractive
 
-WORKDIR /prsInteractive/workflows
+# Create necessary directories
+RUN mkdir -p /prsInteractive/data \
+    && mkdir -p /prsInteractive/results \
+    && mkdir -p /prsInteractive/logs \
+    && mkdir -p /prsInteractive/config
+
+# Copy configuration files
+COPY config/ /prsInteractive/config/
+
+# Set proper permissions
+RUN chmod -R 755 /prsInteractive

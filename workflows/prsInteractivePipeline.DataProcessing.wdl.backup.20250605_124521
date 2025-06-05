@@ -18,6 +18,7 @@ workflow prsInteractivePipeline {
         File scripts_archive
     }
     
+    # Set up the environment variables and create pheno folder
     call createSummary {
         input:
             pheno = pheno,
@@ -26,6 +27,7 @@ workflow prsInteractivePipeline {
             platform = platform
     }
     
+    # Run the train test holdout split and phenotype creation
     call runTrainTestHoldoutSplitPhenotype {
         input:
             pheno = pheno,
@@ -59,7 +61,13 @@ task createSummary {
         echo "Using pheno string: ~{pheno_str}"
         echo "With icd10: ~{icd10}"
         
-        # Create summary file
+        # Debug information
+        echo "Current working directory: $(pwd)"
+        echo "Current user: $(whoami)"
+        echo "Available directories:"
+        ls -la /
+        
+        # Create summary file in working directory
         ts=$(date +%Y%m%d_%H%M%S)
         summaryFile="summary.txt"
         touch "${summaryFile}"
@@ -70,12 +78,14 @@ task createSummary {
         echo "user running workflow: $(whoami)" >> "${summaryFile}"
         echo "running on platform: ~{platform}" >> "${summaryFile}"
         
+        # Verify file was created
         echo "Summary file contents:"
         cat $summaryFile
     >>>
     
     runtime {
         docker: "ukb-base:V1"
+
     }
     
     output {
@@ -116,10 +126,41 @@ task runTrainTestHoldoutSplitPhenotype {
         # Create results directory
         mkdir -p ./results/~{pheno}
         
-        # Find and run Python script
+        # Debug information
+        echo "Current working directory: $(pwd)"
+        echo "Files in current directory:"
+        ls -la
+        echo "Files in data directory:"
+        ls -la ./data/
+        
+        # Verify required files exist
+        if [ -f "./data/participant.csv" ]; then
+            echo "✅ participant.csv found"
+            echo "File size: $(wc -l < ./data/participant.csv) lines"
+            echo "First few lines:"
+            head -3 ./data/participant.csv
+        else
+            echo "❌ participant.csv not found"
+            exit 1
+        fi
+        
+        if [ -f "./data/participant_environment.csv" ]; then
+            echo "✅ participant_environment.csv found"
+        else
+            echo "❌ participant_environment.csv not found"
+            exit 1
+        fi
+        
+        # Find Python scripts
+        echo "Looking for Python scripts..."
+        find . -name "*.py" -type f
+        
+        # Verify the main script exists
         MAIN_SCRIPT=$(find . -name "create_pheno_train_test_split.py" -type f | head -1)
         if [ -z "$MAIN_SCRIPT" ]; then
             echo "❌ create_pheno_train_test_split.py not found"
+            echo "Available Python files:"
+            find . -name "*.py" -type f
             exit 1
         fi
         
@@ -128,6 +169,10 @@ task runTrainTestHoldoutSplitPhenotype {
         # Activate conda environment
         eval "$(conda shell.bash hook)"
         conda activate ukb_env
+        
+        # Verify Python environment
+        echo "Python version: $(python --version)"
+        echo "Python path: $(which python)"
         
         # Run the Python script
         echo "Running Python script..."
@@ -145,10 +190,12 @@ task runTrainTestHoldoutSplitPhenotype {
         # Create completion file
         echo "train test split and phenotype creation complete" > completion_file.txt
         echo "Successfully processed ~{pheno} with ICD10 ~{icd10}" >> completion_file.txt
+        echo "Output files created in ./results/~{pheno}/" >> completion_file.txt
     >>>
     
     runtime {
         docker: "ukb-base:V1"
+
     }
     
     output {

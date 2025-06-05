@@ -7,12 +7,11 @@ workflow prsInteractivePipeline {
         String pheno_str
         Int n
         Array[File] raw_variant_calls
-        File hla_participant_csv
+        File participant_hla
         File participant_data
         File participant_environment
         File covar
         File hla_headers
-        File participant_hla
         File withdrawals
         File config_file
     }
