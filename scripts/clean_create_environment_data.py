@@ -1,10 +1,27 @@
 #!/usr/bin/env python3
 import pandas as pd
+from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
 import os
 import argparse
 
 from helper.download import get_dataset, get_epi_columns, get_columns
 from helper.data_wrangling import *
+
+def scale_cardio_training_data(df):
+    # Initialize the StandardScaler
+    scaler = StandardScaler()
+    
+    # Fit the scaler to your data (compute the mean and standard deviation)
+    scaler.fit(df)
+    
+    # Transform the data using the fitted scaler
+    scaled_data = scaler.transform(df)
+    
+    # Create a new DataFrame with the scaled data
+    scaled_df = pd.DataFrame(scaled_data, columns=df.columns,index=df.index)
+    
+    return(scaled_df,scaler)
 
 def mean_center_data(df):
     '''mean center data for all features in featureList
@@ -16,230 +33,182 @@ def mean_center_data(df):
     return(dfMeanCentered,mean)
 
 
-def combine_gene_environment(cardioFull,geneticDf,combinedGeneticE):
-    pass
+def impute_data(df):
+    '''
+    
+        input: dataframe env features, genetic features before combining
+               index = IID, no phenotype column
+        output: imputed Dataframe (training data), imputed_model
 
+       '''
+    imp_mean = SimpleImputer(missing_values=np.nan, strategy='mean').fit(df)
+    dfImp = imp_mean.transform(df)
+    return(dfImp, imp_mean)
 
-def scale_combine_epi_genetic_features(environFull,cardioGeneticFeaturePath,trainingDf):
-
-    envCopy = environFull.copy()
+def combine_gene_environment(envGeneticDf,geneticEnvFeatureList):
+    # Create all columns at once using a dictionary
+    combined_columns = {}
     
-    #get the genetic-env features post modelling
-    cardioGeneticDf = pd.read_csv(cardioGeneticFeaturePath)
-    
-    
-    envCopy = envCopy[envCopy.index.isin(trainingDf.index)]
-    
-    envCopyImputed = impute_data(envCopy)
-    
-    
-    
-    for epiCombo in epiCardioFeaturesToCombineList:
-        XcenteredInteractions[','.join(epiCombo[:])] = Xcentered[epiCombo[0]] * X[epiCombo[1]]
+    for epiCombo in geneticEnvFeatureList:
+        parts = epiCombo.split(',')
+        first_col = parts[0]
+        remaining_cols = ','.join(parts[1:])
         
-    XepiScaled,scalerEpi = scale_cardio_training_data(XcenteredInteractions)
-    
-    #scale the epiCentered data after combining
-    Xcentered,scalerEpiCentered = scale_cardio_training_data(Xcentered)
-    
-    Xmain = trainingCardioDf[mainCardioFeatures]
-    if not Xmain.empty:
-        XmainScaled,scalerMain = scale_cardio_training_data(Xmain)
+        combined_columns[epiCombo] = envGeneticDf[first_col] * envGeneticDf[remaining_cols]
         
-    else:
-        print("Main cardio DataFrame is empty. Scaling is skipped.")
-        scalerMain = None
-        
-    #save data in dataframe
-    #save means for epi features
-    df = pd.DataFrame(data=epiMean)
-    df.reset_index(inplace=True)
-    df.columns = ['feature','mean']
-    models = pd.DataFrame({'scalerEpi':scalerEpi,'scalerMain':scalerMain,'scalerEpiCentered':scalerEpiCentered},index=[0])
-    df.to_csv(f'{dataPath}/data/cardioTrainingMeans.csv',index=False)
-    models.to_csv(f'{dataPath}/data/cardioTrainingModels.csv',index=False)
-        
-    return(epiMean,scalerEpi,scalerMain,scalerEpiCentered)
-
-def calculate_mean_scaler_for_cardio_training_data(envDf,genoDf,genoEnvEpiFeatures):
-    #get full columns to use for index of section columns
-    #cardioDf,epiCardioFeaturesToCenter,mainCardioFeatures,epiCardioFeaturesToCombineList,dataPath,get_dataset
+    # Create DataFrame from dictionary all at once
+    combinedDf = pd.DataFrame(combined_columns, index=envGeneticDf.index)
     
-    print('downloading geno training data for mean and scaler calculation for cardio data ....')
+    return combinedDf
     
 
-        
-    genoEpiFeatures = list(set([epi_geno_combo[1] for epi_geno_combo in epiCardioFeaturesToCombineList]))
-        
-        
-    Xcentered,epiMean = mean_center_data(XEpi)
-    
-    #multiply the mean centered cardio features with geno features for seed epi pairs
-    XcenteredInteractions = pd.DataFrame(index=Xcentered.index)
-    
-#	#get the uncentered data
-#	XuncenteredInteractions = pd.DataFrame(cardioDf[epiCardioFeaturesToCenter].index)
-    
-    for epiCombo in epiCardioFeaturesToCombineList:
-        XcenteredInteractions[','.join(epiCombo[:])] = Xcentered[epiCombo[0]] * X[epiCombo[1]]
-        
-    XepiScaled,scalerEpi = scale_cardio_training_data(XcenteredInteractions)
-    
-    #scale the epiCentered data after combining
-    Xcentered,scalerEpiCentered = scale_cardio_training_data(Xcentered)
-    
-    Xmain = trainingCardioDf[mainCardioFeatures]
-    if not Xmain.empty:
-        XmainScaled,scalerMain = scale_cardio_training_data(Xmain)
-        
-    else:
-        print("Main cardio DataFrame is empty. Scaling is skipped.")
-        scalerMain = None
-        
-    #save data in dataframe
-    #save means for epi features
-    df = pd.DataFrame(data=epiMean)
-    df.reset_index(inplace=True)
-    df.columns = ['feature','mean']
-    models = pd.DataFrame({'scalerEpi':scalerEpi,'scalerMain':scalerMain,'scalerEpiCentered':scalerEpiCentered},index=[0])
-    df.to_csv(f'{dataPath}/data/cardioTrainingMeans.csv',index=False)
-    models.to_csv(f'{dataPath}/data/cardioTrainingModels.csv',index=False)
-        
-    return(epiMean,scalerEpi,scalerMain,scalerEpiCentered)
+def main(phenoPath,trainingPath,testPath,holdoutPath,env_type,envDf,hlaDf):
+    '''
+    input:
+        string trainingPath = absolute path to gentoyped training set
+        string testPath = absolute path to genotyped test set
+        string holdoutPath = absolute path to genotyped holdout set
 
+        envFeaturePath = absolute path to results from _gene_environment_feature_discovery = {env_type}importantFeaturesPostShap.csv
 
-
-def process_cardio_data(X,cardioDf,cardioDfFull,epiCardioFeaturesToCenter,mainCardioFeatures,epiCardioFeaturesToCombineList,dataPath,full_columns,get_dataset):
-    '''transform cardioDf and geno dataset into a combined, mean centered, standardized dataset
+    output: 
+        Dataframes : environment-genetic features combined for separate training, test, and holdout
+    '''
     
-    input : X dataframe(training or test, genotyped dataset with HLA region
-            epiCardioFeaturesToCenter : list of cardio features involved in epistatic interactions that need to be mean centered before combining with geno data
-            mainCardioFeatures : list of main cardio features not involved in epi interactions and dont need mean centering
-            epiCardioFeaturesToCombineList : zipped list of cardio features and geno features in each epi pair to create new feature for model
-            
-    return:
-            Xtransformed : dataframe combined centered and standardized dataset 
-    '''	
+    ############## DOWNLOAD ENVIRONMENTAL DATA #######################
     
-    mean,scalerEpi,scalerMain,scalerEpiCentered = calculate_mean_scaler_for_cardio_training_data(cardioDfFull,epiCardioFeaturesToCenter,mainCardioFeatures,epiCardioFeaturesToCombineList,dataPath,full_columns,get_dataset)
-    
-    #mean center the epiCardioFeatures before combining with genotyped data for model training
-    cardioMain = cardioDf[mainCardioFeatures]
-    cardioEpi = cardioDf[epiCardioFeaturesToCenter]
-    
-    
-    #mean center main	
-    Xcentered = cardioEpi-mean
-    
-    #multiply the mean centered cardio features with geno features for seed epi pairs
-    XcenteredInteractions = pd.DataFrame(index=Xcentered.index)
-    
-#	#get the uncentered data
-#	XuncenteredInteractions = pd.DataFrame(cardioDf[epiCardioFeaturesToCenter].index)
-    
-    for epiCombo in epiCardioFeaturesToCombineList:
-        XcenteredInteractions[','.join(epiCombo[:])] = Xcentered[epiCombo[0]] * X[epiCombo[1]]
-        
-#	for epiCombo in epiCardioFeaturesToCombineList:
-#		XuncenteredInteractions[','.join(epiCombo[:])] = cardioDf[epiCombo[0]] * X[epiCombo[1]]
-        
-    # Transform the data using the fitted scaler
-    scaled_data = scalerEpi.transform(XcenteredInteractions)
-    
-    # Create a new DataFrame with the scaled data
-    XepiScaled = pd.DataFrame(scaled_data, columns=XcenteredInteractions.columns,index=XcenteredInteractions.index)
-    
-    # Transform epi centered data to scaled epi centered data
-    scaled_data = scalerEpiCentered.transform(Xcentered)
-    XcenteredScaled = pd.DataFrame(scaled_data, columns=Xcentered.columns,index=Xcentered.index)
-    
-    
-    if not cardioMain.empty:
-        if scalerMain:
-            #transform Xmain
-            scaled_data = scalerMain.transform(cardioMain)
-            # Create a new DataFrame with the scaled data
-            XmainScaled = pd.DataFrame(scaled_data, columns=cardioMain.columns,index=cardioMain.index)
-        else:
-            print('There was no scaler for main cardio features, in which case there were no cardio main features to scale')
-            
-    else:
-        print("Main cardio DataFrame is empty. Scaling is skipped.")
-        XmainScaled = pd.DataFrame()
-        
-    return(XmainScaled,XepiScaled,XcenteredScaled)
-
-
-def create_gene_env_training_data(cardioEpiFeatureFile,trainingEnv,trainingPath):
-    '''input :
-        datapath to files cardioEpiFeatures file, trainingPath to genotyped data
-        trainingEnv: dataframe with env features for training data
-        
-        output:
-        combinedGeneticEnvData = Dataframe()
-        trained_imputed_model : sklearn.SimpleImputer model
-        trained_mean: float
-        trained scaler_model = sklearn.Scaler model
-        '''
-
+    importantFeaturesFile =f'{phenoPath}/scores/{env_type}importantFeaturesPostShap.csv'
     
 
-def main(resultsPath,cardioEpiFeatureFile,trainingPath,testPath,holdoutPath,env_type):
-    
-    importantFeaturesFile =f'{resultsPath}/scores/{env_type}importantFeaturesPostShap.csv'
-    
-    envDf = pd.read_csv(f'{resultsPath}/participant_environment.csv')
-    
-    #########   GET G AND GXG FEATURES THAT ARE RANKED AND FILTERED TO COMBINE WITH E ##########
-    
-    trainingID = pd.read_csv(f'{resultsPath}/trainingID.txt',sep=' ')
-    testID = pd.read_csv(f'{resultsPath}/testID.txt',sep=' ')
-    holdoutID = pd.read_csv(f'{resultsPath}/holdoutID.txt',sep=' ')
-    
-    trainingEnv = envDf[envDf['IID'].isin(trainingID[0].tolist())]
-    trainingEnv.set_index(['IID'],inplace=True)
-    
-    testEnv = envDf[envDf['IID'].isin(testID[0].tolist())]
-    testEnv.set_index(['IID'],inplace=True)
-    
-    holdoutEnv = envDf[envDf['IID'].isin(holdoutID[0].tolist())]
-    holdoutEnv.set_index(['IID'],inplace=True)
-    
-    #download datasets to combine
-    full_columns = get_columns(resultsPath)
     
     #the G and GxG SNPs post GxGxE feature discovery
     features = pd.read_csv(importantFeaturesFile)
     #filter the main E features
     features2 = features[features['main_E'] == 0]
     
-    #filter epistatic 
+    #filter features with an epistatic interactions
     envEpiDf = features2[features2['epistatic'] == 1]
-    epiFeatures = envEpiDf['geneticFeatures'].unique().tolist()
+    epiFeatures = envEpiDf[~envEpiDf['geneticFeature'].isna()]['geneticFeature'].unique().tolist()
+    
+    #remove the epi interactions with HLA region
+    epiGenoFeatures = list(set(epiFeatures) - set(hlaDf.columns.tolist()))
     
     envFeatures = envEpiDf['envFeature'].unique().tolist()
     
-    epiEnvFeatures = envEpiDf['envGeneticFeature'].tolist()
+    #GxGxE features comma separated
+    epiEnvFeatures = envEpiDf[~envEpiDf['envFeature'].isna()]['envGeneticFeature'].tolist()
+        
     
+    ###### PROCESS TRAINING ENVIRONMENT DATA TEST AND HOLDOUT SET ###
+    
+    # DOWNLOAD GENETIC DATA AND MERGE WITH ENV DATA
     #expand the features into a list and filter redundant features
-    expandedSnps = get_epi_snps(set(epiFeatures))
+    expandedSnps = get_epi_snps(set(epiGenoFeatures))
     
-    trainingDf = get_dataset(trainingDf, expandedSnps)
+    trainingDf = get_dataset(trainingPath, expandedSnps)
+    trainingDf = create_epi_df(trainingDf, epiGenoFeatures)
+    geneEnvTraining = trainingDf.merge(envDf,left_index=True,right_index=True,how='left')
+    geneEnvTraining = geneEnvTraining.merge(hlaDf,left_index=True,right_index=True,how='left')
     
-    #create combined GxG and G dataset
-    trainingDf = create_epi_df(trainingDf,epiFeatures)
     
-    
-    
-    #process training data and return mean to center, trained imputation model, and trained scaled model
-    impute_model, trained_mean, centered_model, geneEnvTrainingData = create_gene_env_training_data(trainingEnv[envFeatures],trainingDf, epiEnvFeatures)
-    geneEnvTrainingData.to_csv(f'{resultsPath}/geneEnvironmentTraining.csv')
-    
-    del geneEnvTrainingData
-    
-    #use trained models for imputation, centering and scaling validation and holdout sets
     testDf = get_dataset(testPath, expandedSnps)
-    imputedDf = impute_model
+    testDf = create_epi_df(testDf, epiGenoFeatures)
+    geneEnvTest = testDf.merge(envDf,left_index=True,right_index=True,how='left')
+    geneEnvTest = geneEnvTest.merge(hlaDf,left_index=True,right_index=True,how='left')
+    
+    
+    holdoutDf = get_dataset(holdoutPath, expandedSnps)
+    holdoutDf = create_epi_df(holdoutDf, epiGenoFeatures)
+    geneEnvHoldout = holdoutDf.merge(envDf,left_index=True,right_index=True,how='left')
+    geneEnvHoldout = geneEnvHoldout.merge(hlaDf,left_index=True,right_index=True,how='left')
+    
+    
+    # MEAN CENTER
+    envTraining,training_mean = mean_center_data(geneEnvTraining[envFeatures])
+    envTest = geneEnvTest[envFeatures] - training_mean
+    envHoldout = geneEnvHoldout[envFeatures] - training_mean
+    
+    # REPLACE ENV FEATURES WITH MEAN CENTERED FEATURES
+    geneEnvTraining[envFeatures] = envTraining[envFeatures]
+    geneEnvTest[envFeatures] = envTest[envFeatures]
+    geneEnvHoldout[envFeatures] = envHoldout[envFeatures]
+    
+    # CREATE GENE-ENVIRONMENT FEATURE DATAFRAME
+    combinedTraining = combine_gene_environment(geneEnvTraining,epiEnvFeatures)
+    combinedTest = combine_gene_environment(geneEnvTest,epiEnvFeatures)
+    combinedHoldout = combine_gene_environment(geneEnvHoldout,epiEnvFeatures)
+    
+    # SCALE COMBINED DATA
+    combinedTraining,scaler_model = scale_cardio_training_data(combinedTraining)
+    scaled_test = scaler_model.transform(combinedTest)
+    combinedTest = pd.DataFrame(scaled_test, columns=combinedTest.columns,index=combinedTest.index)
+    scaled_holdout = scaler_model.transform(combinedHoldout)
+    combinedHoldout = pd.DataFrame(scaled_holdout, columns=combinedHoldout.columns,index=combinedHoldout.index)
+    
+    
+
+    combinedTraining.reset_index().to_csv(f'{phenoPath}/geneEnvironmentTraining.csv')
+    combinedTest.reset_index().to_csv(f'{phenoPath}/geneEnvironmentTest.csv')
+    combinedHoldout.reset_index().to_csv(f'{phenoPath}/geneEnvironmentHoldout.csv')
+
+if __name__ == '__main__':
+    
+    parser = argparse.ArgumentParser(description="creating GxGxE Dataframes...")
+    parser.add_argument("--training_file", help="data file of training data")
+    parser.add_argument("--test_file", help="data file of test data")
+    parser.add_argument("--holdout_file", help="data file of holdout data")
+    parser.add_argument("--env_type", help="env data type analyzed")
+    parser.add_argument("--pheno_path", help="Results Path to write to")
+    parser.add_argument("--env_data_file",help="Environmental data for participants")
+    parser.add_argument("--hladata_file",help="HLA data for participants")
+    parser.add_argument("--env_epi_features",help="Genetic environmental epistatic features")
+    
+    
+    
+    args = parser.parse_args()
+    
+    print(f"[PYTHON] Reading environmental data from: {args.env_data_file}")
+    print(f"[PYTHON] Reading HLA data from: {args.hla_data_file}")
+    print(f"[PYTHON] Reading training data from: {args.training_file}")
+    print(f"[PYTHON] Reading test data from: {args.test_file}")
+    print(f"[PYTHON] Reading holdout data from: {args.holdout_file}")
+    print(f"[PYTHON] Writing to phenotype output folder: {args.pheno_path}")
+    print(f"[PYTHON] Phenotype: {args.pheno}")
+    print(f"[PYTHON] Environmental type: {args.env_type}")
+    
+        
+    #Check if participant_environment.csv exists
+    if not os.path.exists(args.env_data_file):
+        print(f"ERROR: participant_environment.csv not found at {args.env_data_file}")
+        print(f"Available files in {args.env_data_file}:")
+        try:
+            for f in os.listdir(args.env_data_file):
+                print(f"  - {f}")
+        except:
+            print("  (cannot list directory)")
+            sys.exit(1)
+#   pheno_path = "/Users/kerimulterer/prsInteractive/testResults/type2Diabetes"
+#   env_data_file = "/Users/kerimulterer/prsInteractive/testResults/participant_environment.csv"
+#   hla_data_file = "/Users/kerimulterer/prsInteractive/testResults/participant_hla.csv"
+#   training_file = "/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw"
+#   test_file = "/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombined.raw"
+#   holdout_file = "/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.raw"
+#   env_type = 'cardioMetabolic'
+        
+#       envDf = pd.read_csv(args.env_data_file)
+    envDf = pd.read_csv(args.env_data_file)
+    envDf.rename(columns={'Participant ID':'IID'},inplace=True)
+    envDf.set_index(['IID'],inplace=True)
+    
+    hlaDf = pd.read_csv(args.hla_data_file)
+    hlaDf.rename(columns={'Participant ID':'IID'},inplace=True)
+    hlaDf.set_index(['IID'],inplace=True)
+    
+    
+#       main(args.pheno_path,args.training_path,args.test_path,args.holdout_path,args.env_type,envDf)
+    main(args.pheno_path,args.training_file,args.test_file,args.holdout_file,args.env_type,envDf,hlaDf)
+        
+
     
     
 

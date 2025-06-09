@@ -12,7 +12,7 @@
 
 ################## USE DATA FROM UK BIOBANK ############
 # FILES THAT MUST BE PRESENT:
-#   $PHENO_PATH/pheno_config.sh
+#   $PHENO_PATH/pheno.config
 #   $PHENO_PATH/epiFiles/trainingCombinedEpi.epi.cc.summary
 #   $PHENO_PATH/trainingCombined.raw
 #   $PHENO_PATH/testCombined.raw
@@ -33,81 +33,58 @@ pheno=$1
 ##############  SET UP ENV VARIABLES FOR JOB #################
 
 # Source config with error handling
-if [ ! -f "../config.sh" ]; then
-    echo "ERROR: ../config.sh not found!"
+if [ ! -f "../env.config" ]; then
+    echo "ERROR: ../env.config not found!"
     echo "Current directory: $(pwd)"
-    echo "Looking for: $(realpath ../config.sh 2>/dev/null || echo '../config.sh')"
-    exit 1
-fi
-
-source ../config.sh
-
-
-PHENO_DIR="$RESULTS_DIR/$pheno"
-
-PHENO_CONFIG="$PHENO_DIR/pheno_config.sh"
-
-source "$PHENO_CONFIG"
-
-export PHENO_PATH="$PHENO_DIR"
-export PHENO="$pheno"
-
-echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
-
-
-###########  CREATE A PHENOTYPE FOLDER TO COLLECT RESULTS IF NOT PRESENT ############
-
-
-if [ ! -d "${PHENO_DIR}" ]; then
-    echo "Folder '${PHENO_DIR}' does not exist. The data cleaning and creation step must be complete with run_data_cleaning_workflow..."
-    echo "You must know the ICD10 code to filter, the phenotype substring to look for and phenotype string to create results folder (user defined).."
+    echo "Looking for: $(realpath ../env.config 2>/dev/null || echo '../env.config')"
     exit 1
     
 else
-    echo "Folder '${PHENO_DIR}' already exists."	
+    source ../env.config
 fi
 
-#filter the epi pairs in .summary file to remove redundanct pairs that are identical but reversed
+#RESULTS_DIR is sourced from env.config
+PHENO_DIR="$RESULTS_DIR/$pheno"
 
+source "$PHENO_DIR/pheno.config"
+
+#PHENO_PATH is sourced in pheno.config
 EPI_PATH="$PHENO_PATH/epiFiles"
-export EPI_PATH
+#check to see that epi analysis is done and results are present
+if [ ! -d "${EPI_PATH}" ]; then
+    echo "Folder '${EPI_PATH}' does not exist. Epistatic analysis needs be completed using the multiprocessing_fast_epistasis bash script..."
+    exit 1
+fi
 
-python "${SCRIPTS_DIR}/filter_redundant_epi_pairs.py"
+#sourced from pheno.config
+echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
 
-TIMEOUT=600
+#check to see if epiPairs have been filtered 
+if [[ "$EPI_FILE" == *"filtered"* ]]; then
+    echo "✓ epi pairs have been filtered for redundancy and file updated"
+else
+    #filter redundant epi pairs
+    python "${SCRIPTS_DIR}/filter_redundant_epi_pairs.py"
+    NEW_EPI_FILE="$PHENO_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary"
+    if [[ "$(uname)" == "Darwin" ]]; then
+        # macOS sed syntax (requires '' for in-place)
+        sed -i '' "s|^EPI_FILE=.*|EPI_FILE=${NEW_EPI_FILE}|" "$PHENO_DIR/pheno.config"
+    else
+        # Linux sed syntax
+        sed -i "s|^EPI_FILE=.*|EPI_FILE=${NEW_EPI_FILE}|" "$PHENO_DIR/pheno.config"
+    fi
+fi
+
+export EPI_FILE
+export PHENO
+#run the epi batch models on the hpc
+bash run_model_batches.sh $PHENO 'epi'
 
 conda deactivate
 
-TIMEOUT=15
-
-NEW_EPI_PATH="$PHENO_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary"
-export EPI_PATH=$NEW_EPI_PATH
-echo "Epi path is now set to ... $NEW_EPI_PATH"
-
-#check to see if EPI_PATH exists
-if grep -q "^EPI_PATH=" "$PHENO_CONFIG"; then
-    if [[ "$(uname)" == "Darwin" ]]; then
-        # macOS sed syntax (requires '' for in-place)
-        sed -i '' "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
-    else
-        # Linux sed syntax
-        sed -i "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
-    fi
-else
-    echo "EPI_PATH=${NEW_EPI_PATH}" >> "$PHENO_CONFIG"
-    echo "export EPI_PATH" >> "$PHENO_CONFIG"	
-fi
 
 
-#run the epi batch models on the hpc
-
-sbatch run_model_batches_submit.sh $PHENO 'epi'
-
-
-
-
-
-
+TIMEOUT = 600
 
 
 

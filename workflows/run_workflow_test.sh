@@ -1,6 +1,6 @@
 #!/bin/bash
 
-source ../config.sh  # because you're in prsInteractive/workflows
+source ../env.config  # because you're in prsInteractive/workflows
 
 ## Set base directories
 
@@ -73,7 +73,7 @@ python "$SCRIPTS_DIR/test/change_test_data_IID_to_number.py"
 export DATA_TYPE="main"
 bash run_model_batches_test.sh 
 
-PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
+PHENO_CONFIG="$PHENO_PATH/pheno.config"
 source $PHENO_CONFIG
 #
 EPI_PATH="$PHENO_PATH/epiFiles"
@@ -81,28 +81,28 @@ export EPI_PATH
 #
 python "${SCRIPTS_DIR}/filter_redundant_epi_pairs.py"
 #
-NEW_EPI_PATH="$PHENO_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary"
+NEW_EPI_FILE="$PHENO_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary"
 #
-echo "Epi path is now set to ... $NEW_EPI_PATH"
+echo "Epi file is now set to ... $NEW_EPI_FILE"
 #
 #check to see if EPI_PATH exists
-if grep -q "^EPI_PATH=" "$PHENO_CONFIG"; then
+if grep -q "^EPI_FILE=" "$PHENO_CONFIG"; then
     if [[ "$(uname)" == "Darwin" ]]; then
         # macOS sed syntax (requires '' for in-place)
-        sed -i '' "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
+        sed -i '' "s|^EPI_FILE=.*|EPI_FILE=${NEW_EPI_FILE}|" "$PHENO_CONFIG"
     else
         # Linux sed syntax
-        sed -i "s|^EPI_PATH=.*|EPI_PATH=${NEW_EPI_PATH}|" "$PHENO_CONFIG"
+        sed -i "s|^EPI_FILE=.*|EPI_FILE=${NEW_EPI_FILE}|" "$PHENO_CONFIG"
     fi
 else
-    echo "EPI_PATH=${NEW_EPI_PATH}" >> "$PHENO_CONFIG"
-    echo "export EPI_PATH" >> "$PHENO_CONFIG"	
+    echo "EPI_FILE=${NEW_EPI_PATH}" >> "$PHENO_CONFIG"
+    echo "export EPI_FILE" >> "$PHENO_CONFIG"	
 fi
 #
 #
 ##run the epi batch models on the hpc
 export DATA_TYPE="epi"
-#bash run_model_batches_test.sh
+bash run_model_batches_test.sh
 
 #add 4 lines of epi interactions with significance not present after feature ranking step
 python "$SCRIPTS_DIR/test/add_epi_importantFeatures_for_test.py"

@@ -39,40 +39,25 @@ env_type=$2
 ##############  SET UP ENV VARIABLES FOR JOB #################
 
 # Source config
-source ../config.sh  # because you're in prsInteractive/hpc
+source ../env.config  # because you're in prsInteractive/hpc
 
-PHENO_DIR="$RESULTS_DIR/$pheno"
 
-export PHENO_PATH="$PHENO_DIR"
+#export PHENO_PATH="$PHENO_DIR"
 export ENV_TYPE=$env_type
 
 
 echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
 
-PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
+PHENO_CONFIG="$RESULTS_DIR/$pheno/pheno.config.sh"
 
-if [ ! -f "${PHENO_CONFIG}" ]; then
-    echo "Folder '${PHENO_CONFIG}' does not exist. The data cleaning and creation step must be complete with run_data_cleaning_workflow..."
+if [ ! -f "${PHENO_CONFIG}"]; then
+    echo "Folder ${PHENO_CONFIG} does not exist. The envSetUp.sh step must be done and data cleaning and creation step completed with run_data_cleaning_workflow..."
     exit 1
     
 else
-    source "$PHENO_CONFIG"	
+    source "${PHENO_CONFIG}"	
 fi
 
-
-
-
-###########  CREATE A PHENOTYPE FOLDER TO COLLECT RESULTS IF NOT PRESENT ############
-
-
-if [ ! -d "${PHENO_DIR}" ]; then
-    echo "Folder '${PHENO_DIR}' does not exist. The data cleaning and creation step must be complete with run_data_cleaning_workflow..."
-    echo "You must know the ICD10 code to filter, the phenotype substring to look for and phenotype string to create results folder (user defined).."
-    exit 1
-    
-else
-    echo "Folder '${PHENO_DIR}' already exists."	
-fi
 
 #create the GxGxE training, test, and holdout datasets for modeling
 #the datasets are created using parameters trained with training set and used to transfrom test and holdout sets
@@ -83,9 +68,9 @@ export PHENO=$pheno
 
 echo "PHENOTYPE BEING ANALYZED ...: $PHENO"
 echo "[HPC WORKFLOW] SCRIPTS_PATH is set: $SCRIPTS_DIR"
-echo "[HPC WORKFLOW] TRAINING_PATH is set: $TRAINING_PATH"
-echo "[HPC WORKFLOW] TEST_PATH is set: $TEST_PATH"
-
+echo "[HPC WORKFLOW] TRAINING FILE is set: $TRAINING_PATH"
+echo "[HPC WORKFLOW] TEST FILE is set: $TEST_PATH"
+echo "[HPC WORKFLOW] HOLDOUT FILE is set: $HOLDOUT_PATH"
 
 python "${SCRIPTS_DIR}/gene_environment_feature_discovery.py"
 

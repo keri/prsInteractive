@@ -7,25 +7,35 @@
 #   participant data in csv format with 
 
 pheno=$1
-icd10=$2
-phenoStr=$3
-n=$4
+
 
 #pheno="myocardialInfarction"
-#icd10="I21"
-#phenoStr="myocardial infarction"
-#n=40
-
-source ../config.sh #because you're in workflows directory
 
 
-# Set base directories
-PHENO_DIR="$RESULTS_DIR/$pheno"
+##############  SET UP ENV VARIABLES FOR JOB #################
 
-export PHENO_PATH="$PHENO_DIR"
-export PHENO="$pheno"
-export PHENO_STR="$phenoStr"
-export ICD="$icd10"
+# Source config
+source ../env.config  # because you're in prsInteractive/hpc
+
+
+#check that a results folder for phenotype exists
+if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
+    echo "Folder '${RESULTS_PATH}/$pheno' does not exist..."
+    echo "run envSetUp.sh <pheno> <icd10> <phenoStr> <n cores to use in epistatic interaction analysis>"
+    exit 1
+    
+else
+    echo "sourcing $pheno env variables."
+    #source pheno specific environment variables
+    source "${RESULTS_PATH}/$PHENO/pheno.config"
+fi
+
+export PHENO_PATH
+export PHENO
+export PHENO_STR
+export ICD10
+export EPI_PATH
+export DATA_PATH
 
 
 echo "[WORKFLOW] DATA_PATH is set to: $DATA_PATH"
@@ -33,21 +43,9 @@ echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
 echo "[WORKFLOW] Scripts directory: $SCRIPTS_DIR"
 echo "PHENOTYPE BEING ANALYZED ...: $PHENO"
-echo "ICD 10 BEING ANALYZED ...: $ICD"
+echo "ICD 10 BEING ANALYZED ...: $ICD10"
 echo "PHENOTYPE STRING TO FILTER FOR IF ICD CODE NOT PRESENT ...: $PHENO_STR"
 
-
-
-#make a folder inside root data folder for each phenotype
-
-if [ ! -d "${PHENO_DIR}" ]; then
-    echo "Folder '${PHENO_DIR}' does not exist. Creating it..."
-    mkdir "${PHENO_DIR}" 
-
-    
-else
-    echo "Folder '${PHENO_DIR}' already exists."	
-fi
 
 
 #create phenotype data and train test split IDs

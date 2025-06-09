@@ -18,7 +18,7 @@ conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
 #export PATH="/nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env/bin:$PATH"
 
 # Source config
-#source ../config.sh  # because you're in prsInteractive/hpc
+#source ../env.config  # because you're in prsInteractive/hpc
 
 
 echo "[HPC WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"

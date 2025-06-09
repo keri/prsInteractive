@@ -2,6 +2,7 @@
 
 import pandas as pd
 import numpy as np
+from sklearn.preprocessing import StandardScaler
 
 def create_epi_df(epiDf,pairList):
     '''input : epiDf with snps as columns + PHENOTYPE
@@ -25,7 +26,7 @@ def get_epi_snps(epiFeatures):
     epiSnps = list(set(epiSnps))
     return(epiSnps)
 
-def scale_cardio_training_data(df):
+def scale_data(df):
     # Initialize the StandardScaler
     scaler = StandardScaler()
     
@@ -38,7 +39,7 @@ def scale_cardio_training_data(df):
     # Create a new DataFrame with the scaled data
     scaled_df = pd.DataFrame(scaled_data, columns=df.columns,index=df.index)
     
-    return(scaled_df,scaler)
+    return(scaled_df)
 
 
 

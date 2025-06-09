@@ -87,16 +87,16 @@ rm "${PHENO_PATH}/testCombinedRaw.raw"
 
 
 # Validate pheno_config file exists 
-if [ ! -f "$PHENO_PATH/pheno_config.sh" ]; then
-	echo "Creating pheno_config file '${PHENO_PATH}/pheno_config.sh' ... "
-	touch "$PHENO_PATH/pheno_config.sh"
+if [ ! -f "$PHENO_PATH/pheno.config" ]; then
+	echo "Creating pheno_config file '${PHENO_PATH}/pheno.config' ... "
+	touch "$PHENO_PATH/pheno.config"
 	
 else
-	echo "Pheno_config file '${PHENO_PATH}/pheno_config.sh' already exists ... "
+	echo "Pheno_config file '${PHENO_PATH}/pheno.config' already exists ... "
 fi
 
 
-PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
+PHENO_CONFIG="$PHENO_PATH/pheno.config.sh"
 
 TEST_PATH="${PHENO_PATH}/testCombined.raw"
 export TEST_PATH

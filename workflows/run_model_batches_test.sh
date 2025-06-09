@@ -21,19 +21,16 @@
 #   usage
 #fi
 
-#PHENO="$1"
+PHENO="$1"
 echo "PHENO is set to : $PHENO"
-#DATA_TYPE="$2"
+DATA_TYPE="$2"
 echo "DATA_TYPE is set to : $DATA_TYPE"
 
-PHENO_CONFIG="$PHENO_PATH/pheno_config.sh"
-
-
-
+PHENO_CONFIG="$PHENO_PATH/pheno.config"
 
 # Validate pheno_config file exists and source if it does
 if [ ! -f $PHENO_CONFIG ]; then
-    echo "$PHENO_CONFIG does not exist which means pheno_config.sh has not been produced ... "
+    echo "$PHENO_CONFIG does not exist which means pheno.config has not been produced ... "
     echo "You need to back and run run_data_cleaning_workflow_submit.sh "
     exit 1
 else 
@@ -67,10 +64,9 @@ if [ ! -d "$PHENO_PATH/figures" ]; then
 fi
 
 
-
 if [ "$DATA_TYPE" == "epi" ]; then
-    INPUT_FILE=$EPI_PATH
-    echo "in the run batch models: EPI_PATH is set to: $EPI_PATH"
+    INPUT_FILE=$EPI_FILE
+    echo "in the run batch models: EPI_PATH is set to: $EPI_FILE"
 else
     INPUT_FILE="$PHENO_PATH/merged_allChromosomes.snplist"
 fi
@@ -113,6 +109,11 @@ for JOB_ID in $(seq 1 1); do
     
     export START=$JOB_START_BATCH
     export END=$JOB_END_BATCH
+    export DATA_TYPE
+    export PHENO
+    export PHENO_PATH
+    export TRAINING_PATH
+    export TEST_PATH
 
 
     # Submit the SLURM job

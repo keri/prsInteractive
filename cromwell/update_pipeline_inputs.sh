@@ -43,7 +43,7 @@ echo "PLATFORM USED ON BACKEND ..: $PLATFORM"
 #check to see if PHENO_PATH is already present
 #create a phenotype env for later use
 # Create a .env file for future reference
-cat > "${PHENO_DIR}/pheno_config.sh" << EOF
+cat > "${PHENO_DIR}/pheno.config" << EOF
 #pheno environment variables
 PHENO="${pheno}"
 PHENO_PATH=$PHENO_DIR

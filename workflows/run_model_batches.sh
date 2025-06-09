@@ -4,23 +4,37 @@
 #
 # This script calculates the number of 3K-sized batches needed for processing
 # and submits jobs for all batches.
-if [ "$DATA_TYPE" == "main" ]; then
-    source ../config.sh
-fi
+PHENO=$1
+DATA_TYPE=$2
 
-#PHENO="$1"
 echo "PHENO is set to : $PHENO"
-#DATA_TYPE="$2"
 echo "DATA_TYPE is set to : $DATA_TYPE"
 
-PHENO_DIR="$RESULTS_DIR/$PHENO"
+# Source config with error handling
+if [ ! -f "../env.config" ]; then
+    echo "ERROR: ../env.config not found!"
+    echo "Current directory: $(pwd)"
+    echo "Looking for: $(realpath ../env.config 2>/dev/null || echo '../env.config')"
+    exit 1
+    
+else
+    source ../env.config
+fi
 
-# Set environment variable
-export DATA_PATH="$DATA_DIR"
-export PHENO_PATH="$PHENO_DIR"
-export RESULTS_PATH="$RESULTS_DIR"
+#check that a results folder for phenotype exists
+if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
+    echo "Folder '${RESULTS_PATH}/$pheno' does not exist..."
+    echo "run envSetUp.sh <pheno> <icd10> <phenoStr> <n cores to use in epistatic interaction analysis>"
+    exit 1
+    
+else
+    echo "sourcing $pheno env variables."
+    #source pheno specific environment variables
+    source "${RESULTS_PATH}/$PHENO/pheno.config"
+fi
 
-## Function to display usage information
+
+# Function to display usage information
 #usage() {
 #   echo "Usage: $0 [pheno] [data_type] "
 #   echo "  input_file  : File containing data to be processed in batches and epi or main for data_type"
@@ -35,31 +49,8 @@ export RESULTS_PATH="$RESULTS_DIR"
 #fi
 
 
+echo "Running batch models for $DATA_TYPE data... "	
 
-#PHENO="$1"
-echo "PHENO is set to : $PHENO"
-#DATA_TYPE="$2"
-echo "DATA_TYPE is set to : $DATA_TYPE"
-
-
-# Validate pheno_config file exists and source if it does
-if [ ! -f "$RESULTS_PATH/$PHENO/pheno_config.sh" ]; then
-    echo "'$RESULTS_PATH/$PHENO/pheno_config.sh' does not exist which means pheno_config.sh has not been created ... "
-    echo "You need to back and run run_data_cleaning_workflow_submit.sh "
-    exit 1
-else 
-    #exports PHENO_PATH, EPI_PATH, TRAINING_PATH, TEST_PATH
-    source "$RESULTS_PATH/$PHENO/pheno_config.sh"
-fi
-
-#check that pheno path exists
-if [ ! -d "$PHENO_PATH" ]; then
-    echo "'$PHENO_PATH' does not exist. You need to go back and create the data by running run_data_cleaning_workflow_submit.sh"
-    exit 1
-    
-else
-    echo "Running batch models for '${DATA_TYPE}' data... "	
-fi
 
 # Validate model folders exist in pheno folder
 if [ ! -d "$PHENO_PATH/scores" ]; then
@@ -78,10 +69,9 @@ if [ ! -d "$PHENO_PATH/figures" ]; then
 fi
 
 
-
 if [ "$DATA_TYPE" == "epi" ]; then
-    INPUT_FILE=$EPI_PATH
-    echo "epi path is set to : $EPI_PATH"
+    INPUT_FILE=$EPI_FILE
+    echo "epi file is set to : $EPI_FILE"
 else
     INPUT_FILE="$PHENO_PATH/merged_allChromosomes.snplist"
 fi
@@ -106,8 +96,9 @@ echo "Total number of 3K batches: $TOTAL_BATCHES"
 BATCHES_PER_JOB=5
 TOTAL_JOBS=$(( (TOTAL_BATCHES + BATCHES_PER_JOB - 1) / BATCHES_PER_JOB ))
 echo "Grouping into $TOTAL_JOBS jobs (5 batches per job)"
-    
-for JOB_ID in $(seq 1 2); do
+
+for JOB_ID in $(seq 3 $TOTAL_JOBS); do
+    #for JOB_ID in $(seq 1 2); do
     echo "job id : $JOB_ID"
     # Calculate batch range for this job
     JOB_START_BATCH=$(( (JOB_ID - 1) * BATCHES_PER_JOB + 1 ))
@@ -123,13 +114,15 @@ for JOB_ID in $(seq 1 2); do
     
     export START=$JOB_START_BATCH
     export END=$JOB_END_BATCH
-    export DATA_TYPE=$DATA_TYPE
-    export PHENO=$PHENO
-
+    export DATA_TYPE
+    export PHENO
+    export PHENO_PATH
+    export TRAINING_PATH
+    export TEST_PATH
+    
     # Submit the SLURM job
     #   --export=START_BATCH=$JOB_START_BATCH,END_BATCH=$JOB_END_BATCH,DATA_TYPE=$DATA_TYPE,PHENO=$PHENO \
-    python "${SCRIPTS_DIR}/sklearnSectionModelsScoreTrain.py"
+    sbatch sklearnSectionModelsScoreTrain_submit.sh
     
 done
-    
-echo "Batch job submission complete!"
+
