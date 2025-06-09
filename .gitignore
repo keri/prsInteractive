@@ -17,3 +17,4 @@ cromwell/
 cromwell-executions/
 cromwell-workflow-logs/
 logs/
+*.jar
