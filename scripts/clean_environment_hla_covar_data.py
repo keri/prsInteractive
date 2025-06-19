@@ -6,6 +6,7 @@
 import pandas as pd
 import os
 import argparse
+import sys
 
 
 def rename_covar_columns(covarFile):
@@ -21,8 +22,7 @@ def clean_environmental(data_path):
     #download and clean data
     df = pd.read_csv(f'{data_path}/participant_environment.csv')
     
-    
-    return(df_filtered)
+    return(df)
     
 def create_covar_data(data_path):
     df = pd.read_csv(f'{data_path}/participant.csv')
@@ -79,13 +79,36 @@ def main(data_path,results_path):
     
     #clean_environmental(data_path)
     hla_data = clean_hla(data_path)
-    hla_data.to_csv(f'{results_path}/participant_hla.csv',index=False)
+#   hla_data.to_csv(f'{results_path}/participant_hla.csv',index=False)
     
     covar_data = create_covar_data(data_path)
-    covar_data.to_csv(f'{results_path}/covar.txt', sep=' ', index=False)
+#   covar_data.to_csv(f'{results_path}/covar.txt', sep=' ', index=False)
     
     env_data = clean_environmental(data_path)
-    env_data.to_csv(f'{results_path}/participant_environment.csv', index=False)
+#   env_data.to_csv(f'{results_path}/participant_environment.csv', index=False)
+    
+    # Save files
+    try:
+      hla_data.to_csv(f'{results_path}/participant_hla.csv',index=False)
+      covar_data.to_csv(f'{results_path}/covar.txt', sep=' ', index=False)
+      env_data.to_csv(f'{results_path}/participant_environment.csv', index=False)
+            
+      print(f"\nSuccessfully saved files to {results_path}:")
+      for filename in ['participant_hla.csv', 'covar.txt', 'participant_environment.csv']:
+        filepath = os.path.join(results_path, filename)
+        if os.path.exists(filepath):
+          print(f"  ✅ {filename} ({os.path.getsize(filepath)} bytes)")
+        else:
+          print(f"  ❌ {filename} (not found)")
+          
+      return True
+  
+    except Exception as e:
+      print(f"ERROR saving files: {e}")
+      return False
+
+  
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="creating hla and covar data file...")
@@ -94,11 +117,12 @@ if __name__ == "__main__":
     parser.add_argument("--results_folder", help="Path to the results data folder")
 
     
-    
     args = parser.parse_args()
     
     # Prefer command-line input if provided; fallback to env var
     data_path = args.data_folder or os.environ.get("DATA_PATH")
+    results_path = args.data_folder or os.environ.get("RESULTS_PATH")
+  
 
     if not data_path:
         raise ValueError("You must provide a data path via --data_folder or set the DATA_PATH environment variable.")
@@ -106,7 +130,6 @@ if __name__ == "__main__":
     print(f"[PYTHON] Reading from: {data_path}")
     
     
-    results_path = args.data_folder or os.environ.get("RESULTS_PATH")
     
     if not results_path:
         raise ValueError("You must provide a results path via --results_path or set the RESULTS_PATH environment variable.")
@@ -114,4 +137,10 @@ if __name__ == "__main__":
     print(f"[PYTHON] Writing to: {results_path}")
 
             
-    main(data_path,results_path)
+    success = main(data_path,results_path)
+    if success:
+      print("\n✅ environmental,covar, and hla data processing completed successfully!")
+      sys.exit(0)
+    else:
+      print("\n❌ environmental,covar, and hla data processing failed!")
+      sys.exit(1)

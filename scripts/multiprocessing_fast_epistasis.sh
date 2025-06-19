@@ -63,7 +63,7 @@ else
 fi
 
 EPI_FILE="$PHENO_PATH/epiFiles/trainingCombinedEpi.epi.cc.summary"
-echo "Epi path is set to ... $EPI_FILE"
+echo "Epi file is set to ... $EPI_FILE"
 
 #check to see if EPI_PATH exists
 if grep -q "^EPI_FILE=" "$PHENO_CONFIG"; then

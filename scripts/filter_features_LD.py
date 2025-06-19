@@ -80,7 +80,7 @@ def filter_epi_features(epiFeatures,ld2):
 					
 			#get the tag pair with the highest coefficient
 			epiFeaturesTemp = epiFeatures[epiFeatures['feature'].isin(featureToFilter)]
-			epiFeaturesToPrune = epiFeaturesTemp.sort_values(['coefs'],ascending=False)['feature'].tolist()[1:]
+			epiFeaturesToPrune = epiFeaturesTemp.sort_values(['shap_zscore'],ascending=False)['feature'].tolist()[1:]
 			for f in epiFeaturesToPrune:
 				ldfeaturesToFilter.append(f)
 		else:
@@ -119,17 +119,14 @@ def main(phenoPath):
 #	filePath = f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet'
 	ld = pd.read_csv(f'{phenoPath}/finalModel.ld',sep='\s+')
 	ld2 = ld[ld['R2'] > .6]
-	features = pd.read_csv(f'{phenoPath}/scores/importantFeaturesPostRegression.csv')
+	features = pd.read_csv(f'{phenoPath}/scores/importantFeaturesPostShap.csv')
 	
 	#get the main and epi weigths separate as the separate epi+main model performed best
-	featuresMain = features[features['model'] == 'main'][['feature','coefs']]
-	featuresEpi = features[(features['model'] == 'epi') & (features['feature'].str.contains(','))][['feature','coefs']]
+	featuresMain = features[features['model'] == 'main'][['feature','shap_zscore']]
+	featuresEpi = features[(features['model'] == 'epi') & (features['feature'].str.contains(','))][['feature','shap_zscore']]
 #	featuresEpi = features2[['feature','lasso_coefs_grid_search']]
 	
-	#find pairs that are replicated due to being backwards (snp1 = snp2 and snp2 = snp1 in another pair)
-	featuresEpiReversedToPrune = find_matching_epi_features_but_backwards(featuresEpi)
-	
-	
+
 	#############################################################################################
 	#                              LD FEATURES TO PRUNE FOR MAIN SNPS                           #
 	#############################################################################################
@@ -149,19 +146,19 @@ def main(phenoPath):
 	featuresFinal = features[~features['feature'].isin(featuresToPrune)]
 	
 
-	featuresFinal.to_csv(f'{phenoPath}/scores/importantFeaturesPostRegression.csv')
+	featuresFinal.to_csv(f'{phenoPath}/scores/importantFeaturesForAssociationAnalysis.csv')
 	
 if __name__ == '__main__':
 	
 	parser = argparse.ArgumentParser(description="creating LD snp list ....")
-	parser.add_argument("--pheno_folder", help="Path to the input pheno folder")
+	parser.add_argument("--pheno_path", help="Path to the input pheno folder")
 	
 	
 	args = parser.parse_args()
 	
 	# Prefer command-line input if provided; fallback to env var
 #   pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
-	pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
+	pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
 	print(f"[PYTHON] Reading from: {pheno_path}")
 	
 	if not pheno_path:

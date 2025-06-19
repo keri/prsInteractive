@@ -14,16 +14,19 @@ def find_matching_epi_features_but_backwards(df):
         # locate pairs that are present in reverse
         if dfCopy[dfCopy['feature'] == new_pair].shape[0] > 0:
             dfCopy.loc[dfCopy['feature'] == pair,'duplicated'] = 1
+
+            
     filteredDf = dfCopy[dfCopy['duplicated'] == 0]
     filteredDf.drop(columns=['duplicated'],inplace=True)
     
     return(filteredDf)
 
-def main(epiPath):
+def main(epiFile):
 
-    input_file = f'{epiPath}/trainingCombinedEpi.epi.cc.summary'
-
-    output_file = f'{epiPath}/trainingCombinedEpi.filtered.epi.cc.summary'
+#   input_file = f'{epiPath}/trainingCombinedEpi.epi.cc.summary'
+    input_file = epiFile
+    
+    output_file = f'{epiFile}.filtered'
     
     # Create a set to track unique pairs
     seen_pairs = set()
@@ -57,20 +60,20 @@ def main(epiPath):
 if __name__ == '__main__':
     #
     parser = argparse.ArgumentParser(description="removing redundant epi pairs that are reversed...")
-    parser.add_argument("--epi_path", help="Path to the input epi folder")
+    parser.add_argument("--epi_file", help="Path to the input epi folder")
 
     
     args = parser.parse_args()
 
     # Prefer command-line input if provided; fallback to env var
-#   epi_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles'
-    epi_path = args.epi_path or os.environ.get("EPI_PATH")
-    print(f"[PYTHON] Reading from: {epi_path}")
+#   epi_file = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/epiFiles/trainingCombinedEpi.epi.cc.summary'
+    epi_file = args.epi_file or os.environ.get("EPI_FILE")
+    print(f"[PYTHON] Reading from: {epi_file}")
     
     
-    if not epi_path:
-        raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
+    if not epi_file:
+        raise ValueError("You must provide epi file path via --epi_file or set the EPI_FILE environment variable.")
 
         
-    main(epi_path)
+    main(epi_file)
     

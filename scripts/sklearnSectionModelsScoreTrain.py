@@ -28,7 +28,6 @@ from helper.calculate_shap_values import *
 from helper.data_wrangling import *
 
 
-
 def convert_log_prob_to_odds(df):
     '''input df columns = ['feature', 'model', 'log_prob_no_pheno', 'log_prob_yes_pheno',
        'risk_ratio_no_pheno', 'risk_ratio_yes_pheno', 'lasso_coef',
@@ -101,7 +100,6 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
     st = time.time()
 
     #get the feature names for model
-
     Ximp = imp_mean.transform(X)
 
     #########################
@@ -172,10 +170,14 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
     
     if rank_features or auc > .51:
         topFeatures,featuresZscores = calculate_plot_shap_values(clfHGB,X,y,i,figPath,data_type)
+        #get the featureZscores into a dataframe to merge with dfSnps2
+        zscores = pd.DataFrame(data=featuresZscores).reset_index()
+        zscores.columns=['feature','shap_zscore']
     
     else:
         topFeatures = pd.DataFrame()
-    return(dfSnps2,topFeatures)
+        zscores = pd.DataFrame()
+    return(dfSnps2,topFeatures,zscores)
 
 
 
@@ -241,7 +243,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
         if not os.path.exists(featureScoresFile):
             #save empty dataframe on first run
-            allModelFeatures = pd.DataFrame(columns=['log_prob_no_pheno','log_prob_yes_pheno','odds_no_pheno','odds_yes_pheno','model#','feature', 'model'])
+            allModelFeatures = pd.DataFrame(columns=['log_prob_no_pheno','log_prob_yes_pheno','odds_no_pheno','odds_yes_pheno','model#','feature', 'model','shap_zscore'])
             
             print(f'creating features scores file : {featureScoresFile} ...')
             
@@ -300,10 +302,15 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
             print('Test array shape = ',Xtest.shape)
 
-            allModelFeatures,topFeatures = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,)
+            allModelFeatures,topFeatures,zscores = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,)
             allModelFeatures['model#'] = i
             allModelFeatures['feature'] = sectionPairs
             allModelFeatures['model'] = data_type
+            
+            if zscores.empty:
+                allModelFeatures['shap_zscore'] = np.nan
+            else:
+                allModelFeatures = allModelFeatures.merge(zscores,on='feature',how='left')
             
             if topFeatures.empty:
                 pass
@@ -336,43 +343,48 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     
+    #########   FOR DEBUGGING ######
+#   data_type = 'epi'
+#   pheno = 'type2Diabetes_test'
+#   pheno_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}'
+#   training_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
+#   test_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
+#   epi_file = f'/Users/kerimulterer/prsInteractive/results/{pheno}/epiFiles/trainingCombinedEpi.epi.cc.summary.filtered'
+#   start = 1
+#   end = 1
+    
+    
+    
     # Prefer command-line input if provided; fallback to env var
-#   pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
     pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
     print(f"[PYTHON] Reading from: {pheno_path}")
     
-#   pheno = 'type2Diabetes'
     pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
-    
-#   data_type = 'main'
+
+
     data_type = args.data_type or os.environ.get("DATA_TYPE")
     print(f"data type : {data_type}")
     
-#   training_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw'
     training_path = args.training_file or os.environ.get("TRAINING_PATH")
     print(f"training file : {training_path}")
     
-#   test_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombined.raw'
     test_path = args.test_file or os.environ.get("TEST_PATH")
     print(f"test file : {test_path}")
     
     
     
     if data_type == 'epi':
-        epi_path = args.epi_file or os.environ.get("EPI_PATH")
-#       epi_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary'
-        if not epi_path:
-            raise ValueError("You must provide a data type code via --epi_path or set the EPI_PATH environment variable.")
-        print(f"epi path : {epi_path}")
+        epi_file = args.epi_file or os.environ.get("EPI_FILE")
+        if not epi_file:
+            raise ValueError("You must provide a data type code via --epi_file or set the EPI_FILE environment variable.")
+        print(f"epi file : {epi_file}")
     else:
-        epi_path = 'None'
-    
-#   start = 1
+        epi_file = 'None'
+        
     start = args.start or os.environ.get("START")
     print(f"start : {start}")
     
-#   end = 1
     end = args.end or os.environ.get("END")
     print(f"end : {end}")
     
@@ -411,5 +423,5 @@ if __name__ == '__main__':
     os.makedirs(dir_path, exist_ok=True)
 
         
-    main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end)
+    main(pheno,pheno_path,training_path,test_path,epi_file,data_type,start,end)
     

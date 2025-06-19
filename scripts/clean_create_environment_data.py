@@ -4,6 +4,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler
 import os
 import argparse
+import sys
 
 from helper.download import get_dataset, get_epi_columns, get_columns
 from helper.data_wrangling import *
@@ -157,56 +158,89 @@ if __name__ == '__main__':
     parser.add_argument("--training_file", help="data file of training data")
     parser.add_argument("--test_file", help="data file of test data")
     parser.add_argument("--holdout_file", help="data file of holdout data")
-    parser.add_argument("--env_type", help="env data type analyzed")
     parser.add_argument("--pheno_path", help="Results Path to write to")
-    parser.add_argument("--env_data_file",help="Environmental data for participants")
-    parser.add_argument("--hladata_file",help="HLA data for participants")
-    parser.add_argument("--env_epi_features",help="Genetic environmental epistatic features")
+    parser.add_argument("--env_type", help="env data type analyzed")
+    parser.add_argument("--env_file",help="Environmental data for participants")
+    parser.add_argument("--hla_file",help="HLA data for participants")
+    parser.add_argument("--gene_env_file",help="Genetic environmental epistatic features")
     
     
     
     args = parser.parse_args()
     
-    print(f"[PYTHON] Reading environmental data from: {args.env_data_file}")
-    print(f"[PYTHON] Reading HLA data from: {args.hla_data_file}")
-    print(f"[PYTHON] Reading training data from: {args.training_file}")
-    print(f"[PYTHON] Reading test data from: {args.test_file}")
-    print(f"[PYTHON] Reading holdout data from: {args.holdout_file}")
-    print(f"[PYTHON] Writing to phenotype output folder: {args.pheno_path}")
-    print(f"[PYTHON] Phenotype: {args.pheno}")
-    print(f"[PYTHON] Environmental type: {args.env_type}")
+    # Prefer command-line input if provided; fallback to env var
+    training_file = args.training_file or os.environ.get("TRAINING_PATH")
+    print(f"training file : {training_file}")
+    
+    test_file = args.test_file or os.environ.get("TEST_PATH")
+    print(f"test file : {test_file}")
+    
+    holdout_file = args.holdout_file or os.environ.get("HOLDOUT_PATH")
+    print(f"holdout file : {holdout_file}")
+    
+    pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
+    print(f"[PYTHON] Reading from: {pheno_path}")
+    
+    env_type = args.env_type or os.environ.get("ENV_TYPE")
+    print(f"[PYTHON] Environmental type : {env_type}")
+    
+    env_file = args.env_file or os.environ.get("ENV_FILE")
+    print(f"reading from participant environment file : {env_file}")
+    
+    hla_file = args.hla_file or os.environ.get("HLA_FILE")
+    print(f"reading from participant hla file : {hla_file}")
+    
+    gene_env_file = args.gene_env_file or os.environ.get("GENE_ENV_FILE")
+    print(f"reading from gene environment epi features file : {gene_env_file}")
+    
+    
+    
+    print(f"[PYTHON] Reading training data from: {training_file}")
+    print(f"[PYTHON] Reading test data from: {test_file}")
+    print(f"[PYTHON] Reading holdout data from: {holdout_file}")
+    print(f"[PYTHON] Writing to phenotype output folder: {pheno_path}")
+    print(f"Environmental type : {env_type}")
+    print(f"[PYTHON] Reading environmental data from: {env_file}")
+    print(f"[PYTHON] Reading HLA data from: {hla_file}")
+    print(f"[PYTHON] Reading gene environmental feature data from: {gene_env_file}")
+    
+
+
+    print(f"[PYTHON] Environmental type: {env_type}")
     
         
     #Check if participant_environment.csv exists
-    if not os.path.exists(args.env_data_file):
-        print(f"ERROR: participant_environment.csv not found at {args.env_data_file}")
-        print(f"Available files in {args.env_data_file}:")
+    if not os.path.exists(env_file):
+        print(f"ERROR: participant_environment.csv not found at {env_file}")
+        print(f"Available files in {env_file}:")
         try:
-            for f in os.listdir(args.env_data_file):
+            for f in os.listdir(env_file):
                 print(f"  - {f}")
         except:
             print("  (cannot list directory)")
             sys.exit(1)
-#   pheno_path = "/Users/kerimulterer/prsInteractive/testResults/type2Diabetes"
-#   env_data_file = "/Users/kerimulterer/prsInteractive/testResults/participant_environment.csv"
-#   hla_data_file = "/Users/kerimulterer/prsInteractive/testResults/participant_hla.csv"
-#   training_file = "/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw"
-#   test_file = "/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/testCombined.raw"
-#   holdout_file = "/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/holdoutCombined.raw"
-#   env_type = 'cardioMetabolic'
+
         
-#       envDf = pd.read_csv(args.env_data_file)
-    envDf = pd.read_csv(args.env_data_file)
+    ###########  TEST VARIABLES ##########
+    pheno_path = "/Users/kerimulterer/prsInteractive/results/type2Diabetes"
+    env_data_file = "/Users/kerimulterer/prsInteractive/results/participant_environment.csv"
+    hla_data_file = "/Users/kerimulterer/prsInteractive/results/participant_hla.csv"
+    training_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw"
+    test_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined.raw"
+    holdout_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes/holdoutCombined.raw"
+    env_type = 'cardioMetabolic'
+    
+    envDf = pd.read_csv(env_data_file)
     envDf.rename(columns={'Participant ID':'IID'},inplace=True)
     envDf.set_index(['IID'],inplace=True)
     
-    hlaDf = pd.read_csv(args.hla_data_file)
+    hlaDf = pd.read_csv(hla_data_file)
     hlaDf.rename(columns={'Participant ID':'IID'},inplace=True)
     hlaDf.set_index(['IID'],inplace=True)
     
     
-#       main(args.pheno_path,args.training_path,args.test_path,args.holdout_path,args.env_type,envDf)
-    main(args.pheno_path,args.training_file,args.test_file,args.holdout_file,args.env_type,envDf,hlaDf)
+    main(pheno_path,training_file,test_file,holdout_file,env_type,envDf,hlaDf)
+#   main(args.pheno_path,args.training_file,args.test_file,args.holdout_file,args.env_type,envDf,hlaDf)
         
 
     

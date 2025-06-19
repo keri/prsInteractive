@@ -96,7 +96,7 @@ else
 fi
 
 
-PHENO_CONFIG="$PHENO_PATH/pheno.config.sh"
+PHENO_CONFIG="$PHENO_PATH/pheno.config"
 
 TEST_PATH="${PHENO_PATH}/testCombined.raw"
 export TEST_PATH
@@ -127,7 +127,7 @@ if grep -q "^TRAINING_PATH=" "$PHENO_CONFIG"; then
 		sed -i "s|^TRAINING_PATH=.*|TRAINING_PATH=${TRAINING_PATH}|" "$PHENO_CONFIG"
 	fi
 else
-	echo "TRAINING_PATH=${TEST_PATH}" >> "$PHENO_CONFIG"
+	echo "TRAINING_PATH=${TRAINING_PATH}" >> "$PHENO_CONFIG"
 	echo "export TRAINING_PATH" >> "$PHENO_CONFIG"
 fi
 

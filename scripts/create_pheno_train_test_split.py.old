@@ -170,4 +170,4 @@ if __name__ == "__main__":
     df = pd.read_csv(f'{data_path}/participant.csv')
     df2 = df.fillna('')
     
-    main(df2, pheno, pheno_path, icd_code=icd,pheno_str=pheno_str)
+    main(df2, pheno, pheno_path, icd_code=icd10,pheno_str=pheno_str)

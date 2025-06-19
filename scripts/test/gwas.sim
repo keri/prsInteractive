@@ -1,0 +1,8 @@
+# Simple PLINK simulation ensuring all MAF > 0.01
+# Format: n_snps label maf_min maf_max liability_threshold1 liability_threshold2 penetrance1 penetrance2
+
+# Null variants (no disease effect)
+300 null_variants 0.02 0.45 0.00 0.20 1.00 1.00
+
+# Disease variants with multiplicative effects
+100 disease_variants 0.01 0.30 0.01 1.00 2.00 mult

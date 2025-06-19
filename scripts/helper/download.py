@@ -47,7 +47,8 @@ def get_dataset(df_pathway,columns_to_get):
     print('withdrawals are in path : ',machinePath)
     
     with open(df_pathway,'r') as reader:
-        df = pd.read_csv(df_pathway, delimiter=" ",usecols=columns_to_get)#max_rows=100
+        df = pd.read_csv(df_pathway, delimiter='\s+',usecols=columns_to_get)#max_rows=100
+        #df = pd.read_csv(df_pathway, delimiter='\s+',usecols=columns_to_get, nrows=100)
     en = time.time()
         
         

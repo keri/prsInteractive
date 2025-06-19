@@ -186,32 +186,48 @@ def main(df2, pheno, pheno_path, icd_code="E11", pheno_str="type 2 diabetes"):
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Creating phenotype file and train/test/holdout splits")
-    parser.add_argument("--data_path", required=True, help="Path to the prsInteractive data folder")
-    parser.add_argument("--pheno_path", required=True, help="Path to the output phenotype results folder")
-    parser.add_argument("--pheno", required=True, help="Phenotype to analyze")
-    parser.add_argument("--pheno_str", required=True, help="Phenotype string used in Non-cancer illness code, self-reported field")
-    parser.add_argument("--icd10", required=True, help="ICD 10 code of phenotype")
+    parser.add_argument("--data_path", required=False, help="Path to the prsInteractive data folder")
+    parser.add_argument("--pheno_path", required=False, help="Path to the output phenotype results folder")
+    parser.add_argument("--pheno", required=False, help="Phenotype to analyze")
+    parser.add_argument("--pheno_str", required=False, help="Phenotype string used in Non-cancer illness code, self-reported field")
+    parser.add_argument("--icd10", required=False, help="ICD 10 code of phenotype")
     
     args = parser.parse_args()
     
-    print(f"[PYTHON] Reading from: {args.data_path}")
-    print(f"[PYTHON] Output to: {args.pheno_path}")
-    print(f"[PYTHON] Phenotype: {args.pheno}")
-    print(f"[PYTHON] ICD code: {args.icd10}")
-    print(f"[PYTHON] Phenotype string: {args.pheno_str}")
+    # Prefer command-line input if provided; fallback to env var
+    data_path = args.data_path or os.environ.get("DATA_PATH")
+    print(f"[PYTHON] Reading from: {data_path}")
+    
+    pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
+    print(f"[PYTHON] Reading from: {pheno_path}")
+    
+    pheno = args.pheno or os.environ.get("PHENO")
+    print(f"[PYTHON] Phenotype : {pheno}")
+    
+    icd10 = args.icd10 or os.environ.get("ICD10")
+    print(f"[PYTHON] icd code : {icd10}")
+    
+    pheno_str = args.pheno_str or os.environ.get("PHENO_STR")
+    print(f"[PYTHON] Phenotype string to filter for : {pheno_str}")
+    
+    print(f"[PYTHON] Reading from: {data_path}")
+    print(f"[PYTHON] Output to: {pheno_path}")
+    print(f"[PYTHON] Phenotype: {pheno}")
+    print(f"[PYTHON] ICD code: {icd10}")
+    print(f"[PYTHON] Phenotype string: {pheno_str}")
     
     # Check if data path exists
-    if not os.path.exists(args.data_path):
-        print(f"ERROR: Data path {args.data_path} does not exist!")
+    if not os.path.exists(data_path):
+        print(f"ERROR: Data path {data_path} does not exist!")
         sys.exit(1)
     
     # Check if participant.csv exists
-    participant_file = os.path.join(args.data_path, 'participant.csv')
+    participant_file = os.path.join(data_path, 'participant.csv')
     if not os.path.exists(participant_file):
         print(f"ERROR: participant.csv not found at {participant_file}")
-        print(f"Available files in {args.data_path}:")
+        print(f"Available files in {data_path}:")
         try:
-            for f in os.listdir(args.data_path):
+            for f in os.listdir(data_path):
                 print(f"  - {f}")
         except:
             print("  (cannot list directory)")
@@ -228,7 +244,7 @@ if __name__ == "__main__":
         df2 = df.fillna('')
         
         # Run main processing
-        success = main(df2, args.pheno, args.pheno_path, icd_code=args.icd10, pheno_str=args.pheno_str)
+        success = main(df2, pheno, pheno_path, icd_code=icd10, pheno_str=pheno_str)
         
         if success:
             print("\n✅ Phenotype processing completed successfully!")

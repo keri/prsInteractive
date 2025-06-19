@@ -62,13 +62,9 @@ indices_to_change = np.random.choice(covar.index, size=n // 2, replace=False)
 # Set those rows' values to 1
 covar.loc[indices_to_change, 'SEX'] = 1
 
-########################### PHENOTYPE DATA ##########################
+########################### PHENOTYPE DATA FOR THE EHF FILE ##########################
 
 phenoDf = covar[['IID','FID','PHENOTYPE']]
-
-phenoDf.to_csv(f"{pheno_path}/pheno.txt",sep=' ',index=False, header=None)
-
-
 
 ###########################  CREATE COVARIATE DATA ###############
 
@@ -77,9 +73,9 @@ covar = covar[['IID','FID','SEX']]
 for i in range(1,11):
     covar[f'PC{i}'] = np.random.uniform(-10, 10, len(covar)).tolist()
     
-covar['age'] = np.random.randint(45, 65, len(covar))
+    covar['age'] = np.random.randint(45, 65, len(covar))
 
-covar.to_csv(f"{results_path}/covar.txt",sep=' ',index=False)
+
 
 ##################  create clinical marker data  ##############
 
@@ -112,11 +108,11 @@ hlaData = environmentalData[['Participant ID']]
 for i in range(1,5):
     hlaData[f'hla{i}'] = np.random.uniform(0, 2, len(hlaData)).tolist()
     
-hlaData.to_csv(f"{data_path}/hla_participant.csv",index=False)
+
 
 hlaDataHeader = hlaData[hlaData.columns[1:].tolist()]
 print('hlaData data columns = ',hlaDataHeader.head(1))
-hlaDataHeader.head(0).to_csv(f"{data_path}/ukb_hla_v2.txt", sep="\t", index=False)
+
 
 
 
@@ -192,4 +188,43 @@ participants.loc[selected_rows, columns_to_check] = ''
 # Assign value based on the mask
 participants.loc[selected_rows, 'Date E11 first reported (non-insulin-dependent diabetes mellitus)'] = 'not empty'
 
-participants.to_csv(f"{data_path}/participant.csv",index=False)
+withdrawals = covar.sample(n=3)[['IID','FID']]
+
+
+#change Participant ID to int which will be done for the remaining data as well
+withdrawals['IID'] = withdrawals['IID'].apply( lambda x : int(x.replace('per','')))
+
+
+# Save files
+try:
+    participants.to_csv(f"{data_path}/participant.csv",index=False)
+    hlaData.to_csv(f"{data_path}/hla_participant.csv",index=False)
+    hlaDataHeader.head(0).to_csv(f"{data_path}/ukb_hla_v2.txt", sep="\t", index=False)
+#   phenoDf.to_csv(f"{pheno_path}/pheno.txt",sep=' ',index=False, header=None)
+    covar.to_csv(f"{data_path}/covar.txt",sep=' ',index=False, header=None)
+    
+    #the download data function need IID in format int N
+    withdrawals[['IIDN']].to_csv(f"{data_path}/withdrawals.csv",index=False,header=None)
+    #the cleaning process needs IID in format of perN
+    withdrawals[['IID','FID']].to_csv(f"{data_path}/withdrawalsID.txt",sep=' ',index=False,header=None)
+    
+    
+    print(f"\nSuccessfully saved files to {data_path}:")
+    for filename in ['participant.csv','hla_participant.csv','ukb_hla_v2.txt','withdrawals.csv',"withdrawalsID.txt",'covar.txt']:
+        filepath = os.path.join(data_path, filename)
+        if os.path.exists(filepath):
+            print(f"  ✅ {filename} ({os.path.getsize(filepath)} bytes)")
+        else:
+            print(f"  ❌ {filename} (not found)")
+    
+#   print(f"\nSuccessfully saved files to {pheno_path}:")
+#   for filename in ['pheno.txt','covar.txt']:
+#       filepath = os.path.join(data_path, filename)
+#       if os.path.exists(filepath):
+#           print(f"  ✅ {filename} ({os.path.getsize(filepath)} bytes)")
+#       else:
+#           print(f"  ❌ {filename} (not found)")
+
+except Exception as e:
+    print(f"ERROR saving files: {e}")
+    
