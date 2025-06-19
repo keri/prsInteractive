@@ -18,3 +18,4 @@ cromwell-executions/
 cromwell-workflow-logs/
 logs/
 *.jar
+testData/
