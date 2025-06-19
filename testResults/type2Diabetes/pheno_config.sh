@@ -1,8 +1,0 @@
-TEST_PATH=/prsInteractive/testResults/type2Diabetes/testCombined.raw
-export TEST_PATH
-TRAINING_PATH=/prsInteractive/testResults/type2Diabetes/trainingCombined.raw
-export TRAINING_PATH
-HOLDOUT_PATH=/prsInteractive/testResults/type2Diabetes/holdoutCombined.raw
-export HOLDOUT_PATH
-EPI_PATH=/prsInteractive/testResults/type2Diabetes/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary
-export EPI_PATH
