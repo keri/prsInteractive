@@ -1,78 +1,121 @@
 #!/bin/bash
 
 #
-#SBATCH --job-name=prs_score_development
+#SBATCH --job-name=gene_env_discovery
 #SBATCH -o /nfs/scratch/projects/ukbiobank/err_out/%A_gene_env_discovery.out
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_gene_env_discovery.err
-#SBATCH --partition=quicktest
-#SBATCH --cpus-per-task=2
-#SBATCH --mem=20G
-#SBATCH --time=00:10:00
+#SBATCH --partition=bigmem
+#SBATCH --cpus-per-task=50
+#SBATCH --mem=900G
+#SBATCH --time=48:00:00
+#SBATCH --mail-type=BEGIN,END,FAIL
+#SBATCH --mail-user=ashleyroconnor@gmail.com
 #
 
 ################## USE DATA FROM UK BIOBANK ############
 # FILES THAT MUST BE PRESENT:
-#   $PHENO_PATH/scores/featureWeights.csv
 #   $PHENO_PATH/scores/importantFeaturesPostShap.csv
 #   $RESULTS_PATH/covar.txt
-#   $PHENO_PATH/scores/importantFeaturesPostShap.csv
-
-
-
-
-#pheno="myocardialInfarction"
-#icd10="I21"
-#phenoStr="myocardial infarction"
+#   $RESULTS_PATH/testCombined.raw
+#   $RESULTS_PATH/trainingCombined.raw
+#   $RESULTS_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary
+#   /env.config
+#   $PHENO_PATH/pheno.config
 
 
 
 module load Miniconda3/4.9.2
 source $(conda info --base)/etc/profile.d/conda.sh 
 conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
-#export PATH="/nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env/bin:$PATH"
-
-module load plink/1.90
 
 pheno=$1
 env_type=$2
 
+echo "[DEBUG] Starting script with pheno=$pheno, env_type=$env_type"
+
 ##############  SET UP ENV VARIABLES FOR JOB #################
 
 # Source config
-source ../env.config  # because you're in prsInteractive/hpc
+echo "[DEBUG] Sourcing ../env.config"
+source ../env.config
 
 
-#export PHENO_PATH="$PHENO_DIR"
-export ENV_TYPE=$env_type
 
-
-echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
-
-PHENO_CONFIG="$RESULTS_DIR/$pheno/pheno.config.sh"
-
-if [ ! -f "${PHENO_CONFIG}"]; then
-    echo "Folder ${PHENO_CONFIG} does not exist. The envSetUp.sh step must be done and data cleaning and creation step completed with run_data_cleaning_workflow..."
+# Check if RESULTS_PATH was set from env.config
+if [ -z "$RESULTS_PATH" ]; then
+    echo "ERROR: RESULTS_PATH not set from env.config"
     exit 1
-    
-else
-    source "${PHENO_CONFIG}"	
 fi
 
+echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 
-#create the GxGxE training, test, and holdout datasets for modeling
-#the datasets are created using parameters trained with training set and used to transfrom test and holdout sets
-#these are: feature means for E features and imputation before GxE combined, and scaler after GxE combined.
-export PHENO_PATH=$PHENO_PATH
+# FIXED: Use RESULTS_PATH consistently
+PHENO_CONFIG="$RESULTS_PATH/$pheno/pheno.config"
+echo "[DEBUG] Looking for pheno config at: $PHENO_CONFIG"
+
+if [ ! -f "${PHENO_CONFIG}" ]; then
+    echo "ERROR: File ${PHENO_CONFIG} does not exist. The envSetUp.sh step must be done and data cleaning and creation step completed with run_data_cleaning_workflow..."
+    exit 1
+else
+    echo "[DEBUG] Sourcing pheno config: $PHENO_CONFIG"
+    source "${PHENO_CONFIG}"    
+fi
+
+# Set phenotype-specific paths
+
+export ENV_TYPE=$env_type
+echo "[WORKFLOW] ENV_TYPE is set to: $ENV_TYPE"
+export PHENO_PATH="$RESULTS_PATH/$pheno"
 export PHENO=$pheno
+export TRAINING_PATH=$TRAINING_PATH
+export TEST_PATH=$TEST_PATH
+export RESULTS_PATH=$RESULTS_PATH
 
 
-echo "PHENOTYPE BEING ANALYZED ...: $PHENO"
-echo "[HPC WORKFLOW] SCRIPTS_PATH is set: $SCRIPTS_DIR"
-echo "[HPC WORKFLOW] TRAINING FILE is set: $TRAINING_PATH"
-echo "[HPC WORKFLOW] TEST FILE is set: $TEST_PATH"
-echo "[HPC WORKFLOW] HOLDOUT FILE is set: $HOLDOUT_PATH"
+echo "[DEBUG] ===== ENVIRONMENT VARIABLES ====="
+echo "PHENOTYPE BEING ANALYZED: $PHENO"
+echo "PHENO_PATH: $PHENO_PATH"
+echo "SCRIPTS_DIR: $SCRIPTS_DIR"
+echo "TRAINING_PATH: $TRAINING_PATH"
+echo "TEST_PATH: $TEST_PATH"
+echo "HOLDOUT_PATH: $HOLDOUT_PATH"
+echo "RESULTS_PATH: $RESULTS_PATH"
+echo "ENV_TYPE: $ENV_TYPE"
+echo "====================================="
 
+# Check if required files exist before running Python
+echo "[DEBUG] Checking required files..."
+
+required_files=(
+    "$TRAINING_PATH"
+    "$TEST_PATH"
+    "$PHENO_PATH/scores/importantFeaturesPostShap.csv"
+    "${SCRIPTS_DIR}/gene_environment_feature_discovery.py"
+)
+
+for file in "${required_files[@]}"; do
+    if [ ! -f "$file" ]; then
+        echo "ERROR: Required file does not exist: $file"
+        exit 1
+    else
+        echo "[DEBUG] Found: $file"
+    fi
+done
+
+echo "[DEBUG] All required files found. Starting Python script..."
+
+# Run the Python script
 python "${SCRIPTS_DIR}/gene_environment_feature_discovery.py"
+
+exit_code=$?
+echo "[DEBUG] Python script exited with code: $exit_code"
+
+if [ $exit_code -ne 0 ]; then
+    echo "ERROR: Python script failed with exit code $exit_code"
+    exit $exit_code
+fi
+
+echo "[DEBUG] Script completed successfully"
 
 
 
