@@ -30,35 +30,6 @@ DATA_TYPE=$2
 echo "PHENO is set to : $PHENO"
 echo "DATA_TYPE is set to : $DATA_TYPE"
 
-update_config_file() {
-    local config_file="$1"
-    local new_epi_file="$2"
-    
-    echo "Updating config file: $config_file"
-    echo "New EPI_FILE value: $new_epi_file"
-    
-    # Create backup
-    cp "$config_file" "${config_file}.backup"
-    
-    if [[ "$(uname)" == "Darwin" ]]; then
-        # macOS version
-        sed -i '' "s|^EPI_FILE=.*|EPI_FILE=${new_epi_file}|" "$config_file"
-    else
-        # Linux version  
-        sed -i "s|^EPI_FILE=.*|EPI_FILE=${new_epi_file}|" "$config_file"
-    fi
-    
-    # Verify the change
-    if grep -q "^EPI_FILE=${new_epi_file}$" "$config_file"; then
-        echo "✓ Successfully updated EPI_FILE in config"
-        rm "${config_file}.backup"  # Remove backup if successful
-        return 0
-    else
-        echo "❌ Failed to update config file"
-        mv "${config_file}.backup" "$config_file"  # Restore backup
-        return 1
-    fi
-}
 
 # Source config with error handling
 if [ ! -f "../env.config" ]; then
@@ -127,14 +98,29 @@ if [ "$DATA_TYPE" == "epi" ]; then
         
         # Update config file
         CONFIG_FILE="${PHENO_PATH}/pheno.config"
-        if update_config_file "$CONFIG_FILE" "$NEW_EPI_FILE"; then
-            # Update session variables
-            export EPI_FILE="$NEW_EPI_FILE"
-            INPUT_FILE="$NEW_EPI_FILE"
-            echo "✓ EPI file processing completed successfully"
+        echo "Updating config file: $config_file"
+        echo "New EPI_FILE value: $new_epi_file"
+        
+        # Create backup
+        cp "$config_file" "${config_file}.backup"
+        
+        if [[ "$(uname)" == "Darwin" ]]; then
+            # macOS version
+            sed -i '' "s|^EPI_FILE=.*|EPI_FILE=${new_epi_file}|" "$config_file"
         else
-            echo "⚠ Config update failed, but continuing with filtered file"
-            INPUT_FILE="$NEW_EPI_FILE"
+            # Linux version  
+            sed -i "s|^EPI_FILE=.*|EPI_FILE=${new_epi_file}|" "$config_file"
+        fi
+        
+        # Verify the change
+        if grep -q "^EPI_FILE=${new_epi_file}$" "$config_file"; then
+            echo "✓ Successfully updated EPI_FILE in config"
+            rm "${config_file}.backup"  # Remove backup if successful
+
+        else
+            echo "❌ Failed to update config file"
+            mv "${config_file}.backup" "$config_file"  # Restore backup
+
         fi
         
     fi

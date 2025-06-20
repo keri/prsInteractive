@@ -1,21 +1,30 @@
 #!/bin/bash
 
+platform=${5:-"local"}  # default to local
+pheno=$1
+icd10=$2
+phenoStr=$3
+n=$4 
+
+
+#setup environment variables
+bash ../envSetUp.sh $pheno $icd10 "${phenoStr}" $n
+
 source ../env.config  # because you're in prsInteractive/workflows
 
 ## Set base directories
 
 DATA_DIR="$PROJECT_ROOT/testData"
-RESULTS_DIR="$PROJECT_ROOT/testResults"
-PHENO_DIR="$RESULTS_DIR/type2Diabetes"
+
 
 # Set environment variable
 export DATA_PATH="$DATA_DIR"
 export PHENO_PATH="$PHENO_DIR"
 export RESULTS_PATH="$RESULTS_DIR"
-export PHENO="type2Diabetes"
+export PHENO="type2Diabetes_test"
 export PHENO_STR="type 2 diabetes"
 export ICD="E11"
-export N=18
+export N_CORES=18
 
 
 echo "[WORKFLOW] DATA_PATH is set to: $DATA_PATH"
@@ -70,8 +79,14 @@ bash "$SCRIPTS_DIR/multiprocessing_fast_epistasis.sh"
 #only done for test as the IID needs to be numeric and simulation creates IID as string
 python "$SCRIPTS_DIR/test/change_test_data_IID_to_number.py"
 
-export DATA_TYPE="main"
-bash run_model_batches_test.sh 
+# Generate conversion file from existing .raw file
+# Quick one-liner to fix existing files
+for file in "$PHENO_PATH/trainingCombined.raw" "$PHENO_PATH/testCombined.raw" "$PHENO_PATH/holdoutCombined.raw"; do
+    awk 'BEGIN{OFS=" "} NR==1{print; next} {gsub(/per/, "", $1); gsub(/per/, "", $2); $1=int($1); $2=int($2); print}' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+done
+
+
+bash run_model_batches_test.sh $PHENO "main"
 
 PHENO_CONFIG="$PHENO_PATH/pheno.config"
 source $PHENO_CONFIG

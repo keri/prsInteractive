@@ -92,8 +92,8 @@ def get_epi_columns(epi_filepath):
 
 if __name__ == "__main__":
     
-    phenoPath = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
-    trainingPath = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/trainingCombined.raw'
+    phenoPath = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test'
+    trainingPath = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/trainingCombined.raw'
     snpList = get_columns(phenoPath)
     columns_to_get = snpList
 #   

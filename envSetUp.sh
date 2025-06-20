@@ -44,7 +44,7 @@ cat > "$PROJECT_ROOT/results/$pheno/pheno.config" << EOF
 # prsInteractive Pipeline Environment for $pheno
 PHENO_PATH=$PROJECT_ROOT/results/$pheno
 PHENO=$pheno
-PHENO_STR="$phenoStr"
+PHENO_STR="${phenoStr}"
 ICD10=$icd10
 N_CORES=$n
 EPI_PATH=$PROJECT_ROOT/results/$pheno/epiFiles

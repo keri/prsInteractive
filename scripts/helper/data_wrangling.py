@@ -51,7 +51,7 @@ def scale_data(df):
 #
 #if __name__ == '__main__':
 #   
-#   main('/Users/kerimulterer/prsInteractive/testResults/type2Diabetes/epiFiles')
+#   main('/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/epiFiles')
 
 
     
