@@ -1,32 +1,6 @@
 #!/bin/bash
 
-#
-#SBATCH --job-name=gene_env_discovery
-#SBATCH -o /nfs/scratch/projects/ukbiobank/err_out/%A_gene_env_discovery.out
-#SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_gene_env_discovery.err
-#SBATCH --partition=bigmem
-#SBATCH --cpus-per-task=50
-#SBATCH --mem=900G
-#SBATCH --time=48:00:00
-#SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=ashleyroconnor@gmail.com
-#
 
-################## USE DATA FROM UK BIOBANK ############
-# FILES THAT MUST BE PRESENT:
-#   $PHENO_PATH/scores/importantFeaturesPostShap.csv
-#   $RESULTS_PATH/covar.txt
-#   $RESULTS_PATH/testCombined.raw
-#   $RESULTS_PATH/trainingCombined.raw
-#   $RESULTS_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary
-#   /env.config
-#   $PHENO_PATH/pheno.config
-
-
-
-module load Miniconda3/4.9.2
-source $(conda info --base)/etc/profile.d/conda.sh 
-conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
 
 pheno=$1
 env_type=$2

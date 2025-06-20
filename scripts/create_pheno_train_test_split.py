@@ -6,6 +6,14 @@ import os
 import argparse
 import sys
 
+#!/usr/bin/env python3
+
+import pandas as pd
+import numpy as np
+import os
+import argparse
+import sys
+
 def main(df2, pheno, pheno_path, icd_code="E11", pheno_str="type 2 diabetes"):
     '''
     input:
@@ -28,11 +36,20 @@ def main(df2, pheno, pheno_path, icd_code="E11", pheno_str="type 2 diabetes"):
     print(f"Output path: {pheno_path}")
     print(f"Input dataframe shape: {df2.shape}")
     
+    # Validate inputs
+    if not icd_code or not isinstance(icd_code, str):
+        print(f"ERROR: Invalid ICD code: {icd_code}. Must be a non-empty string.")
+        return False
+    
+    if not pheno_str or not isinstance(pheno_str, str):
+        print(f"ERROR: Invalid phenotype string: {pheno_str}. Must be a non-empty string.")
+        return False
+    
     # Print column names for debugging
     print("Available columns:")
     for i, col in enumerate(df2.columns):
         print(f"  {i}: {col}")
-    
+        
     # Initialize phenotype column with controls (1)
     df2['phenotype'] = 1
     
@@ -64,7 +81,7 @@ def main(df2, pheno, pheno_path, icd_code="E11", pheno_str="type 2 diabetes"):
                 (df2['Diagnoses - main ICD10'].str.contains('K90', na=False))
             )
         else:
-            # Generic phenotype matching
+            # Generic phenotype matching - ensure strings are valid
             mask = (
                 (df2['Non-cancer illness code, self-reported | Instance 0'].str.contains(pheno_str, na=False)) |
                 (df2['Non-cancer illness code, self-reported | Instance 1'].str.contains(pheno_str, na=False)) |
@@ -72,7 +89,7 @@ def main(df2, pheno, pheno_path, icd_code="E11", pheno_str="type 2 diabetes"):
                 (df2['Non-cancer illness code, self-reported | Instance 3'].str.contains(pheno_str, na=False)) |
                 (df2['Diagnoses - main ICD10'].str.contains(icd_code, na=False))
             )
-        
+            
         # Set cases to 2
         df2.loc[mask, 'phenotype'] = 2
         
@@ -91,7 +108,7 @@ def main(df2, pheno, pheno_path, icd_code="E11", pheno_str="type 2 diabetes"):
             if relevant_cols:
                 print(df2[relevant_cols[:5]].head())
             return False
-            
+        
     except KeyError as e:
         print(f"ERROR: Missing column {e}")
         print("Available columns that might be relevant:")
@@ -108,7 +125,7 @@ def main(df2, pheno, pheno_path, icd_code="E11", pheno_str="type 2 diabetes"):
     
     if len(cases) < 10:
         print(f"WARNING: Very few cases ({len(cases)}). Consider adjusting phenotype definition.")
-    
+        
     # Split data maintaining class proportions
     training_cases = cases.sample(frac=0.70, random_state=1)
     training_controls = controls.sample(frac=0.70, random_state=1)
@@ -144,7 +161,7 @@ def main(df2, pheno, pheno_path, icd_code="E11", pheno_str="type 2 diabetes"):
         print(f'  Cases: {cases_in_split}')
         print(f'  Controls: {controls_in_split}')
         print(f'  Case percentage: {case_percentage:.2f}%')
-    
+        
     # Create output DataFrames
     trainingID = training[['Participant ID']].copy()
     trainingID['IID'] = training['Participant ID']
@@ -178,11 +195,11 @@ def main(df2, pheno, pheno_path, icd_code="E11", pheno_str="type 2 diabetes"):
                 print(f"  ❌ {filename} (not found)")
                 
         return True
-        
+    
     except Exception as e:
         print(f"ERROR saving files: {e}")
         return False
-
+    
 if __name__ == "__main__":
     
     parser = argparse.ArgumentParser(description="Creating phenotype file and train/test/holdout splits")
@@ -194,21 +211,12 @@ if __name__ == "__main__":
     
     args = parser.parse_args()
     
-    # Prefer command-line input if provided; fallback to env var
+    # Prefer command-line input if provided; fallback to env var with defaults
     data_path = args.data_path or os.environ.get("DATA_PATH")
-    print(f"[PYTHON] Reading from: {data_path}")
-    
     pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
-    print(f"[PYTHON] Reading from: {pheno_path}")
-    
-    pheno = args.pheno or os.environ.get("PHENO")
-    print(f"[PYTHON] Phenotype : {pheno}")
-    
-    icd10 = args.icd10 or os.environ.get("ICD10")
-    print(f"[PYTHON] icd code : {icd10}")
-    
-    pheno_str = args.pheno_str or os.environ.get("PHENO_STR")
-    print(f"[PYTHON] Phenotype string to filter for : {pheno_str}")
+    pheno = args.pheno or os.environ.get("PHENO", "type2Diabetes")  # Default phenotype
+    icd10 = args.icd10 or os.environ.get("ICD10", "E11")  # Default ICD code
+    pheno_str = args.pheno_str or os.environ.get("PHENO_STR", "type 2 diabetes")  # Default string
     
     print(f"[PYTHON] Reading from: {data_path}")
     print(f"[PYTHON] Output to: {pheno_path}")
@@ -216,11 +224,20 @@ if __name__ == "__main__":
     print(f"[PYTHON] ICD code: {icd10}")
     print(f"[PYTHON] Phenotype string: {pheno_str}")
     
+    # Validate required parameters
+    if not data_path:
+        print("ERROR: DATA_PATH not provided via command line or environment variable")
+        sys.exit(1)
+        
+    if not pheno_path:
+        print("ERROR: PHENO_PATH not provided via command line or environment variable")
+        sys.exit(1)
+        
     # Check if data path exists
     if not os.path.exists(data_path):
         print(f"ERROR: Data path {data_path} does not exist!")
         sys.exit(1)
-    
+        
     # Check if participant.csv exists
     participant_file = os.path.join(data_path, 'participant.csv')
     if not os.path.exists(participant_file):
@@ -232,7 +249,7 @@ if __name__ == "__main__":
         except:
             print("  (cannot list directory)")
         sys.exit(1)
-    
+        
     print(f"Loading data from {participant_file}...")
     
     try:

@@ -63,7 +63,7 @@ def combine_gene_environment(envGeneticDf,geneticEnvFeatureList):
     return combinedDf
     
 
-def main(phenoPath,trainingPath,testPath,holdoutPath,env_type,envDf,hlaDf):
+def main(phenoPath,trainingPath,testPath,holdoutPath,envDf,hlaDf,importantFeaturesFile):
     '''
     input:
         string trainingPath = absolute path to gentoyped training set
@@ -78,10 +78,7 @@ def main(phenoPath,trainingPath,testPath,holdoutPath,env_type,envDf,hlaDf):
     
     ############## DOWNLOAD ENVIRONMENTAL DATA #######################
     
-    importantFeaturesFile =f'{phenoPath}/scores/{env_type}importantFeaturesPostShap.csv'
-    
 
-    
     #the G and GxG SNPs post GxGxE feature discovery
     features = pd.read_csv(importantFeaturesFile)
     #filter the main E features
@@ -148,9 +145,9 @@ def main(phenoPath,trainingPath,testPath,holdoutPath,env_type,envDf,hlaDf):
     
     
 
-    combinedTraining.reset_index().to_csv(f'{phenoPath}/geneEnvironmentTraining.csv')
-    combinedTest.reset_index().to_csv(f'{phenoPath}/geneEnvironmentTest.csv')
-    combinedHoldout.reset_index().to_csv(f'{phenoPath}/geneEnvironmentHoldout.csv')
+    combinedTraining.reset_index().to_csv(f'{phenoPath}/geneEnvironmentTraining.csv',index=False)
+    combinedTest.reset_index().to_csv(f'{phenoPath}/geneEnvironmentTest.csv',index=False)
+    combinedHoldout.reset_index().to_csv(f'{phenoPath}/geneEnvironmentHoldout.csv',index=False)
 
 if __name__ == '__main__':
     
@@ -159,7 +156,6 @@ if __name__ == '__main__':
     parser.add_argument("--test_file", help="data file of test data")
     parser.add_argument("--holdout_file", help="data file of holdout data")
     parser.add_argument("--pheno_path", help="Results Path to write to")
-    parser.add_argument("--env_type", help="env data type analyzed")
     parser.add_argument("--env_file",help="Environmental data for participants")
     parser.add_argument("--hla_file",help="HLA data for participants")
     parser.add_argument("--gene_env_file",help="Genetic environmental epistatic features")
@@ -181,9 +177,6 @@ if __name__ == '__main__':
     pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
     print(f"[PYTHON] Reading from: {pheno_path}")
     
-    env_type = args.env_type or os.environ.get("ENV_TYPE")
-    print(f"[PYTHON] Environmental type : {env_type}")
-    
     env_file = args.env_file or os.environ.get("ENV_FILE")
     print(f"reading from participant environment file : {env_file}")
     
@@ -199,16 +192,11 @@ if __name__ == '__main__':
     print(f"[PYTHON] Reading test data from: {test_file}")
     print(f"[PYTHON] Reading holdout data from: {holdout_file}")
     print(f"[PYTHON] Writing to phenotype output folder: {pheno_path}")
-    print(f"Environmental type : {env_type}")
     print(f"[PYTHON] Reading environmental data from: {env_file}")
     print(f"[PYTHON] Reading HLA data from: {hla_file}")
     print(f"[PYTHON] Reading gene environmental feature data from: {gene_env_file}")
-    
 
-
-    print(f"[PYTHON] Environmental type: {env_type}")
     
-        
     #Check if participant_environment.csv exists
     if not os.path.exists(env_file):
         print(f"ERROR: participant_environment.csv not found at {env_file}")
@@ -222,24 +210,24 @@ if __name__ == '__main__':
 
         
     ###########  TEST VARIABLES ##########
-    pheno_path = "/Users/kerimulterer/prsInteractive/results/type2Diabetes"
-    env_data_file = "/Users/kerimulterer/prsInteractive/results/participant_environment.csv"
-    hla_data_file = "/Users/kerimulterer/prsInteractive/results/participant_hla.csv"
-    training_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw"
-    test_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined.raw"
-    holdout_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes/holdoutCombined.raw"
-    env_type = 'cardioMetabolic'
+#   pheno_path = "/Users/kerimulterer/prsInteractive/results/type2Diabetes"
+#   env_data_file = "/Users/kerimulterer/prsInteractive/results/participant_environment.csv"
+#   hla_data_file = "/Users/kerimulterer/prsInteractive/results/participant_hla.csv"
+#   training_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/trainingCombined.raw"
+#   test_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/testCombined.raw"
+#   holdout_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/holdoutCombined.raw"
+#   gene_env_file="/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/scores/cardioMetabolicimportantFeaturesPostShap.csv"
     
-    envDf = pd.read_csv(env_data_file)
+    envDf = pd.read_csv(env_file)
     envDf.rename(columns={'Participant ID':'IID'},inplace=True)
     envDf.set_index(['IID'],inplace=True)
     
-    hlaDf = pd.read_csv(hla_data_file)
+    hlaDf = pd.read_csv(hla_file)
     hlaDf.rename(columns={'Participant ID':'IID'},inplace=True)
     hlaDf.set_index(['IID'],inplace=True)
     
     
-    main(pheno_path,training_file,test_file,holdout_file,env_type,envDf,hlaDf)
+    main(pheno_path,training_file,test_file,holdout_file,envDf,hlaDf,gene_env_file)
 #   main(args.pheno_path,args.training_file,args.test_file,args.holdout_file,args.env_type,envDf,hlaDf)
         
 

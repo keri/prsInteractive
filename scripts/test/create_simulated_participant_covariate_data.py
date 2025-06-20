@@ -204,7 +204,7 @@ try:
     covar.to_csv(f"{data_path}/covar.txt",sep=' ',index=False, header=None)
     
     #the download data function need IID in format int N
-    withdrawals[['IIDN']].to_csv(f"{data_path}/withdrawals.csv",index=False,header=None)
+    withdrawals[['IID']].to_csv(f"{data_path}/withdrawals.csv",index=False,header=None)
     #the cleaning process needs IID in format of perN
     withdrawals[['IID','FID']].to_csv(f"{data_path}/withdrawalsID.txt",sep=' ',index=False,header=None)
     
