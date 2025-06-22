@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import csv
 import time
+import os
+from pathlib import Path
 
 
 def download_hla_data(hlaPath):

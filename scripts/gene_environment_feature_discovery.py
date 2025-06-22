@@ -19,76 +19,8 @@ from helper.download import *
 from helper.calculate_shap_values import *
 #from helper.find_important_features_from_shap import *
 warnings.filterwarnings('ignore')
-import pandas as pd
-import numpy as np
-import time
-import csv
 
 
-
-
-# Usage examples:
-#if __name__ == "__main__":
-#   # Standard usage
-#   df = get_dataset("path/to/your/file.raw", your_snp_list)
-#   
-#   # For very large files
-#   df = get_dataset("path/to/your/file.raw", your_snp_list, use_chunking=True)
-#   
-#   # Memory optimization
-    
-#def get_columns(resultsPath):
-#   snpList = pd.read_csv(resultsPath,sep="\s+",nrows=1).columns.tolist()
-##    print('getting columns...')
-##    print('pathway to file for columns = ',resultsPath)
-#   
-##   snpList = []
-##   with open(f'{resultsPath}/merged_allChromosomes.snplist') as f:
-##       reader = csv.reader(f,delimiter='\t')
-##       for row in reader:
-##           if row:  # skip empty rows
-##               snpList.append(row[0])
-##    df = pd.read_csv(f'{trainingPath}/merged_allChromosomes.snplist',sep='\t',header=None)
-##   full_columns = df[0].tolist()
-#   
-#   print('downloaded columns .....')
-#   
-#   return(snpList)
-#
-#def get_dataset(df_pathway,columns_to_get):
-#   '''input : epi snps column_list = ['SNP','BEST_SNP','CHR','BEST_CHR']
-#   mainfilepath = filepath to raw file
-#   output: dataframe space separated .raw, values: 0,1,2 for values, columns: rsID_MA'''
-#   st = time.time()
-#   full_columns = get_columns(df_pathway)
-#   columns_to_get = ['IID','PHENOTYPE'] + columns_to_get
-#   #full_columns = ['FID','IID','PAT','MAT','SEX','PHENOTYPE'] + full_columns
-#   idxColumns = get_column_index(columns_to_get,full_columns)
-#   
-#   #take out the people that have withdrawn from study
-#   machinePath = '/'.join(df_pathway.split('/')[:-3])
-#   
-##   machinePath = '/'.join(df_pathway.split('/')[:-5])
-#   print(machinePath)
-#   
-#   withdrawn = pd.read_csv(f'{machinePath}/data/withdrawals.csv',header=None)
-#   print('withdrawals are in path : ',machinePath)
-#   
-#   with open(df_pathway,'r') as reader:
-#       mainArray = np.genfromtxt(df_pathway, delimiter="\s+", dtype=float,usecols=idxColumns,skip_header=1)
-##       mainArray = pd.read_csv(df_pathway, delimiter='\s+',usecols=columns_to_get)#max_rows=100
-##       df = pd.read_csv(df_pathway, delimiter='\s+',usecols=columns_to_get, nrows=100)
-#   en = time.time()
-#   
-#   
-#   df = pd.DataFrame(data=mainArray,columns=columns_to_get)
-#   df2 = df[~df['IID'].isin(withdrawn[0])]
-#   
-#   
-#   df2.set_index(['IID'],inplace=True)
-#   
-#   print(f'time it took to download entire dataset is ',(en-st)/60, ' minutes')
-#   return (df2)
 
 def train_models(X,y,modelPath,pheno,env_type,i):
     '''input : X from training dataset and y
