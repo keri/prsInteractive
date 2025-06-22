@@ -322,6 +322,6 @@ if __name__ == "__main__":
     phenoPath = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test'
     trainingPath = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/trainingCombined.raw'
     snpList = get_columns(phenoPath)
-    columns_to_get = snpList
+#   columns_to_get = snpList
 #   
-    mainArray = get_dataset(trainingPath,columns_to_get)
+    mainArray = get_dataset(trainingPath,snpList, use_chunking=True)

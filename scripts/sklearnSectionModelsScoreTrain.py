@@ -271,7 +271,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
         #train models and pickle trained models to be used in scoring
 
-        mainArray = get_dataset(training_path,sectionSnps) #main effect snps so both pathways are the same
+        mainArray = get_dataset(training_path,sectionSnps, use_chunking=True) #main effect snps so both pathways are the same
     #     the first columns will be IID, PHENOTYPE
         y = mainArray['PHENOTYPE']
         Xmain = mainArray.drop(columns=["PHENOTYPE"])
@@ -291,7 +291,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
             imp_mean,clfNVB,clfHGB = train_models(Xmain,y,modelPath,pheno,data_type,i)
 
 
-            testArray = get_dataset(test_path,sectionSnps)
+            testArray = get_dataset(test_path,sectionSnps, use_chunking=True)
 
             yTest = testArray["PHENOTYPE"]
             Xtest = testArray.drop(columns=['PHENOTYPE'])

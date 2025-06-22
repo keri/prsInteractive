@@ -103,13 +103,13 @@ def main(phenoPath,trainingPath,testPath,holdoutPath,envDf,hlaDf,importantFeatur
     #expand the features into a list and filter redundant features
     expandedSnps = get_epi_snps(set(epiGenoFeatures))
     
-    trainingDf = get_dataset(trainingPath, expandedSnps)
+    trainingDf = get_dataset(trainingPath, expandedSnps,use_chunking=True)
     trainingDf = create_epi_df(trainingDf, epiGenoFeatures)
     geneEnvTraining = trainingDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvTraining = geneEnvTraining.merge(hlaDf,left_index=True,right_index=True,how='left')
     
     
-    testDf = get_dataset(testPath, expandedSnps)
+    testDf = get_dataset(testPath, expandedSnps, use_chunking=True)
     testDf = create_epi_df(testDf, epiGenoFeatures)
     geneEnvTest = testDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvTest = geneEnvTest.merge(hlaDf,left_index=True,right_index=True,how='left')

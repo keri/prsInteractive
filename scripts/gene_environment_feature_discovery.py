@@ -12,6 +12,7 @@ import time
 import pickle
 import os
 import csv
+from pathlib import Path
 import argparse
 from helper.data_wrangling import *
 from helper.download import *
@@ -22,7 +23,7 @@ import pandas as pd
 import numpy as np
 import time
 import csv
-from pathlib import Path
+
 
 
 
@@ -111,7 +112,7 @@ def train_models(X,y,modelPath,pheno,env_type,i):
     
     return(grid_search_hgb)
 
-def score_models(X,y,pheno,env_type,modelFile,i,clfHGB):
+def score_models(X,y,pheno,env_type,modelFile,i,clfHGB,chunk):
     '''load pickled models and score with test set'''
     print('scoring models .....')
     
@@ -132,7 +133,7 @@ def score_models(X,y,pheno,env_type,modelFile,i,clfHGB):
     jscore = jaccard_score(y,yHat)
     hloss = hamming_loss(y,yHat)
     f1score = f1_score(y,yHat)
-    fields=['gradient boosted classifier',score,balanced_score,auc,mcc,logloss,jscore,hloss,f1score,env_type,i]
+    fields=['gradient boosted classifier',score,balanced_score,auc,mcc,logloss,jscore,hloss,f1score,env_type,i,chunk]
     
     with open(modelFile,mode='a') as f:
         writer = csv.writer(f)
@@ -159,7 +160,7 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
     
     if not os.path.exists(f'{modelFile}'):
         # create empty dataframe to capture the scores and snps in each iteration
-        models = pd.DataFrame(columns=['model','test score','balanced score','auc','matthews_corrcoef','log_loss','jaccard_score','hamming_loss','f1_score','env_type','iteration'])
+        models = pd.DataFrame(columns=['model','test score','balanced score','auc','matthews_corrcoef','log_loss','jaccard_score','hamming_loss','f1_score','env_type','iteration','chunk'])
         with open(modelFile,mode='w',newline='') as f:
             models.to_csv(f,index=False)
             f.close()
@@ -212,12 +213,12 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
         #trainingData = get_dataset(trainingPath,modelFeatures2)
         trainingData = get_dataset(trainingPath, modelFeatures2, use_chunking=True)
         y = trainingData['PHENOTYPE']
-        trainingData = create_epi_df(trainingData,modelFeatures['feature'].tolist())
+        trainingData = create_epi_df(trainingData,modelFeatures['feature'].tolist()[start:stop])
         #
         #testData = get_dataset(testPath,modelFeatures2)
         testData = get_dataset(testPath, modelFeatures2, use_chunking=True)
         yTest = testData['PHENOTYPE']
-        testData = create_epi_df(testData,modelFeatures['feature'].tolist())
+        testData = create_epi_df(testData,modelFeatures['feature'].tolist()[start:stop])
         
         ##################### merge HLA data ###########################
         
@@ -276,7 +277,7 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
             print(testData2.shape)
     
             clfHGB = train_models(trainingData2,y,modelsPath,pheno,env_type,feature1)
-            auc = score_models(testData2, yTest, pheno, env_type, modelFile, feature1, clfHGB)
+            auc = score_models(testData2, yTest, pheno, env_type, modelFile, feature1, clfHGB,chunk)
             #if auc > .51:
                 #columns = index of features and shap_valueZscores
             topFeatures,featureZscores = calculate_plot_shap_values(clfHGB,trainingData2,testData2,i,figPath,env_type)
@@ -336,7 +337,7 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
                             
                     # set epistatic == True for all indices with GxGxE
                     featureZscores.loc[importantCombinedIndices,'epistatic'] = 1
-    
+                    
                 with open(importantFeaturesFile,mode='a',newline='') as f:
                     featureZscores.to_csv(f,index=False,header=False)
                     f.close()
