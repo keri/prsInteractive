@@ -82,7 +82,7 @@ export SCRIPTS_DIR=$SCRIPTS_DIR
 ## Add entries
 #{
 #   echo "HLA_FILE=$RESULTS_PATH/participant_hla.csv"
-#   echo "COVAR_FILE=$RESULTS_PATH/covar.txt" 
+#   echo "COVAR_FILE=$RESULTS_PATH/covar.csv" 
 #   echo "ENV_FILE=$RESULTS_PATH/participant_environment.csv"
 #} >> "$CONFIG_FILE"
 #
@@ -91,7 +91,7 @@ export SCRIPTS_DIR=$SCRIPTS_DIR
 #cat "$CONFIG_FILE"
 #
 ## Check if actual files exist
-#for file in "$RESULTS_PATH/participant_hla.csv" "$RESULTS_PATH/covar.txt" "$RESULTS_PATH/participant_environment.csv"; do
+#for file in "$RESULTS_PATH/participant_hla.csv" "$RESULTS_PATH/covar.csv" "$RESULTS_PATH/participant_environment.csv"; do
 #   if [[ -f "$file" ]]; then
 #       echo "✓ File exists: $file"
 #   else
@@ -114,7 +114,7 @@ export SCRIPTS_DIR=$SCRIPTS_DIR
 ##only done for test as the IID needs to be numeric and simulation creates IID as string
 #python "$SCRIPTS_DIR/test/change_test_data_IID_to_number.py"
 #
-## Generate conversion file from existing .raw file
+
 ## Quick one-liner to fix existing files
 #for file in "$PHENO_PATH/trainingCombined.raw" "$PHENO_PATH/testCombined.raw" "$PHENO_PATH/holdoutCombined.raw"; do
 #   awk 'BEGIN{OFS=" "} NR==1{print; next} {gsub(/per/, "", $1); gsub(/per/, "", $2); $1=int($1); $2=int($2); print}' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
@@ -144,22 +144,43 @@ export SCRIPTS_DIR=$SCRIPTS_DIR
 #python "$SCRIPTS_DIR/gene_environment_feature_discovery.py"
 
 #update pheno.config
-CONFIG_FILE="$PHENO_PATH/pheno.config"
-
-## Add entries
-#{
-#   echo "GENE_ENV_FILE=$PHENO_PATH/scores/cardioMetabolicimportantFeaturesPostShap.csv"
-#} >> "$CONFIG_FILE"
-    
-source $CONFIG_FILE
+#CONFIG_FILE="$PHENO_PATH/pheno.config"
+#
+### Add entries
+##{
+##   echo "GENE_ENV_FILE=$PHENO_PATH/scores/cardioMetabolicimportantFeaturesPostShap.csv"
+##} >> "$CONFIG_FILE"
+#   
+#source $CONFIG_FILE
 
 export HOLDOUT_PATH=$HOLDOUT_PATH
 export ENV_FILE=$ENV_FILE
 export HLA_FILE=$HLA_FILE
 export GENE_ENV_FILE=$GENE_ENV_FILE
 #create gene_env datasets for training, validation, and test
-python "$SCRIPTS_DIR/clean_create_environment_data.py"
-#bash "$SCRIPTS_DIR/run_plink_LD.sh"
+#python "$SCRIPTS_DIR/clean_create_environment_data.py"
+
+#update pheno.config
+CONFIG_FILE="$PHENO_PATH/pheno.config"
+
+## Add entries
+{
+    echo "GENE_ENV_TRAINING=$PHENO_PATH/scores/geneEnvironmentTraining.csv"
+    echo "GENE_ENV_TEST=$PHENO_PATH/scores/geneEnvironmentTest.csv"
+    echo "GENE_ENV_HOLDOUT=$PHENO_PATH/scores/geneEnvironmentHoldout.csv"
+
+} >> "$CONFIG_FILE"
+    
+source $CONFIG_FILE
+
+bash "$SCRIPTS_DIR/run_plink_LD.sh" $pheno
+
+# Pass to R script
+#RScript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
+#--data_path "$DATA_PATH" \
+#--hla_file "$HLA_FILE" \
+#--covar_file "$COVAR_FILE" \
+#--output_path "$RESULTS_PATH"
 
 
 

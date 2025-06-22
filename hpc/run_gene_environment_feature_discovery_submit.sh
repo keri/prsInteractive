@@ -15,10 +15,8 @@
 ################## USE DATA FROM UK BIOBANK ############
 # FILES THAT MUST BE PRESENT:
 #   $PHENO_PATH/scores/importantFeaturesPostShap.csv
-#   $RESULTS_PATH/covar.txt
 #   $RESULTS_PATH/testCombined.raw
 #   $RESULTS_PATH/trainingCombined.raw
-#   $RESULTS_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary
 #   /env.config
 #   $PHENO_PATH/pheno.config
 
@@ -51,7 +49,7 @@ if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
 else
     echo "sourcing $pheno env variables."
     #source pheno specific environment variables
-    source "${RESULTS_PATH}/$PHENO/pheno.config"
+    source "${RESULTS_PATH}/$pheno/pheno.config"
 fi
 
 

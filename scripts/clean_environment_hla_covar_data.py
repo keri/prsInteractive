@@ -28,6 +28,7 @@ def create_covar_data(data_path):
     df = pd.read_csv(f'{data_path}/participant.csv')
     df.rename(columns={'Participant ID':'IID'},inplace=True)
     df['SEX'] = df['Sex'].apply( lambda x : 0 if x == 'Female' else 1)
+    df = rename_covar_columns(df)
     return(df)
     
     
@@ -82,7 +83,7 @@ def main(data_path,results_path):
 #   hla_data.to_csv(f'{results_path}/participant_hla.csv',index=False)
     
     covar_data = create_covar_data(data_path)
-#   covar_data.to_csv(f'{results_path}/covar.txt', sep=' ', index=False)
+#   covar_data.to_csv(f'{results_path}/covar.csv', sep=' ', index=False)
     
     env_data = clean_environmental(data_path)
 #   env_data.to_csv(f'{results_path}/participant_environment.csv', index=False)
@@ -90,11 +91,11 @@ def main(data_path,results_path):
     # Save files
     try:
       hla_data.to_csv(f'{results_path}/participant_hla.csv',index=False)
-      covar_data.to_csv(f'{results_path}/covar.txt', sep=' ', index=False)
+      covar_data.to_csv(f'{results_path}/covar.csv', index=False)
       env_data.to_csv(f'{results_path}/participant_environment.csv', index=False)
             
       print(f"\nSuccessfully saved files to {results_path}:")
-      for filename in ['participant_hla.csv', 'covar.txt', 'participant_environment.csv']:
+      for filename in ['participant_hla.csv', 'covar.csv', 'participant_environment.csv']:
         filepath = os.path.join(results_path, filename)
         if os.path.exists(filepath):
           print(f"  ✅ {filename} ({os.path.getsize(filepath)} bytes)")
@@ -111,18 +112,20 @@ def main(data_path,results_path):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="creating hla and covar data file...")
-    parser.add_argument("--data_folder", help="Path to the input data folder")
-    
-    parser.add_argument("--results_folder", help="Path to the results data folder")
-
-    
-    args = parser.parse_args()
-    
-    # Prefer command-line input if provided; fallback to env var
-    data_path = args.data_folder or os.environ.get("DATA_PATH")
-    results_path = args.data_folder or os.environ.get("RESULTS_PATH")
+#   parser = argparse.ArgumentParser(description="creating hla and covar data file...")
+#   parser.add_argument("--data_folder", help="Path to the input data folder")
+#   
+#   parser.add_argument("--results_folder", help="Path to the results data folder")
+#
+#   
+#   args = parser.parse_args()
+#   
+#   # Prefer command-line input if provided; fallback to env var
+#   data_path = args.data_folder or os.environ.get("DATA_PATH")
+#   results_path = args.data_folder or os.environ.get("RESULTS_PATH")
   
+    data_path = "/Users/kerimulterer/prsInteractive/testData"
+    results_path = "/Users/kerimulterer/prsInteractive/results"
 
     if not data_path:
         raise ValueError("You must provide a data path via --data_folder or set the DATA_PATH environment variable.")

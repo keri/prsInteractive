@@ -79,11 +79,11 @@ DATA_PATH="$PROJECT_ROOT/data"
 # Make sure data directory exists
 if [ ! -d "$DATA_PATH" ]; then
     echo "WARNING: Data directory $DATA_PATH does not exist!"
-    echo "Please create it and place your data files there: participant.csv participant_environment.csv covar.txt ukb_hla_v2.txt hla_participant.csv withdrawals.csv"
+    echo "Please create it and place your data files there: participant.csv participant_environment.csv covar.csv ukb_hla_v2.txt hla_participant.csv withdrawals.csv"
 fi
 # Check for required data files
 echo "Checking for required data files..."
-for file in "participant.csv" "participant_environment.csv" "covar.txt" "ukb_hla_v2.txt" "hla_participant.csv" "withdrawals.csv"; do
+for file in "participant.csv" "participant_environment.csv" "covar.csv" "ukb_hla_v2.txt" "hla_participant.csv" "withdrawals.csv"; do
     if [ ! -f "$DATA_PATH/$file" ]; then
         echo "WARNING: Required file $PROJECT_ROOT/data/$file not found!"
     else

@@ -122,8 +122,8 @@ def main(phenoPath):
 	features = pd.read_csv(f'{phenoPath}/scores/importantFeaturesPostShap.csv')
 	
 	#get the main and epi weigths separate as the separate epi+main model performed best
-	featuresMain = features[features['model'] == 'main'][['feature','shap_zscore']]
-	featuresEpi = features[(features['model'] == 'epi') & (features['feature'].str.contains(','))][['feature','shap_zscore']]
+	featuresMain = features[features['data_type'] == 'main'][['feature','shap_zscore']]
+	featuresEpi = features[(features['data_type'] == 'epi') & (features['feature'].str.contains(','))][['feature','shap_zscore']]
 #	featuresEpi = features2[['feature','lasso_coefs_grid_search']]
 	
 
@@ -141,7 +141,7 @@ def main(phenoPath):
 	
 	epiFeatureToPruneinLD = filter_epi_features(featuresEpi,ld2)
 	
-	featuresToPrune = featuresEpiReversedToPrune + mainFeaturesToPrune + epiFeatureToPruneinLD
+	featuresToPrune = mainFeaturesToPrune + epiFeatureToPruneinLD
 	
 	featuresFinal = features[~features['feature'].isin(featuresToPrune)]
 	

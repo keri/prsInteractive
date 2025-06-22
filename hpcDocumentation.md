@@ -5,7 +5,7 @@
 
 ###Input files must be present:
    in prsInteractive/data/
-    1. covar.txt 
+    1. covar.csv
     2. hla_participant.csv
     3. participant.csv
     4. participant_environment.csv
@@ -33,7 +33,7 @@
     ####/nfs/scratch/projects/ukbiobank/prsInteractive/results/
     1. participant_environment.csv
     2. participant_hla.csv
-    3. covar.txt
+    3. covar.csv
 
 #########################  STEPS IN ANALYSIS  #############################
 

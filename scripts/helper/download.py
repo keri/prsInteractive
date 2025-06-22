@@ -63,17 +63,17 @@ def get_dataset(df_pathway,columns_to_get):
 
 
 def get_columns(resultsPath):
-    #dfColumns = pd.read_csv(df_pathway,sep=' ',nrows=1)
-    print('getting columns...')
-    print('pathway to file for columns = ',resultsPath)
+    snpList = pd.read_csv(resultsPath,sep='/s+',nrows=1)
+#    print('getting columns...')
+#    print('pathway to file for columns = ',resultsPath)
     
-    snpList = []
-    with open(f'{resultsPath}/merged_allChromosomes.snplist') as f:
-        reader = csv.reader(f,delimiter='\t')
-        for row in reader:
-            if row:  # skip empty rows
-                snpList.append(row[0])
-#   df = pd.read_csv(f'{trainingPath}/merged_allChromosomes.snplist',sep='\t',header=None)
+#   snpList = []
+#   with open(f'{resultsPath}/merged_allChromosomes.snplist') as f:
+#       reader = csv.reader(f,delimiter='\t')
+#       for row in reader:
+#           if row:  # skip empty rows
+#               snpList.append(row[0])
+#    df = pd.read_csv(f'{trainingPath}/merged_allChromosomes.snplist',sep='\t',header=None)
 #   full_columns = df[0].tolist()
 
     print('downloaded columns .....')

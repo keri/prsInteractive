@@ -145,9 +145,9 @@ def main(phenoPath,trainingPath,testPath,holdoutPath,envDf,hlaDf,importantFeatur
     
     
 
-    combinedTraining.reset_index().to_csv(f'{phenoPath}/geneEnvironmentTraining.csv',index=False)
-    combinedTest.reset_index().to_csv(f'{phenoPath}/geneEnvironmentTest.csv',index=False)
-    combinedHoldout.reset_index().to_csv(f'{phenoPath}/geneEnvironmentHoldout.csv',index=False)
+    combinedTraining.reset_index().rename(columns={'index': 'IID'}).to_csv(f'{phenoPath}/geneEnvironmentTraining.csv',index=False)
+    combinedTest.reset_index().rename(columns={'index': 'IID'}).to_csv(f'{phenoPath}/geneEnvironmentTest.csv',index=False)
+    combinedHoldout.reset_index().rename(columns={'index': 'IID'}).to_csv(f'{phenoPath}/geneEnvironmentHoldout.csv',index=False)
 
 if __name__ == '__main__':
     

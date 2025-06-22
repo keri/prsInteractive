@@ -5,7 +5,6 @@
 ################## USE DATA FROM UK BIOBANK ############
 # FILES THAT MUST BE PRESENT:
 #   $PHENO_PATH/scores/importantFeaturesPostShap.csv
-#   $RESULTS_PATH/covar.txt
 #   $RESULTS_PATH/testCombined.raw
 #   $RESULTS_PATH/trainingCombined.raw
 #   $RESULTS_PATH/epiFiles/trainingCombinedEpi.filtered.epi.cc.summary

@@ -69,12 +69,12 @@ echo "[WORKFLOW] OUTPUT PHENO FIGURES directory:: $PROJECT_ROOT/$pheno/figures"
 # Make sure data directory exists
 if [ ! -d "$PROJECT_ROOT/data" ]; then
     echo "WARNING: Data directory $PROJECT_ROOT/data does not exist!"
-    echo "Please create it and place your data files there: participant.csv participant_environment.csv covar.txt ukb_hla_v2.txt hla_participant.csv withdrawals.csv"
+    echo "Please create it and place your data files there: participant.csv participant_environment.csv covar.csv ukb_hla_v2.txt hla_participant.csv withdrawals.csv"
 fi
 
 # Check for required data files
 echo "Checking for required data files..."
-for file in "participant.csv" "participant_environment.csv" "covar.txt" "ukb_hla_v2.txt" "hla_participant.csv" "withdrawals.csv"; do
+for file in "participant.csv" "participant_environment.csv" "covar.csv" "ukb_hla_v2.txt" "hla_participant.csv" "withdrawals.csv"; do
     if [ ! -f "$PROJECT_ROOT/data/$file" ]; then
         echo "WARNING: Required file $PROJECT_ROOT/data/$file not found!"
     else
