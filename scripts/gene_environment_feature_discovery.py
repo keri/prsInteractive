@@ -279,64 +279,64 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
             
 if __name__ == '__main__':
     
-#   parser = argparse.ArgumentParser(description="running models for GxGxE features...")
-#   parser.add_argument("--pheno_folder", help="Path to the input pheno folder")
-#   parser.add_argument("--training_file", help="data file of training data")
-#   parser.add_argument("--test_file", help="data file of test data")
-#   parser.add_argument("--env_type", help="data type to analyze")
-#   parser.add_argument("--pheno", help="Phenotype to analyze")
-#   parser.add_argument("--results_path", help="data path to results")
-#   
-#   
-#   args = parser.parse_args()
-#   
-#   # Prefer command-line input if provided; fallback to env var
-#   pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
-#   print(f"[PYTHON] Reading from: {pheno_path}")
-#   
-#   pheno = args.pheno or os.environ.get("PHENO")
-#   print(f"[PYTHON] Phenotype : {pheno}")
-#   
-#   env_type = args.env_type or os.environ.get("ENV_TYPE")
-#   print(f"data type : {env_type}")
-#   
-#   training_path = args.training_file or os.environ.get("TRAINING_PATH")
-#   print(f"training file : {training_path}")
-#   
-#   test_path = args.test_file or os.environ.get("TEST_PATH")
-#   print(f"test file : {test_path}")
-#   
-#   results_path = args.results_path or os.environ.get("RESULTS_PATH")
-#   print(f"results path : {results_path}")
-#   
-#
-#   
-#   
-#   
-#   if not pheno_path:
-#       raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
-#       
-#   if not pheno:
-#       raise ValueError("You must provide a phenotype via --pheno or set the PHENO environment variable.")
-#       
-#   if not env_type:
-#       raise ValueError("You must provide a env type code via --env_type or set the ENV_TYPE environment variable.")
-#       
-#   if not training_path:
-#       raise ValueError("You must provide a training path via --training_path or set the TRAINING_PATH environment variable.")
-#       
-#   if not test_path:
-#       raise ValueError("You must provide a test path via --test_path or set the TEST_PATH environment variable.")
-#       
-#   if not results_path:
-#       raise ValueError("You must provide a results path via --results_path or set the RESULTS_PATH environment variable.")
+    parser = argparse.ArgumentParser(description="running models for GxGxE features...")
+    parser.add_argument("--pheno_folder", help="Path to the input pheno folder")
+    parser.add_argument("--training_file", help="data file of training data")
+    parser.add_argument("--test_file", help="data file of test data")
+    parser.add_argument("--env_type", help="data type to analyze")
+    parser.add_argument("--pheno", help="Phenotype to analyze")
+    parser.add_argument("--results_path", help="data path to results")
+    
+    
+    args = parser.parse_args()
+    
+    # Prefer command-line input if provided; fallback to env var
+    pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
+    print(f"[PYTHON] Reading from: {pheno_path}")
+    
+    pheno = args.pheno or os.environ.get("PHENO")
+    print(f"[PYTHON] Phenotype : {pheno}")
+    
+    env_type = args.env_type or os.environ.get("ENV_TYPE")
+    print(f"data type : {env_type}")
+    
+    training_path = args.training_file or os.environ.get("TRAINING_PATH")
+    print(f"training file : {training_path}")
+    
+    test_path = args.test_file or os.environ.get("TEST_PATH")
+    print(f"test file : {test_path}")
+    
+    results_path = args.results_path or os.environ.get("RESULTS_PATH")
+    print(f"results path : {results_path}")
+    
+
+    
+    
+    
+    if not pheno_path:
+        raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
         
-    pheno='myocardialInfarction'
-    pheno_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}'
-    env_type='cardioMetabolic'
-    training_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
-    test_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
-    results_path='/Users/kerimulterer/prsInteractive/results'
+    if not pheno:
+        raise ValueError("You must provide a phenotype via --pheno or set the PHENO environment variable.")
+        
+    if not env_type:
+        raise ValueError("You must provide a env type code via --env_type or set the ENV_TYPE environment variable.")
+        
+    if not training_path:
+        raise ValueError("You must provide a training path via --training_path or set the TRAINING_PATH environment variable.")
+        
+    if not test_path:
+        raise ValueError("You must provide a test path via --test_path or set the TEST_PATH environment variable.")
+        
+    if not results_path:
+        raise ValueError("You must provide a results path via --results_path or set the RESULTS_PATH environment variable.")
+        
+#   pheno='myocardialInfarction'
+#   pheno_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}'
+#   env_type='cardioMetabolic'
+#   training_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
+#   test_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
+#   results_path='/Users/kerimulterer/prsInteractive/results'
     
     main(pheno,env_type,pheno_path,training_path,test_path,results_path)
     

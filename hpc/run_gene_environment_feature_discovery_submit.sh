@@ -5,11 +5,11 @@
 #SBATCH -o /nfs/scratch/projects/ukbiobank/err_out/%A_gene_env_discovery.out
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_gene_env_discovery.err
 #SBATCH --partition=bigmem
-#SBATCH --cpus-per-task=50
+#SBATCH --cpus-per-task=60
 #SBATCH --mem=900G
 #SBATCH --time=48:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=ashleyroconnor@gmail.com
+#SBATCH --mail-user=oconnoas@staff.vuw.ac.nz
 #
 
 ################## USE DATA FROM UK BIOBANK ############
