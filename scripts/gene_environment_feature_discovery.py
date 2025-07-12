@@ -121,6 +121,8 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
     
     # Keep columns with less than 5% missing values
     envDf = envDf.loc[:, missing_percentage < 5]
+    print('env df columns = ',envDf.columns)
+    print('shape of envDf : ',envDf.shape)
     
     ########################  DOWNLOAD GENOTYPED DATA FOR FINAL FILTERED FEATURES USED IN FINAL MODEL  ##################################
     
@@ -139,17 +141,16 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
         print(f'chunk stop : {stop}')
         
         modelFeatures2 = get_epi_snps(modelFeatures['feature'].tolist()[start:stop])
-        
-    
     
         #trainingData = get_dataset(trainingPath,modelFeatures2)
         trainingData = get_dataset(trainingPath, modelFeatures2, use_chunking=True)
         y = trainingData['PHENOTYPE']
+        #drops the PHENOTYPE column
         trainingData = create_epi_df(trainingData,modelFeatures['feature'].tolist()[start:stop])
         #
         #testData = get_dataset(testPath,modelFeatures2)
         testData = get_dataset(testPath, modelFeatures2, use_chunking=True)
-        yTest = testData['PHENOTYPE']
+        yTest = testData['PHENOTYPE']        
         testData = create_epi_df(testData,modelFeatures['feature'].tolist()[start:stop])
         
         ##################### merge HLA data ###########################
@@ -173,22 +174,23 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
         
         # Create an empty DataFrame to store pair-wise interactions
     
-        trainingDataIndex = pd.DataFrame(index=trainingData.index)
-        cardioFeaturesTraining = envDf.merge(trainingDataIndex,left_index=True,right_index=True,how='right') #ensures the rows are in the correct order for combining into interaction dataset
-        testDataIndex = pd.DataFrame(index=testData.index)
-        cardioFeaturesTest = envDf.merge(testDataIndex,left_index=True,right_index=True,how='right')
+#       trainingDataIndex = pd.DataFrame(index=trainingData.index)
+        cardioFeaturesTraining = envDf.loc[trainingData.index]
+#       cardioFeaturesTraining = envDf.merge(trainingDataIndex,left_index=True,right_index=True,how='right') #ensures the rows are in the correct order for combining into interaction dataset
+#       testDataIndex = pd.DataFrame(index=testData.index)
+        cardioFeaturesTest = envDf.loc[testData.index]
+#       cardioFeaturesTest = envDf.merge(testDataIndex,left_index=True,right_index=True,how='right')
         
         
         # Loop through each env feature and run models
         # create data set for each model with 1 E feature, interaction matrix (ExG), and G matrix combined
         for i in range(len(envDf.columns)):
             feature1 = envDf.columns[i]
-            
+            print('env feature being analyzed : ',feature1)
             #	for j in range(len(modelFeatures2)):
             # Create pairwise dataset with the pair-wise interaction
             interactionDataset = cardioFeaturesTraining.iloc[:, i].values.reshape(-1,1) * trainingData
             interactionDatasetTest = cardioFeaturesTest.iloc[:, i].values.reshape(-1,1) * testData
-            
             #change the column names to have the cardioMetabolic feature in the name
             interactionColNames = [f'{feature1},{x}' for x in trainingData.columns]
             
@@ -197,10 +199,12 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
             interactionDatasetTest.columns = interactionColNames
             interactionDataset.index = trainingData.index
             interactionDatasetTest.index = testData.index
+            print('interaction dataset after multiplying by env feature:', interactionDataset.columns)
             
             #create column for single cardio metabolic feature without interaction
             interactionDataset[feature1] = cardioFeaturesTraining.iloc[:, i]
             interactionDatasetTest[feature1] = cardioFeaturesTest.iloc[:, i]
+            print('interaction dataset after adding env feature:', interactionDataset.columns)
             
             #merge two datasets to train model and calculate SHAP
             trainingData2 = interactionDataset.merge(trainingData,left_index=True,right_index=True)
@@ -213,22 +217,31 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
             #if auc > .51:
                 #columns = index of features and shap_valueZscores
             topFeatures,featureZscores = calculate_plot_shap_values(clfHGB,trainingData2,testData2,i,figPath,env_type)
-    
+            
             if featureZscores.empty:
                 'There was an issue with calculating feature z scores in calculate_shap_values.py script...'
                 
             else:
                 #'envGeneticFeature','shap_zscore','env_type','geneticFeature','main_E','epistatic','envFeature'
                 featureZscores = featureZscores.reset_index()
+                print('featureZscores after index reset:')
+                print(featureZscores.head())
                 featureZscores['env_type'] = env_type
                 featureZscores.columns = ['envGeneticFeature','shap_zscore','env_type']
+                print('featureZscores after column set:')
+                print(featureZscores.head())
                 #remove the feature string when combined with genetic features
                 featureZscores['geneticFeature'] = featureZscores['envGeneticFeature'].apply( lambda x : x.replace(f'{feature1},',''))
                 #remove the feature string when alone
+                print('featureZscores after cleaning evnGeneticFeature column:')
+                print(featureZscores)
                 featureZscores.loc[featureZscores['envGeneticFeature'] == feature1,'geneticFeature'] = ''
                 featureZscores['envFeature'] = ''
                 featureZscores['main_E'] = 0
                 featureZscores['epistatic'] = 0
+                
+                print('featureZscores after cleaning envFeature, main_E, and epistatic columns:')
+                print(featureZscores)
                 
                 featureZscores.sort_values(['shap_zscore'],ascending=False,inplace=True)
                 
@@ -237,6 +250,8 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
                 
                 
                 # find index where envGeneticFeature == feature1
+                print('debugging idx feature1[0] out of index')
+                print(featureZscores.loc[featureZscores['envGeneticFeature'].str.contains(feature1)])
                 idxFeature =  featureZscores.index[featureZscores['envGeneticFeature'] == feature1][0]
                 
                 if idxFeature == 0:
@@ -310,6 +325,12 @@ if __name__ == '__main__':
     print(f"results path : {results_path}")
     
 
+#   pheno='type2Diabetes_test'
+#   pheno_path=f'/Users/keri/prsInteractive/results/{pheno}'
+#   env_type='cardioMetabolic'
+#   training_path=f'/Users/keri/prsInteractive/results/{pheno}/trainingCombined.raw'
+#   test_path=f'/Users/keri/prsInteractive/results/{pheno}/testCombined.raw'
+#   results_path='/Users/keri/prsInteractive/results'
     
     
     
@@ -331,12 +352,6 @@ if __name__ == '__main__':
     if not results_path:
         raise ValueError("You must provide a results path via --results_path or set the RESULTS_PATH environment variable.")
         
-#   pheno='myocardialInfarction'
-#   pheno_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}'
-#   env_type='cardioMetabolic'
-#   training_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
-#   test_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
-#   results_path='/Users/kerimulterer/prsInteractive/results'
     
     main(pheno,env_type,pheno_path,training_path,test_path,results_path)
     

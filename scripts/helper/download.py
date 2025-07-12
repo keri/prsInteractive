@@ -39,7 +39,7 @@ def get_columns(resultsPath):
     except Exception as e:
         print(f"Error reading columns: {e}")
         # Fallback to pandas method
-        snpList = pd.read_csv(resultsPath, sep="\s+", nrows=1).columns.tolist()
+        snpList = pd.read_csv(resultsPath, sep=r"\s+", nrows=1).columns.tolist()
         print(f'Downloaded {len(snpList)} columns using fallback method')
         return snpList
     
@@ -141,9 +141,9 @@ def get_dataset_optimized(df_pathway, columns_to_get, chunk_processing=False):
             
             # Fallback to pandas
             df = pd.read_csv(df_pathway, 
-                           delimiter='\s+', 
+                           delimiter=r'\s+', 
                            usecols=actual_columns,
-                           dtype={'IID': str},  # Keep IID as string
+                           dtype={'IID': int},  # Keep IID as string
                            low_memory=False)
             
     # Remove withdrawn participants
@@ -168,7 +168,7 @@ def get_dataset_optimized(df_pathway, columns_to_get, chunk_processing=False):
     print(f'  Shape: {df.shape}')
     print(f'  Memory usage: {df.memory_usage(deep=True).sum() / 1024**2:.1f} MB')
     print(f'  Processing time: {processing_time:.2f} minutes')
-    
+
     return df
 
 def load_in_chunks(file_path, col_indices, col_names, withdrawn_ids, chunk_size=10000):
@@ -181,10 +181,10 @@ def load_in_chunks(file_path, col_indices, col_names, withdrawn_ids, chunk_size=
     
     # Use pandas for chunked reading
     for chunk in pd.read_csv(file_path, 
-                            delimiter='\s+',
+                            delimiter=r'\s+',
                             usecols=col_names,
                             chunksize=chunk_size,
-                            dtype={'IID': str},
+                            dtype={'IID': int},
                             low_memory=False):
     
         # Remove withdrawn participants from this chunk
@@ -314,7 +314,7 @@ def get_epi_columns(epi_filepath):
     '''epiFile columns = [CHR, SNP, N_SIG, N_TOT, PROP, BEST_CHISQ, BEST_CHR, BEST_SNP ]
         use the CHR SNP BEST_CHR BEST_SNP'''
     
-    epiDf = pd.read_csv(epi_filepath, sep='\s+', usecols=['SNP','BEST_SNP'])
+    epiDf = pd.read_csv(epi_filepath, sep=r'\s+', usecols=['SNP','BEST_SNP'])
     pairList = (epiDf['SNP'] + ',' + epiDf['BEST_SNP']).tolist()
     return (pairList)
 
