@@ -20,4 +20,5 @@ logs/
 *.jar
 testData/
 env.config
-
+scripts/.RData
+scripts/.Rhistory
