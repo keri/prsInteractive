@@ -85,8 +85,8 @@ def train_models(X,y,modelPath,pheno,data_type,i):
     # clfHGB = HistGradientBoostingClassifier(early_stopping='auto',cv=10,l2_regularization=0, learning_rate=0.001,
     #                            max_depth=25, max_iter=1000, scoring='f1_micro').fit(X, y)
     clfHGB = HistGradientBoostingClassifier(early_stopping='auto')
-    grid_search_hgb = GridSearchCV(estimator=clfHGB,param_grid=parameters_hgb,scoring='roc_auc',cv=3,n_jobs=50)
-    grid_search_hgb.fit(X.to_numpy(),y.to_numpy())
+    grid_search_hgb = GridSearchCV(estimator=clfHGB,param_grid=parameters_hgb,scoring='roc_auc',cv=3,n_jobs=18)
+    grid_search_hgb.fit(X,y)
     pickle.dump(grid_search_hgb, open(f'{modelPath}/sklearnGradBoostHistClassifier_{data_type}_{i}.pkl', 'wb'))
     en = time.time()
     timeHGB = (en-st)/60
@@ -107,15 +107,15 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
     #########################
     #model = pickle.load(open(f'{trainingPath}/models/sklearnGradBoostHistClassifier_{data_type}_{i}', 'rb'))
     #clfHGB = pickle.load(model)
-    score = clfHGB.score(X.to_numpy(), y.to_numpy())
-    yHat = clfHGB.predict(X.to_numpy())
-    balanced_score = balanced_accuracy_score(y.to_numpy(),yHat)
-    auc = roc_auc_score(y.to_numpy(), clfHGB.predict_proba(X.to_numpy())[:, 1])
-    mcc = matthews_corrcoef(y.to_numpy(),yHat)
-    logloss = log_loss(y.to_numpy(),clfHGB.predict_proba(X.to_numpy())[:, 1])
-    jscore = jaccard_score(y.to_numpy(),yHat)
-    hloss = hamming_loss(y.to_numpy(),yHat)
-    f1score = f1_score(y.to_numpy(),yHat)
+    score = clfHGB.score(X, y)
+    yHat = clfHGB.predict(X)
+    balanced_score = balanced_accuracy_score(y,yHat)
+    auc = roc_auc_score(y, clfHGB.predict_proba(X)[:, 1])
+    mcc = matthews_corrcoef(y,yHat)
+    logloss = log_loss(y,clfHGB.predict_proba(X)[:, 1])
+    jscore = jaccard_score(y,yHat)
+    hloss = hamming_loss(y,yHat)
+    f1score = f1_score(y,yHat)
     fields=['gradient boosted classifier',score,balanced_score,auc,mcc,logloss,jscore,hloss,f1score,data_type,i]
 
     with open(modelFile,mode='a') as f:
@@ -162,7 +162,7 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
     dfSnps['log_prob_no_pheno'] = clfNVB.feature_log_prob_[0, :]
     dfSnps['log_prob_yes_pheno'] = clfNVB.feature_log_prob_[1, :]
     dfSnps2 = convert_log_prob_to_odds(dfSnps)
-
+    dfSnps2['feature'] = clfNVB.feature_names_in_
 
     en = time.time()
     timenvb = (en-st)/60
@@ -173,11 +173,11 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
         #get the featureZscores into a dataframe to merge with dfSnps2
         zscores = pd.DataFrame(data=featuresZscores).reset_index()
         zscores.columns=['feature','shap_zscore']
-    
+        dfSnps2 = dfSnps2.merge(zscores, on='feature',how='left')
     else:
         topFeatures = pd.DataFrame()
         zscores = pd.DataFrame()
-    return(dfSnps2,topFeatures,zscores)
+    return(dfSnps2,topFeatures)
 
 
 
@@ -206,10 +206,10 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
             models.to_csv(f,index=False)
             f.close()
 
-
+    print('pheno files are being read from: ')
     print(pheno_path)
 
-    full_columns = get_columns(pheno_path)
+    full_columns = get_columns(training_path)
 
     start = int(start)
     end = int(end)
@@ -226,7 +226,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 #           if i == 0:
 #               sectionSnps = full_columns[:istart+n]
 #           else:
-            sectionSnps = full_columns[istart:istart+n]
+            sectionSnps = full_columns[istart+6:istart+n]
             sectionPairs = sectionSnps
 
         else:
@@ -302,15 +302,15 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
             print('Test array shape = ',Xtest.shape)
 
-            allModelFeatures,topFeatures,zscores = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,)
+            allModelFeatures,topFeatures = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,)
             allModelFeatures['model#'] = i
-            allModelFeatures['feature'] = sectionPairs
+#           allModelFeatures['feature'] = sectionPairs
             allModelFeatures['model'] = data_type
             
-            if zscores.empty:
-                allModelFeatures['shap_zscore'] = np.nan
-            else:
-                allModelFeatures = allModelFeatures.merge(zscores,on='feature',how='left')
+#           if zscores.empty:
+#               allModelFeatures['shap_zscore'] = np.nan
+#           else:
+#               allModelFeatures = allModelFeatures.merge(zscores,on='feature',how='left')
             
             if topFeatures.empty:
                 pass
@@ -344,7 +344,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     #########   FOR DEBUGGING ######
-#   data_type = 'epi'
+#   data_type = 'main'
 #   pheno = 'type2Diabetes_test'
 #   pheno_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}'
 #   training_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'

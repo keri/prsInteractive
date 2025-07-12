@@ -100,13 +100,14 @@ def get_dataset_optimized(df_pathway, columns_to_get, chunk_processing=False):
     
     # Load withdrawal data
     machinePath = '/'.join(df_pathway.split('/')[:-3])
+    print('machine path to find withdrawals under: ',machinePath)
     withdrawal_path = f'{machinePath}/data/withdrawals.csv'
     
     print(f'Loading withdrawals from: {withdrawal_path}')
     
     try:
         withdrawn = pd.read_csv(withdrawal_path, header=None)
-        withdrawn_ids = set(withdrawn[0].astype(str))  # Convert to string and use set for faster lookup
+        withdrawn_ids = set(withdrawn[0].astype(int))  # Convert to string and use set for faster lookup
         print(f'Found {len(withdrawn_ids)} withdrawn participants')
     except FileNotFoundError:
         print("Warning: No withdrawal file found")
@@ -150,7 +151,7 @@ def get_dataset_optimized(df_pathway, columns_to_get, chunk_processing=False):
     if withdrawn_ids:
         print("Removing withdrawn participants...")
         initial_count = len(df)
-        df['IID'] = df['IID'].astype(str)  # Ensure string type for comparison
+        df['IID'] = df['IID'].astype(int)  # Ensure string type for comparison
         df = df[~df['IID'].isin(withdrawn_ids)]
         removed_count = initial_count - len(df)
         print(f"Removed {removed_count} withdrawn participants")

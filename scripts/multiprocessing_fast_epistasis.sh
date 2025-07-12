@@ -1,30 +1,30 @@
 #!/bin/bash
 
 
-
-#Keri Multerer October 2022
-#run fast fast-epistasis to generate seed snps
-
-
-echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
-echo "[WORKFLOW] number of cpus to run epistasis is set to: $N_CORES"
-
-
 if [ ! -d "${PHENO_PATH}" ]; then
 	echo "if you are running this script outside of the workflow you can either :"
 	echo "2) COMMENT OUT PRECEDING STEPS IN RUN DATA_CLEANING_WORKFLOW OR"
 	echo "3) run this as an isolated step using plink command"
-	echo "for i in $(seq 1 ${N}); do
+	echo "for i in $(seq 1 ${N_CORES}); do
 		cat output/directory/trainingEpi.epi.cc.${i} >> output/directory/trainingEpi.epi.c
 		done
-		plink --epistasis-summary-merge $OUTPUT_FILE $N --out output/directory/epiFiles/trainingCombinedEpi"
+		plink --epistasis-summary-merge $OUTPUT_FILE $N_CORES --out output/directory/epiFiles/trainingCombinedEpi"
 	echo "3) ./envSetUp.sh <pheno> <pheno string> <icd10> <n cores>"
 	echo "   ./run_data_cleaning_workflow.sh <pheno> or on hpc: sbatch run_data_cleaning_workflow_submit.sh <pheno> "
 	
 else
+	
 	#EPI_PATH is exported from data cleaning workflow
 	OUT_DIR="${EPI_PATH}/preSummaryFiles"
 	OUTPUT_FILE="${OUT_DIR}/trainingEpi.epi.cc"
+	
+	if [ ! -d "${OUT_DIR}" ]; then
+		echo "Folder '${OUT_DIR}' does not exist. Creating it..."
+		mkdir "${OUT_DIR}" 
+
+	else
+		echo "Folder '${OUT_DIR}' already exists."	
+	fi
 fi 
 
 
@@ -63,7 +63,7 @@ else
 fi
 
 EPI_FILE="$PHENO_PATH/epiFiles/trainingCombinedEpi.epi.cc.summary"
-echo "Epi file is set to ... $EPI_FILE"
+echo "Epi path is set to ... $EPI_FILE"
 
 #check to see if EPI_PATH exists
 if grep -q "^EPI_FILE=" "$PHENO_CONFIG"; then
@@ -76,6 +76,7 @@ if grep -q "^EPI_FILE=" "$PHENO_CONFIG"; then
 	fi
 else
 	echo "EPI_FILE=${EPI_FILE}" >> "$PHENO_CONFIG"
-	echo "export EPI_FILE" >> "$PHENO_CONFIG"	
-fi
+	echo "export EPI_FILE" >> "$PHENO_CONFIG"
 
+	
+fi

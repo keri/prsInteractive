@@ -52,8 +52,6 @@ N_CORES=$n
 EPI_PATH=$PROJECT_ROOT/results/$pheno/epiFiles
 EOF
 
-chmod 777 "$PROJECT_ROOT/env.config"
-
 echo "[WORKFLOW] DATA_PATH is set to: $PROJECT_ROOT/data"
 echo "[WORKFLOW] RESULTS_PATH is set to: $PROJECT_ROOT/results"
 echo "[WORKFLOW] Scripts directory: $PROJECT_ROOT/scripts"

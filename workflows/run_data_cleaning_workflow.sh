@@ -34,7 +34,7 @@ export PHENO_PATH
 export PHENO
 export PHENO_STR
 export ICD10
-export EPI_PATH
+export EPI_PATH="${PHENO_PATH}/epiFiles"
 export DATA_PATH
 
 

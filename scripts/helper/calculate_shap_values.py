@@ -58,8 +58,9 @@ def plot_and_save_top_features(featuresZscore,i,figPath,data_type):
         
 def calculate_plot_shap_values(model,X_test,y_test,i,figPath,data_type):
     
-    features = X_test.columns.tolist()
+    #features = X_test.columns.tolist()
     clfHGB = model.best_estimator_
+    features = clfHGB.feature_names_in_
     explainer = fasttreeshap.TreeExplainer(clfHGB, algorithm='auto',n_jobs=-1)
     shap_explainer = explainer(X_test,check_additivity=False)
     shap_values = shap_explainer.values
