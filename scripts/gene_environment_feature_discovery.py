@@ -306,31 +306,31 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
     # Prefer command-line input if provided; fallback to env var
-#   pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
-#   print(f"[PYTHON] Reading from: {pheno_path}")
-#   
-#   pheno = args.pheno or os.environ.get("PHENO")
-#   print(f"[PYTHON] Phenotype : {pheno}")
-#   
-#   env_type = args.env_type or os.environ.get("ENV_TYPE")
-#   print(f"data type : {env_type}")
-#   
-#   training_path = args.training_file or os.environ.get("TRAINING_PATH")
-#   print(f"training file : {training_path}")
-#   
-#   test_path = args.test_file or os.environ.get("TEST_PATH")
-#   print(f"test file : {test_path}")
-#   
-#   results_path = args.results_path or os.environ.get("RESULTS_PATH")
-#   print(f"results path : {results_path}")
+    pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
+    print(f"[PYTHON] Reading from: {pheno_path}")
+    
+    pheno = args.pheno or os.environ.get("PHENO")
+    print(f"[PYTHON] Phenotype : {pheno}")
+    
+    env_type = args.env_type or os.environ.get("ENV_TYPE")
+    print(f"data type : {env_type}")
+    
+    training_path = args.training_file or os.environ.get("TRAINING_PATH")
+    print(f"training file : {training_path}")
+    
+    test_path = args.test_file or os.environ.get("TEST_PATH")
+    print(f"test file : {test_path}")
+    
+    results_path = args.results_path or os.environ.get("RESULTS_PATH")
+    print(f"results path : {results_path}")
     
 
-    pheno='type2Diabetes_test'
-    pheno_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}'
-    env_type='cardioMetabolic'
-    training_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
-    test_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
-    results_path='/Users/kerimulterer/prsInteractive/results'
+#   pheno='type2Diabetes_test'
+#   pheno_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}'
+#   env_type='cardioMetabolic'
+#   training_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
+#   test_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
+#   results_path='/Users/kerimulterer/prsInteractive/results'
     
     
     

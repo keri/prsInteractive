@@ -85,7 +85,7 @@ def train_models(X,y,modelPath,pheno,data_type,i):
     # clfHGB = HistGradientBoostingClassifier(early_stopping='auto',cv=10,l2_regularization=0, learning_rate=0.001,
     #                            max_depth=25, max_iter=1000, scoring='f1_micro').fit(X, y)
     clfHGB = HistGradientBoostingClassifier(early_stopping='auto')
-    grid_search_hgb = GridSearchCV(estimator=clfHGB,param_grid=parameters_hgb,scoring='roc_auc',cv=3,n_jobs=18)
+    grid_search_hgb = GridSearchCV(estimator=clfHGB,param_grid=parameters_hgb,scoring='roc_auc',cv=3,n_jobs=60)
     grid_search_hgb.fit(X,y)
     pickle.dump(grid_search_hgb, open(f'{modelPath}/sklearnGradBoostHistClassifier_{data_type}_{i}.pkl', 'wb'))
     en = time.time()

@@ -6,10 +6,10 @@
 #SBATCH --job-name=train_score_section_models
 #SBATCH -o  /nfs/scratch/projects/ukbiobank/err_out/%A.out
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A.err
-#SBATCH --partition=bigmem
-#SBATCH --cpus-per-task=50
-#SBATCH --mem=800G
-#SBATCH --time=06:00:00
+#SBATCH --partition=quicktest
+#SBATCH --cpus-per-task=60
+#SBATCH --mem=120G
+#SBATCH --time=01:00:00
 #
 
 module load Miniconda3/4.9.2
@@ -49,7 +49,7 @@ export EPI_FILE=$EPI_FILE
 
 python "${SCRIPTS_DIR}/sklearnSectionModelsScoreTrain.py"
 
-conda deactivate
+#conda deactivate
 
 
 
