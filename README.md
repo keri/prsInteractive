@@ -158,7 +158,7 @@ bash run_workflow_test.sh
 ####################  HPC INSTRUCTIONS ###########
 #   STEPS IN ANALYSIS 
 
-## 1) check to see if a conda environment has been created in /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
+## 1) check to see if a conda environment has been created in /prsInteractive/ukb_env
 - if ukb_env is not present, create ukb_env in root directory prsInteractive:
   Create environment from environment.yml file
   This will create a conda "ukb_env" folder with all of the dependencies in the prsInteractive/ directory
@@ -188,7 +188,7 @@ bash run_workflow_test.sh
   
   ```bash 
   
-  $ cd nfs/scratch/projects/ukbiobank/prsInteractive/hpc
+  $ cd path/to/prsInteractive/hpc
   
   $ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string"} {n}
   #i.e. sbatch run_data_cleaning_workflow_submit.sh myocardialInfarction I21 "myocardial infarction" 40
@@ -268,6 +268,8 @@ bash run_workflow_test.sh
   ```
   
   # Running analysis with WDL workflow
+  
+  ########## WORKING IN PROGRESS ########
   
   ### These instructions use the cromwell backend to compile .wdl workflow
   ###
