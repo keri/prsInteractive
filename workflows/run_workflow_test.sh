@@ -14,8 +14,8 @@ source ../env.config  # because you're in prsInteractive/workflows
 
 #
 ### Set base directories
-##mkdir -p "$PRS_INTERACTIVE_HOME/testData/variant_calls"
-##chmod +x "$PRS_INTERACTIVE_HOME/testData"
+mkdir -p "$PRS_INTERACTIVE_HOME/testData/variant_calls"
+chmod +x "$PRS_INTERACTIVE_HOME/testData"
 DATA_PATH="$PRS_INTERACTIVE_HOME/testData"
 PHENO_PATH=$PRS_INTERACTIVE_HOME/results/$pheno
 WITHDRAWN_PATH=/Users/kerimulterer/prsInteractive/testData/withdrawals.csv
