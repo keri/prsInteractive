@@ -142,7 +142,7 @@ def create_saturation_plots(df,featureScores,data_type,figurePath,prsPath):
 
 
 #(pheno,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,scores_path,covar_file,hla_file,feature_file,topN=10000)
-def main(pheno,phenoPath,testPathway,envFileTest,holdoutPathway,envFileHoldout,covarFile,hlaFile,featureFile,topN=10000):
+def main(pheno,withdrawalPath,phenoPath,testPathway,envFileTest,holdoutPathway,envFileHoldout,covarFile,hlaFile,featureFile,topN=10000):
 #   pheno = 'type2Diabetes'
 #   topN=1000
         ##########################################
@@ -234,7 +234,7 @@ def main(pheno,phenoPath,testPathway,envFileTest,holdoutPathway,envFileHoldout,c
             cardioEnvData = cardioEnvHoldout
             
         ####################  DOWNLOAD THE DATASET WITH ALL GENO FEATURES ###################
-        mainEpiDf = get_dataset(data_pathway,featuresToDownload,full_columns)
+        mainEpiDf = get_dataset(data_pathway,withdrawalPath,featuresToDownload,use_chunking=True)
         
         #get the IIDs for dataset to be used in cardio data and covar PRS
         #get the participants in the mainEpiDf dataset
@@ -311,6 +311,7 @@ if __name__ == '__main__':
     parser.add_argument("--holdout_env_gen_file", help="holdout environmental data to use")
     parser.add_argument("--pheno", help="Phenotype to analyze")
     parser.add_argument("--feature_scores_file", help="data path to feature scores from association modelling")
+    parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
     
     
     args = parser.parse_args()
@@ -342,6 +343,10 @@ if __name__ == '__main__':
     
     feature_file = args.feature_scores_file or os.environ.get("FEATURE_SCORES_FILE")
     print(f"feature scores file : {feature_file}")
+    
+    withdrawal_path = args.withdrawal_path or os.environ.get("WITHDRAWAL_PATH")
+    print(f"reading withdrawals from file : {withdrawal_path}")
+    
 
     
 #   pheno='type2Diabetes_test'
@@ -383,9 +388,11 @@ if __name__ == '__main__':
         
     if not feature_file:
         raise ValueError("You must provide a feature scores file from association modelling --feature_scores_file or set the FEATURE_SCORES_FILE environment variable.")
-        
+    
+    if not withdrawal_path:
+        raise ValueError("You must provide a path to withdrawals --withdrawal_path or set the WITHDRAWAL_PATH environment variable.")
             
-    main(pheno,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,topN=10000)
+    main(pheno,withdrawal_path,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,topN=10000)
 
 
     

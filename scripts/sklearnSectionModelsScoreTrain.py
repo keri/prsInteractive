@@ -181,7 +181,7 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
 
 
 
-def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
+def main(pheno,withdrawalPath,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
     print('starting analysis .....')
 
@@ -228,11 +228,13 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 #           else:
             sectionSnps = full_columns[istart+6:istart+n]
             sectionPairs = sectionSnps
+            sectionPairs = [x for x in sectionPairs if pd.notna(x)]
 
         else:
             print('epi_path to get filtered epi pairs ..',epi_path)
             epiColumns = get_epi_columns(epi_path)
             sectionPairs = epiColumns[istart:istart+n]
+            sectionPairs = [x for x in sectionPairs if pd.notna(x)]
             sectionSnps = get_epi_snps(sectionPairs)
 
 
@@ -271,7 +273,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
 
         #train models and pickle trained models to be used in scoring
 
-        mainArray = get_dataset(training_path,sectionSnps, use_chunking=True) #main effect snps so both pathways are the same
+        mainArray = get_dataset(training_path,withdrawalPath,sectionSnps, use_chunking=True) #main effect snps so both pathways are the same
     #     the first columns will be IID, PHENOTYPE
         y = mainArray['PHENOTYPE']
         Xmain = mainArray.drop(columns=["PHENOTYPE"])
@@ -291,7 +293,7 @@ def main(pheno,pheno_path,training_path,test_path,epi_path,data_type,start,end):
             imp_mean,clfNVB,clfHGB = train_models(Xmain,y,modelPath,pheno,data_type,i)
 
 
-            testArray = get_dataset(test_path,sectionSnps, use_chunking=True)
+            testArray = get_dataset(test_path,withdrawalPath,sectionSnps, use_chunking=True)
 
             yTest = testArray["PHENOTYPE"]
             Xtest = testArray.drop(columns=['PHENOTYPE'])
@@ -340,11 +342,12 @@ if __name__ == '__main__':
     parser.add_argument("--start", help="start job")
     parser.add_argument("--end", help="end job")
     parser.add_argument("--pheno", help="Phenotype to analyze")
+    parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
 
     args = parser.parse_args()
     
     #########   FOR DEBUGGING ######
-#   data_type = 'main'
+#   data_type = 'epi'
 #   pheno = 'type2Diabetes_test'
 #   pheno_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}'
 #   training_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
@@ -372,6 +375,8 @@ if __name__ == '__main__':
     test_path = args.test_file or os.environ.get("TEST_PATH")
     print(f"test file : {test_path}")
     
+    withdrawal_path = args.withdrawal_path or os.environ.get("WITHDRAWAL_PATH")
+    print(f"reading withdrawals from file : {withdrawal_path}")
     
     
     if data_type == 'epi':
@@ -423,5 +428,5 @@ if __name__ == '__main__':
     os.makedirs(dir_path, exist_ok=True)
 
         
-    main(pheno,pheno_path,training_path,test_path,epi_file,data_type,start,end)
+    main(pheno,withdrawal_path,pheno_path,training_path,test_path,epi_file,data_type,start,end)
     

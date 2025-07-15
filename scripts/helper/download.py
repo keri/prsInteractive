@@ -79,7 +79,7 @@ def get_column_index(columns_to_get, full_columns):
     print(f"Found {len(indices)} of {len(columns_to_get)} requested columns")
     return indices
 
-def get_dataset_optimized(df_pathway, columns_to_get, chunk_processing=False):
+def get_dataset_optimized(df_pathway, withdrawal_path,columns_to_get, chunk_processing=False):
     """
     Optimized dataset loading with memory management
     
@@ -112,7 +112,7 @@ def get_dataset_optimized(df_pathway, columns_to_get, chunk_processing=False):
     # Load withdrawal data
     machinePath = '/'.join(df_pathway.split('/')[:-3])
     print('machine path to find withdrawals under: ',machinePath)
-    withdrawal_path = f'{machinePath}/data/withdrawals.csv'
+    withdrawal_path = f'{withdrawal_path}'
     
     print(f'Loading withdrawals from: {withdrawal_path}')
     
@@ -235,7 +235,7 @@ def optimize_datatypes(df):
     return df
 
 # Enhanced wrapper function
-def get_dataset(df_pathway, columns_to_get, use_chunking=False, optimize_memory=True):
+def get_dataset(df_pathway, withdrawal_path, columns_to_get, use_chunking=False, optimize_memory=True):
     """
     Main function with additional options
     
@@ -255,7 +255,7 @@ def get_dataset(df_pathway, columns_to_get, use_chunking=False, optimize_memory=
         print("Large file detected - enabling chunked processing")
         use_chunking = True
         
-    return get_dataset_optimized(df_pathway, columns_to_get, chunk_processing=use_chunking)
+    return get_dataset_optimized(df_pathway, withdrawal_path, columns_to_get, chunk_processing=use_chunking)
 
 #def get_column_index(snp_list,full_columns):
 #   '''input : path/to/merged_allChromosomes.raw
@@ -335,7 +335,8 @@ if __name__ == "__main__":
     
     phenoPath = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test'
     trainingPath = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/trainingCombined.raw'
+    withdrawalPath = '/Users/kerimulterer/prsInteractive/testData/withdrawals.csv'
     snpList = get_columns(phenoPath)
 #   columns_to_get = snpList
 #   
-    mainArray = get_dataset(trainingPath,snpList, use_chunking=True)
+    mainArray = get_dataset(trainingPath,withdrawalPath, snpList, use_chunking=True)

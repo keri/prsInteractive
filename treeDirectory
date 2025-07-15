@@ -1,0 +1,17 @@
+.
+├── data
+│   └── variant_calls
+├── hpc
+├── results
+│   ├── epiFiles
+│   │   └── preSummaryFiles
+│   ├── figures
+│   └── models
+├── scripts
+│   ├── helper
+│   └── test
+├── testData
+│   └── variant_calls
+└── workflows
+
+15 directories

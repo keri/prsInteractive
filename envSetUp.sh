@@ -12,12 +12,44 @@ set -e
 # Generate a fixed configuration
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-
 # Export environment variable for Docker mounting
 export PRS_INTERACTIVE_HOME="$PROJECT_ROOT"
 
+echo "[SETUP] Setting up environment for phenotype: $pheno"
+
+# Initialize conda for bash (if not already done)
+if ! command -v conda &> /dev/null; then
+    echo "ERROR: conda not found. Please install conda/miniconda first."
+    exit 1
+fi
+
+# Initialize conda in this shell
+eval "$(conda shell.bash hook)"
+
+# Check if environment exists, create if it doesn't
+ENV_NAME="ukb_env"
+if ! conda env list | grep -q "^${ENV_NAME}\s"; then
+    echo "[CONDA] Creating conda environment from environment.yml..."
+    conda env create -f "$PROJECT_ROOT/environment.yml"
+else
+    echo "[CONDA] Environment $ENV_NAME already exists"
+    # Optionally update environment
+    echo "[CONDA] Updating environment from environment.yml..."
+    conda env update -f "$PROJECT_ROOT/environment.yml" --prune
+fi
+
+# Activate the environment
+echo "[CONDA] Activating environment: $ENV_NAME"
+conda activate $ENV_NAME
+
+# Verify key tools are available
+echo "[CONDA] Verifying environment setup..."
+python --version
+R --version
+echo "[CONDA] Environment activated successfully"
 
 # Create necessary pheno specific directories
+echo "[SETUP] Creating directory structure..."
 mkdir -p "$PROJECT_ROOT/results/$pheno"
 mkdir -p "$PROJECT_ROOT/results/$pheno/scores"
 mkdir -p "$PROJECT_ROOT/results/$pheno/models"
@@ -35,11 +67,11 @@ SCRIPTS_DIR=$PROJECT_ROOT/scripts
 DATA_PATH=$PROJECT_ROOT/data
 HPC_DIR=$PROJECT_ROOT/hpc
 ENV_PATH=$PROJECT_ROOT/ukb_env
+CONDA_ENV_NAME=$ENV_NAME
 WITHDRAWN_PATH=$PROJECT_ROOT/data/withdrawals.csv
 EOF
 
-chmod 777 "$PROJECT_ROOT/env.config"
-
+chmod 644 "$PROJECT_ROOT/env.config"
 
 # Create a .env file for future reference
 cat > "$PROJECT_ROOT/results/$pheno/pheno.config" << EOF
@@ -52,22 +84,19 @@ N_CORES=$n
 EPI_PATH=$PROJECT_ROOT/results/$pheno/epiFiles
 EOF
 
-chmod 777 "$PROJECT_ROOT/results/$pheno/pheno.config"
+chmod 644 "$PROJECT_ROOT/results/$pheno/pheno.config"
 
 echo "[WORKFLOW] DATA_PATH is set to: $PROJECT_ROOT/data"
 echo "[WORKFLOW] RESULTS_PATH is set to: $PROJECT_ROOT/results"
 echo "[WORKFLOW] Scripts directory: $PROJECT_ROOT/scripts"
-echo "CONDA ENV BEING ACTIVATED ...: $PROJECT_ROOT/ukb_env"
+echo "[WORKFLOW] CONDA ENV activated: $ENV_NAME"
 echo "[WORKFLOW] HPC_DIR IS SET TO: $PROJECT_ROOT/hpc"
-
-
 echo "[WORKFLOW] PHENOTYPE PATH is set to: $PROJECT_ROOT/results/$pheno"
 echo "[PHENO] PHENO is set to: $pheno"
 echo "[WORKFLOW] OUTPUT SCORES directory: $PROJECT_ROOT/results/$pheno/scores"
-echo "[WORKFLOW] OUTPUT MODELS directory:: $PROJECT_ROOT/results/$pheno/models"
-echo "[WORKFLOW] OUTPUT EPI RESULTS directory:: $PROJECT_ROOT/results/$pheno/epiFiles"
-echo "[WORKFLOW] OUTPUT PHENO FIGURES directory:: $PROJECT_ROOT/results/$pheno/figures"
-
+echo "[WORKFLOW] OUTPUT MODELS directory: $PROJECT_ROOT/results/$pheno/models"
+echo "[WORKFLOW] OUTPUT EPI RESULTS directory: $PROJECT_ROOT/results/$pheno/epiFiles"
+echo "[WORKFLOW] OUTPUT PHENO FIGURES directory: $PROJECT_ROOT/results/$pheno/figures"
 
 DATA_PATH="$PROJECT_ROOT/data"
 # Make sure data directory exists
@@ -75,6 +104,7 @@ if [ ! -d "$DATA_PATH" ]; then
     echo "WARNING: Data directory $DATA_PATH does not exist!"
     echo "Please create it and place your data files there: participant.csv participant_environment.csv covar.csv ukb_hla_v2.txt hla_participant.csv withdrawals.csv"
 fi
+
 # Check for required data files
 echo "Checking for required data files..."
 for file in "participant.csv" "participant_environment.csv" "covar.csv" "ukb_hla_v2.txt" "hla_participant.csv" "withdrawals.csv"; do
@@ -84,9 +114,12 @@ for file in "participant.csv" "participant_environment.csv" "covar.csv" "ukb_hla
         echo "✓ Found: $file"
     fi
 done
-    
 
-
+echo "[SETUP] Environment setup complete!"
+echo ""
+echo "To run workflow steps, use:"
+echo "  source env.config && conda activate $ENV_NAME"
+echo "  # then run your scripts"
 
 #bash "$PROJECT_ROOT/update_pipeline_inputs.sh" "$pheno" "$icd10" "$phenoStr" $n "$platform"
 

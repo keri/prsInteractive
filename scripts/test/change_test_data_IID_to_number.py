@@ -10,6 +10,7 @@ root_dir = os.environ.get("PRS_INTERACTIVE_HOME")
 hla_path = f'{root_dir}/results/participant_hla.csv'
 env_path = f'{root_dir}/results/participant_environment.csv'
 cov_path = f'{root_dir}/results/covar.csv'
+withdrawal_path = f'{root_dir}/testData/withdrawals.csv'
 
 
 def convert_ID_for_csv(input_file):
@@ -28,6 +29,9 @@ def convert_ID_for_csv(input_file):
 
 for input_file in [hla_path,env_path,cov_path]:
 	convert_ID_for_csv(input_file)
+	
+withdrawals = pd.DataFrame([181,200,30,89])
+withdrawals.to_csv(withdrawal_path,index=False,header=None)
 	
 	
 print('done creating IID and FID numeric values for training workflow !!')

@@ -79,7 +79,7 @@ def score_models(X,y,pheno,env_type,modelFile,i,clfHGB,chunk):
 
 
 
-def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
+def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPath):
     ############################   ENVIRONMENT VARIABLES     ######################
 
     figPath = f'{phenoPath}/figures'
@@ -143,13 +143,13 @@ def main(pheno,env_type,phenoPath,trainingPath,testPath,resultsPath):
         modelFeatures2 = get_epi_snps(modelFeatures['feature'].tolist()[start:stop])
     
         #trainingData = get_dataset(trainingPath,modelFeatures2)
-        trainingData = get_dataset(trainingPath, modelFeatures2, use_chunking=True)
+        trainingData = get_dataset(trainingPath, withdrawalPath,modelFeatures2, use_chunking=True)
         y = trainingData['PHENOTYPE']
         #drops the PHENOTYPE column
         trainingData = create_epi_df(trainingData,modelFeatures['feature'].tolist()[start:stop])
         #
         #testData = get_dataset(testPath,modelFeatures2)
-        testData = get_dataset(testPath, modelFeatures2, use_chunking=True)
+        testData = get_dataset(testPath, withdrawalPath,modelFeatures2, use_chunking=True)
         yTest = testData['PHENOTYPE']        
         testData = create_epi_df(testData,modelFeatures['feature'].tolist()[start:stop])
         
@@ -301,6 +301,7 @@ if __name__ == '__main__':
     parser.add_argument("--env_type", help="data type to analyze")
     parser.add_argument("--pheno", help="Phenotype to analyze")
     parser.add_argument("--results_path", help="data path to results")
+    parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
     
     
     args = parser.parse_args()
@@ -323,6 +324,9 @@ if __name__ == '__main__':
     
     results_path = args.results_path or os.environ.get("RESULTS_PATH")
     print(f"results path : {results_path}")
+    
+    withdrawal_path = args.withdrawal_path or os.environ.get("WITHDRAWAL_PATH")
+    print(f"reading withdrawals from file : {withdrawal_path}")
     
 
 #   pheno='type2Diabetes_test'
@@ -351,7 +355,10 @@ if __name__ == '__main__':
         
     if not results_path:
         raise ValueError("You must provide a results path via --results_path or set the RESULTS_PATH environment variable.")
-        
     
-    main(pheno,env_type,pheno_path,training_path,test_path,results_path)
+    if not withdrawal_path:
+        raise ValueError("You must provide a path to withdrawals --withdrawal_path or set the WITHDRAWAL_PATH environment variable.")
+    
+    main(pheno,withdrawal_path,env_type,pheno_path,training_path,test_path,results_path)
+    
     

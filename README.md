@@ -7,27 +7,23 @@ The prs Insteractive pipeline was developed using genotyped, imputed HLA, and en
 
 ```bash
 
-.root (prsInteractive)
+.
 ├── data
 │   └── variant_calls
-├── figures
 ├── hpc
 ├── results
-│   └── phenotype
-│       └── epiFiles
-│           └── preSummaryFiles
+│   ├── epiFiles
+│   │   └── preSummaryFiles
+│   ├── figures
+│   └── models
 ├── scripts
 │   ├── helper
 │   └── test
 ├── testData
 │   └── variant_calls
-├── testResults
-│   └── type2Diabetes
-│       └── epiFiles
-│           └── preSummaryFiles
 └── workflows
 
-19 directories
+15 directories
 
 ```
 
@@ -104,55 +100,16 @@ Workflow can use as input any clinical marker which includes blood counts, blood
   
 # Output files and folder structure:
 
-```bash 
+```
+.
+└── type2Diabetes_test
+├── epiFiles
+│   └── preSummaryFiles
+├── figures
+├── models
+└── scores
 
-results (root)
-├── covar.txt
-├── pheno
-│   ├── combinedID.txt
-│   ├── epiFiles
-│   │   └── preSummaryFiles
-│   │       ├── trainingEpi.epi.cc.1
-│   │       ├── trainingEpi.epi.cc..
-│   │       ├── trainingEpi.epi.cc.40
-│   │       ├── trainingEpi.epi.cc.summary.1
-│   │       ├── trainingEpi.epi.cc.summary..
-│   │       ├── trainingEpi.epi.cc.summary.40
-│   │       └── trainingEpi.log
-│   ├── figures
-│   ├── holdoutCombined.bed
-│   ├── holdoutCombined.bim
-│   ├── holdoutCombined.fam
-│   ├── holdoutCombined.log
-│   ├── holdoutCombined.nosex
-│   ├── holdoutCombined.raw
-│   ├── holdoutCombinedRaw.log
-│   ├── holdoutID.txt
-│   ├── merged_allChromosomes.bed
-│   ├── merged_allChromosomes.bim
-│   ├── merged_allChromosomes.fam
-│   ├── merged_allChromosomes.log
-│   ├── merged_allChromosomes.snplist
-│   ├── models
-│   │   ├── imp_mean_main_{i}.pkl
-│   │   ├── sklearnGradBoostHistClassifier_main_{i}.pkl
-│   │   └── sklearnNaiveBayes_main_{i}.pkl
-│   ├── pheno_config.sh
-│   ├── pheno.txt
-│   ├── scores
-│   │   ├── featureScores.csv
-│   │   ├── sklearnModelScoresSections.csv
-│   │   └── importantFeaturesPostShap.csv
-│   ├── testCombined.raw
-│   ├── testCombinedRaw.log
-│   ├── testID.txt
-│   ├── trainingCombined.raw
-│   ├── trainingCombinedRaw.log
-│   └── trainingID.txt
-├── participant_environment.csv
-└── participant_hla.csv
-
-6 directories 
+7 directories
 
 ```
 
@@ -164,9 +121,39 @@ Workflow can use as input any clinical marker which includes blood counts, blood
 ![PRS Pipeline Workflow](READMEfigures/simplifiedWorkflow.png)
 
 
-# Important Underlying Feature Analysis using T2D data as an example
+############### RUNNING TEST WORKFLOW ON LOCAL MACHINE ##################
+# clone github repository to local machine
 
-#![Important Feature Pipeline Workflow](READMEfigures/importantFeatureWorkflowSHAP.png)
+# INSTALL miniconda
+
+[miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install, "Install instructions")
+
+# Test Workflow overview
+
+## creates and activates a conda environment ukb_env
+
+## creates folders and results for type2Diabetes_test using steps:
+
+- create simulation data in testData directory:
+  + genotyped data
+  + environmental data
+  + hla data
+  + covariate data
+  
+- use simulated data for all steps to calculating PRS for G, GxG, G+(GxG) and GxGxE datasets
+
+- results will be found in the prsInteractive/results/type2Diabetes_test
+
+
+
+``` 
+cd prsInteractive/workflows/
+
+bash run_workflow_test.sh
+
+```
+
+
 
 ####################  HPC INSTRUCTIONS ###########
 #   STEPS IN ANALYSIS 

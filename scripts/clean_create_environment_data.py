@@ -63,7 +63,7 @@ def combine_gene_environment(envGeneticDf,geneticEnvFeatureList):
     return combinedDf
     
 
-def main(phenoPath,trainingPath,testPath,holdoutPath,envDf,hlaDf,importantFeaturesFile):
+def main(phenoPath,withdrawalPath, trainingPath,testPath,holdoutPath,envDf,hlaDf,importantFeaturesFile):
     '''
     input:
         string trainingPath = absolute path to gentoyped training set
@@ -103,19 +103,19 @@ def main(phenoPath,trainingPath,testPath,holdoutPath,envDf,hlaDf,importantFeatur
     #expand the features into a list and filter redundant features
     expandedSnps = get_epi_snps(set(epiGenoFeatures))
     
-    trainingDf = get_dataset(trainingPath, expandedSnps,use_chunking=True)
+    trainingDf = get_dataset(trainingPath,withdrawalPath,expandedSnps,use_chunking=True)
     trainingDf = create_epi_df(trainingDf, epiGenoFeatures)
     geneEnvTraining = trainingDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvTraining = geneEnvTraining.merge(hlaDf,left_index=True,right_index=True,how='left')
     
     
-    testDf = get_dataset(testPath, expandedSnps, use_chunking=True)
+    testDf = get_dataset(testPath, withdrawalPath, expandedSnps, use_chunking=True)
     testDf = create_epi_df(testDf, epiGenoFeatures)
     geneEnvTest = testDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvTest = geneEnvTest.merge(hlaDf,left_index=True,right_index=True,how='left')
     
     
-    holdoutDf = get_dataset(holdoutPath, expandedSnps)
+    holdoutDf = get_dataset(holdoutPath, withdrawalPath, expandedSnps,use_chunking=True)
     holdoutDf = create_epi_df(holdoutDf, epiGenoFeatures)
     geneEnvHoldout = holdoutDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvHoldout = geneEnvHoldout.merge(hlaDf,left_index=True,right_index=True,how='left')
@@ -159,6 +159,7 @@ if __name__ == '__main__':
     parser.add_argument("--env_file",help="Environmental data for participants")
     parser.add_argument("--hla_file",help="HLA data for participants")
     parser.add_argument("--gene_env_file",help="Genetic environmental epistatic features")
+    parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
     
     
     
@@ -186,7 +187,8 @@ if __name__ == '__main__':
     gene_env_file = args.gene_env_file or os.environ.get("GENE_ENV_FILE")
     print(f"reading from gene environment epi features file : {gene_env_file}")
     
-    
+    withdrawal_path = args.withdrawal_path or os.environ.get("WITHDRAWAL_PATH")
+    print(f"reading withdrawals from file : {withdrawal_path}")
     
     print(f"[PYTHON] Reading training data from: {training_file}")
     print(f"[PYTHON] Reading test data from: {test_file}")
@@ -227,7 +229,7 @@ if __name__ == '__main__':
     hlaDf.set_index(['IID'],inplace=True)
     
     
-    main(pheno_path,training_file,test_file,holdout_file,envDf,hlaDf,gene_env_file)
+    main(pheno_path,withdrawal_path, training_file,test_file,holdout_file,envDf,hlaDf,gene_env_file)
 #   main(args.pheno_path,args.training_file,args.test_file,args.holdout_file,args.env_type,envDf,hlaDf)
         
 
