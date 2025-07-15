@@ -99,9 +99,10 @@ if [ "$DATA_TYPE" == "epi" ]; then
             echo "✓ Successfully updated EPI_FILE in config"
             rm "${CONFIG_FILE}.backup"  # Remove backup if successful
             export EPI_FILE=$NEW_EPI_FILE
+            export INPUT_FILE=$NEW_EPI_FILE
         else
             echo "❌ Failed to update config file"
-            mv "${config_file}.backup" "$config_file"  # Restore backup
+            mv "${CONFIG_FILE}.backup" "$CONFIG_FILE"  # Restore backup
             
         fi
         

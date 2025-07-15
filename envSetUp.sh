@@ -9,7 +9,7 @@ n=$4
 
 set -e
 
-# Generate a fixed Cromwell configuration
+# Generate a fixed configuration
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 
@@ -52,6 +52,8 @@ N_CORES=$n
 EPI_PATH=$PROJECT_ROOT/results/$pheno/epiFiles
 EOF
 
+chmod 777 "$PROJECT_ROOT/results/$pheno/pheno.config"
+
 echo "[WORKFLOW] DATA_PATH is set to: $PROJECT_ROOT/data"
 echo "[WORKFLOW] RESULTS_PATH is set to: $PROJECT_ROOT/results"
 echo "[WORKFLOW] Scripts directory: $PROJECT_ROOT/scripts"
@@ -66,13 +68,7 @@ echo "[WORKFLOW] OUTPUT MODELS directory:: $PROJECT_ROOT/results/$pheno/models"
 echo "[WORKFLOW] OUTPUT EPI RESULTS directory:: $PROJECT_ROOT/results/$pheno/epiFiles"
 echo "[WORKFLOW] OUTPUT PHENO FIGURES directory:: $PROJECT_ROOT/results/$pheno/figures"
 
-#check to see if a testing run with a dedicated testData folder
 
-#if [[ "$pheno" =~ "test" ]]; then
-#   echo "running a test and using testData folder"
-#   DATA_PATH="$PROJECT_ROOT/testData"
-#   
-#else
 DATA_PATH="$PROJECT_ROOT/data"
 # Make sure data directory exists
 if [ ! -d "$DATA_PATH" ]; then
@@ -89,9 +85,6 @@ for file in "participant.csv" "participant_environment.csv" "covar.csv" "ukb_hla
     fi
 done
     
-#fi
-
-
 
 
 

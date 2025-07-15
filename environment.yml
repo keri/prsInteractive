@@ -2,6 +2,7 @@ name: ukb_env
 channels:
     - conda-forge
     - bioconda
+    - r
     - defaults
 dependencies:
     - python=3.9
@@ -12,6 +13,16 @@ dependencies:
     - scikit-learn
     - shap
     - pip
+    # R and R packages
+    - r-base=4.3.*
+    - r-glmnet
+    - r-data.table
+    - r-dplyr
+    - r-domc
+    - r-proc
+    - r-desctools
+    - r-stringr
+    - r-argparse
     - pip:
         - fasttreeshap
         - ipython

@@ -1,13 +1,34 @@
+# Set CRAN mirror first
+options(repos = c(CRAN = "https://cran.rstudio.com/"))
+
 library(glmnet)
-install.packages("data.table")
-library(data.table)
+
+# Conditional installation
+if (!require(data.table, quietly = TRUE)) {
+  install.packages("data.table")
+  library(data.table)
+}
+
 library(dplyr)
 library(doMC)
 library(pROC)
 library(DescTools)
 library(stringr)
-install.packages("argparse")
-library(argparse)
+
+if (!require(argparse, quietly = TRUE)) {
+  install.packages("argparse")
+  library(argparse)
+}
+
+#library(glmnet)
+#library(data.table)
+#library(dplyr)
+#library(doMC)
+#library(pROC)
+#library(DescTools)
+#library(stringr)
+#library(argparse)
+
 registerDoMC(cores = 18)
 
 
@@ -175,37 +196,30 @@ download_covariate_data <- function(covar_file) {
 }
 
 
-create_epi_df <- function(epiDf, pairList,cardio_df=data.table()) {
+create_epi_df <- function(epiDf, pairList, cardio_df=data.table()) {
   # Convert epiDf to data.table if it is not already
   epiDf <- as.data.table(epiDf)
   
   # Initialize an empty data.table for the final result
   epiArrayFinal <- data.table()
   
-  
-  # Set  IID as key to preserve columns
-  # setkey(epiArrayFinal,IID)
-  
   # Loop through each pair in pairList
   for (pair in pairList) {
-
-    snps <- strsplit(pair, ",")[[1]]
-    # Sum the columns corresponding to the SNPs
-    snps_sum <- rowSums(epiDf[, ..snps])
-    # Sum the columns corresponding to the SNPs
-    snps_sum <- rowSums(epiDf[, ..snps])
     
-    # Create a data.table for the summed SNPs with column name as pair
-    temp_dt <- data.table(temp = snps_sum)
+    snps <- strsplit(pair, ",")[[1]]
+    # Multiply the columns corresponding to the SNPs (element-wise product)
+    snps_product <- apply(epiDf[, ..snps], 1, prod)
+    
+    # Create a data.table for the multiplied SNPs with column name as pair
+    temp_dt <- data.table(temp = snps_product)
     setnames(temp_dt, "temp", pair)
     
     # Concatenate with the final result
     epiArrayFinal <- cbind(epiArrayFinal, temp_dt)
   }
   
-  
-  #bind the IID column to array
-  epiArrayFinal <- cbind(epiDf$IID,epiArrayFinal)
+  # Bind the IID column to array
+  epiArrayFinal <- cbind(epiDf$IID, epiArrayFinal)
   
   # Rename the column 'V1' to 'IID'
   setnames(epiArrayFinal, "V1", "IID")
@@ -433,8 +447,8 @@ get_epi_snps <- function(epiFeatures) {
 get_important_features <- function(feature_pathway){
 
   #file has 3 columns : [feature,data_type:(main,epi)]
-  # feature_file = paste0(feature_pathway,'/SHAPFeatureImportance/importantFeaturesForAssociationAnalysis.csv')
-  feature_file = paste0(feature_pathway,'/importantFeaturesPostShap.csv')
+  feature_file = paste0(feature_pathway,'/importantFeaturesForAssociationAnalysis.csv')
+# feature_file = paste0(feature_pathway,'/importantFeaturesPostShap.csv')
   important_features = read.csv(feature_file)
 
   epi_main_features = c(important_features$feature)
@@ -449,38 +463,39 @@ get_important_features <- function(feature_pathway){
 
 ################################ GLOBAL VARIABLES  ########################
 
-# parser <- ArgumentParser()
-# parser$add_argument("--results_path", required = TRUE)
-# parser$add_argument("--data_path", required = TRUE)
-# parser$add_argument("--hla_file", required = TRUE) 
-# parser$add_argument("--covar_file", required = TRUE)
-# parser$add_argument("--pheno_path", required = TRUE)
-# parser$add_argument("--training_file", required = TRUE)
-# parser$add_argument("--test_file", required = TRUE)
-# parser$add_argument("--training_env_gen_file", required = TRUE)
-# parser$add_argument("--test_env_gen_file", required = TRUE)
-# 
-# args <- parser$parse_args()
+parser <- ArgumentParser()
+parser$add_argument("--results_path", required = TRUE)
+parser$add_argument("--data_path", required = TRUE)
+parser$add_argument("--hla_file", required = TRUE) 
+parser$add_argument("--covar_file", required = TRUE)
+parser$add_argument("--pheno_path", required = TRUE)
+parser$add_argument("--training_file", required = TRUE)
+parser$add_argument("--test_file", required = TRUE)
+parser$add_argument("--training_env_gen_file", required = TRUE)
+parser$add_argument("--test_env_gen_file", required = TRUE)
 
-# results_path <- args$results_path
-# data_path <- args$data_path
-# pheno_path <- args$pheno_path
-# hla_file <- args$hla_file
-# training_file <- args$training_file
-# test_file <- args$test_file
-# training_env_gen_file <- args$training_env_gen_file
-# test_env_gen_file <- args$test_env_gen_file
+args <- parser$parse_args()
+
+results_path <- args$results_path
+data_path <- args$data_path
+pheno_path <- args$pheno_path
+hla_file <- args$hla_file
+training_file <- args$training_file
+test_file <- args$test_file
+training_env_gen_file <- args$training_env_gen_file
+test_env_gen_file <- args$test_env_gen_file
+covar_file <- args$covar_file
 
 
-results_path <- '/Users/kerimulterer/prsInteractive/results'
-data_path <- '/Users/kerimulterer/prsInteractive/data'
-pheno_path <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test'
-hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/trainingCombined.raw'
-test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/testCombined.raw'
-training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/geneEnvironmentTraining.csv'
-test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/geneEnvironmentTest.csv'
-covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
+#results_path <- '/Users/kerimulterer/prsInteractive/results'
+#data_path <- '/Users/kerimulterer/prsInteractive/data'
+#pheno_path <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test'
+#hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
+#training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/trainingCombined.raw'
+#test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/testCombined.raw'
+#training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/geneEnvironmentTraining.csv'
+#test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/geneEnvironmentTest.csv'
+#covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
 
 scores_path = paste0(pheno_path,'/scores')
 #covar_pathway = paste0(results_path,'/covar.txt')

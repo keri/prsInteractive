@@ -18,13 +18,24 @@ def download_hla_data(hlaPath):
     
     return(hla)
 
-def get_columns(resultsPath):
+
+def download_covar_data(covarPath):
+    '''download the data change Participant ID to IID and set as index for merging with genotyped data
+    
+    '''
+    covar = pd.read_csv(covarPath)
+    
+    covar.rename(columns={'Participant ID':'IID'},inplace=True)
+    
+    return(covar)
+
+def get_columns(dataFile):
     """
     Optimized column extraction with better error handling
     """
     try:
         # Read only the header line for column names
-        with open(resultsPath, 'r') as f:
+        with open(dataFile, 'r') as f:
             header_line = f.readline().strip()
             
         # Handle different separators
@@ -39,7 +50,7 @@ def get_columns(resultsPath):
     except Exception as e:
         print(f"Error reading columns: {e}")
         # Fallback to pandas method
-        snpList = pd.read_csv(resultsPath, sep=r"\s+", nrows=1).columns.tolist()
+        snpList = pd.read_csv(dataFile, sep=r"\s+", nrows=1).columns.tolist()
         print(f'Downloaded {len(snpList)} columns using fallback method')
         return snpList
     

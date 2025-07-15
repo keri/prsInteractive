@@ -66,8 +66,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     # Prefer command-line input if provided; fallback to env var
-    epi_file = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary'
-#   epi_file = args.epi_file or os.environ.get("EPI_FILE")
+#   epi_file = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/epiFiles/trainingCombinedEpi.epi.cc.summary'
+    epi_file = args.epi_file or os.environ.get("EPI_FILE")
     print(f"[PYTHON] Reading from: {epi_file}")
     
     
