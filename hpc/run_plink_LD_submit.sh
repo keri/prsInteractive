@@ -57,6 +57,8 @@ fi
 
 echo "[DIR] scripts directory : $SCRIPTS_DIR"
 
+export PHENO_PATH=$PHENO_PATH
+
 python "$SCRIPTS_DIR/helper/create_LD_SnpList.py"
 
 wait 
