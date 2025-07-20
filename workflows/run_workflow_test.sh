@@ -18,7 +18,7 @@ mkdir -p "$PRS_INTERACTIVE_HOME/testData/variant_calls"
 chmod +x "$PRS_INTERACTIVE_HOME/testData"
 DATA_PATH="$PRS_INTERACTIVE_HOME/testData"
 PHENO_PATH=$PRS_INTERACTIVE_HOME/results/$pheno
-WITHDRAWN_PATH=/Users/kerimulterer/prsInteractive/testData/withdrawals.csv
+WITHDRAWAL_PATH=/Users/kerimulterer/prsInteractive/testData/withdrawals.csv
 
 
 #make a folder inside root data folder for each phenotype
@@ -50,7 +50,7 @@ export ICD=$icd10
 export N_CORES=18
 export SCRIPTS_DIR=$SCRIPTS_DIR
 export EPI_PATH=$EPI_PATH
-export WITHDRAWAL_PATH=$WITHDRAWN_PATH
+export WITHDRAWAL_PATH=$WITHDRAWAL_PATH
 
 #
 echo "[WORKFLOW] DATA_PATH is set to: $DATA_PATH"

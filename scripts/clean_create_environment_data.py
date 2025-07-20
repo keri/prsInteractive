@@ -52,10 +52,11 @@ def combine_gene_environment(envGeneticDf,geneticEnvFeatureList):
     
     for epiCombo in geneticEnvFeatureList:
         parts = epiCombo.split(',')
-        first_col = parts[0]
-        remaining_cols = ','.join(parts[1:])
-        
-        combined_columns[epiCombo] = envGeneticDf[first_col] * envGeneticDf[remaining_cols]
+        if len(parts) > 1: #ensure there are not single env features
+            first_col = parts[0]
+            remaining_cols = ','.join(parts[1:])
+            
+            combined_columns[epiCombo] = envGeneticDf[first_col] * envGeneticDf[remaining_cols]
         
     # Create DataFrame from dictionary all at once
     combinedDf = pd.DataFrame(combined_columns, index=envGeneticDf.index)
@@ -212,17 +213,19 @@ if __name__ == '__main__':
 
         
     ###########  TEST VARIABLES ##########
-#   pheno_path = "/Users/kerimulterer/prsInteractive/results/type2Diabetes"
-#   env_data_file = "/Users/kerimulterer/prsInteractive/results/participant_environment.csv"
-#   hla_data_file = "/Users/kerimulterer/prsInteractive/results/participant_hla.csv"
-#   training_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/trainingCombined.raw"
-#   test_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/testCombined.raw"
-#   holdout_file = "/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/holdoutCombined.raw"
-#   gene_env_file="/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/scores/cardioMetabolicimportantFeaturesPostShap.csv"
+#   pheno_path = "/Users/kerimulterer/prsInteractive/results/celiacDisease"
+#   env_file = "/Users/kerimulterer/prsInteractive/results/participant_environment.csv"
+#   hla_file = "/Users/kerimulterer/prsInteractive/results/participant_hla.csv"
+#   training_file = "/Users/kerimulterer/prsInteractive/results/celiacDisease/trainingCombined.raw"
+#   test_file = "/Users/kerimulterer/prsInteractive/results/celiacDisease/testCombined.raw"
+#   holdout_file = "/Users/kerimulterer/prsInteractive/results/celiacDisease/holdoutCombined.raw"
+#   gene_env_file="/Users/kerimulterer/prsInteractive/results/celiacDisease/scores/cardioMetabolicimportantFeaturesPostShap.csv"
+#   withdrawal_path = '/Users/kerimulterer/prsInteractive/data/withdrawals.csv'
     
     envDf = pd.read_csv(env_file)
     envDf.rename(columns={'Participant ID':'IID'},inplace=True)
     envDf.set_index(['IID'],inplace=True)
+
     
     hlaDf = pd.read_csv(hla_file)
     hlaDf.rename(columns={'Participant ID':'IID'},inplace=True)

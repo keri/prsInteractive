@@ -208,10 +208,12 @@ create_epi_df <- function(epiDf, pairList, cardio_df=data.table()) {
     
     snps <- strsplit(pair, ",")[[1]]
     # Multiply the columns corresponding to the SNPs (element-wise product)
-    snps_product <- apply(epiDf[, ..snps], 1, prod)
+#   snps_product <- apply(epiDf[, ..snps], 1, prod)
+    snps_sum <- rowSums(epiDf[, ..snps])
     
     # Create a data.table for the multiplied SNPs with column name as pair
-    temp_dt <- data.table(temp = snps_product)
+#   temp_dt <- data.table(temp = snps_product)
+    temp_dt <- data.table(temp = snps_sum)
     setnames(temp_dt, "temp", pair)
     
     # Concatenate with the final result
@@ -447,8 +449,8 @@ get_epi_snps <- function(epiFeatures) {
 get_important_features <- function(feature_pathway){
 
   #file has 3 columns : [feature,data_type:(main,epi)]
-  feature_file = paste0(feature_pathway,'/importantFeaturesForAssociationAnalysis.csv')
-# feature_file = paste0(feature_pathway,'/importantFeaturesPostShap.csv')
+# feature_file = paste0(feature_pathway,'/importantFeaturesForAssociationAnalysis.csv')
+  feature_file = paste0(feature_pathway,'/importantFeaturesPostShap.csv')
   important_features = read.csv(feature_file)
 
   epi_main_features = c(important_features$feature)
@@ -463,39 +465,39 @@ get_important_features <- function(feature_pathway){
 
 ################################ GLOBAL VARIABLES  ########################
 
-parser <- ArgumentParser()
-parser$add_argument("--results_path", required = TRUE)
-parser$add_argument("--data_path", required = TRUE)
-parser$add_argument("--hla_file", required = TRUE) 
-parser$add_argument("--covar_file", required = TRUE)
-parser$add_argument("--pheno_path", required = TRUE)
-parser$add_argument("--training_file", required = TRUE)
-parser$add_argument("--test_file", required = TRUE)
-parser$add_argument("--training_env_gen_file", required = TRUE)
-parser$add_argument("--test_env_gen_file", required = TRUE)
+#parser <- ArgumentParser()
+#parser$add_argument("--results_path", required = TRUE)
+#parser$add_argument("--data_path", required = TRUE)
+#parser$add_argument("--hla_file", required = TRUE) 
+#parser$add_argument("--covar_file", required = TRUE)
+#parser$add_argument("--pheno_path", required = TRUE)
+#parser$add_argument("--training_file", required = TRUE)
+#parser$add_argument("--test_file", required = TRUE)
+#parser$add_argument("--training_env_gen_file", required = TRUE)
+#parser$add_argument("--test_env_gen_file", required = TRUE)
+#
+#args <- parser$parse_args()
 
-args <- parser$parse_args()
-
-results_path <- args$results_path
-data_path <- args$data_path
-pheno_path <- args$pheno_path
-hla_file <- args$hla_file
-training_file <- args$training_file
-test_file <- args$test_file
-training_env_gen_file <- args$training_env_gen_file
-test_env_gen_file <- args$test_env_gen_file
-covar_file <- args$covar_file
+#results_path <- args$results_path
+#data_path <- args$data_path
+#pheno_path <- args$pheno_path
+#hla_file <- args$hla_file
+#training_file <- args$training_file
+#test_file <- args$test_file
+#training_env_gen_file <- args$training_env_gen_file
+#test_env_gen_file <- args$test_env_gen_file
+#covar_file <- args$covar_file
 
 
-#results_path <- '/Users/kerimulterer/prsInteractive/results'
-#data_path <- '/Users/kerimulterer/prsInteractive/data'
-#pheno_path <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test'
-#hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-#training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/trainingCombined.raw'
-#test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/testCombined.raw'
-#training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/geneEnvironmentTraining.csv'
-#test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/geneEnvironmentTest.csv'
-#covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
+results_path <- '/Users/kerimulterer/prsInteractive/results'
+data_path <- '/Users/kerimulterer/prsInteractive/data'
+pheno_path <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
+hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
+training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw'
+test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined.raw'
+training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTraining.csv'
+test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTest.csv'
+covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
 
 scores_path = paste0(pheno_path,'/scores')
 #covar_pathway = paste0(results_path,'/covar.txt')
@@ -690,7 +692,7 @@ testDf[, (numeric_cols) := lapply(.SD, function(x) {
 #get covariate columns to set penalty values to 0
 covariate_columns = setdiff(names(covariate_data),'IID')
 
-
+all_features = setdiff(names(trainingDf),'IID')
 #list of lists include the data_type and features in data_type
 
 #get a list of epi cardio features to use in modelling
@@ -702,6 +704,7 @@ dataset_list = list(
   list('epi',c(epi_features,covariate_columns,hla_columns)),
   list('epi+main',c(epi_main_features,covariate_columns,hla_columns)),
   list('cardio',c(epi_cardio_features,covariate_columns,hla_columns)),
+  list('all',c(all_features,covariate_columns)),
   # list('cardio_main',c(main_cardio_features,covariate_columns)),
   list('covariate',c(covariate_columns))
   

@@ -5,9 +5,9 @@
 #SBATCH -o /nfs/scratch/projects/ukbiobank/err_out/%A_gene_env_discovery.out
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_gene_env_discovery.err
 #SBATCH --partition=bigmem
-#SBATCH --cpus-per-task=60
+#SBATCH --cpus-per-task=80
 #SBATCH --mem=900G
-#SBATCH --time=48:00:00
+#SBATCH --time=200:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=oconnoas@staff.vuw.ac.nz
 #
@@ -73,7 +73,7 @@ export TEST_PATH=$TEST_PATH
 export ENV_TYPE=$env_type
 export PHENO=$pheno
 export RESULTS_PATH=$RESULTS_PATH
-
+export WITHDRAWAL_PATH=$WITHDRAWAL_PATH
 
 echo "[DEBUG] ===== ENVIRONMENT VARIABLES ====="
 echo "PHENOTYPE BEING ANALYZED: $PHENO"

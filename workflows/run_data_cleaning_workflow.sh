@@ -6,17 +6,40 @@
 #   raw hla data in csv format  : hla_participant.csv',index_col='Participant ID') and file with headers : ukb_hla_v2.txt
 #   participant data in csv format with 
 
+#platform=${5:-"local"} 
 pheno=$1
+icd10=$2
+phenoStr=$3
+N_CORES=$4
 
-
-#pheno="myocardialInfarction"
+#pheno="type2Diabetes"
 
 
 ##############  SET UP ENV VARIABLES FOR JOB #################
 
-# Source config
-source ../env.config  # because you're in prsInteractive/hpc
+#Check if parent script exists
+if [[ ! -f "../envSetUp.sh" ]]; then
+    echo "Error: envSetUp.sh script not found at ../envSetUp.sh"
+    exit 1
+fi
 
+
+# Run parent script with all arguments
+echo "Executing: ../envSetUp.sh"
+bash ../envSetUp.sh $pheno $icd10 "${phenoStr}" $N_CORES
+
+# Capture exit status
+exit_status=$?
+if [[ $exit_status -ne 0 ]]; then
+    echo "envSetUp.sh failed with exit status: $exit_status"
+    exit $exit_status
+fi
+
+echo "envSetUp.sh completed successfully"
+
+
+# Source config
+source ../env.config # because you're in prsInteractive/hpc
 
 #check that a results folder for phenotype exists
 if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
@@ -27,15 +50,19 @@ if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
 else
     echo "sourcing $pheno env variables."
     #source pheno specific environment variables
-    source "${RESULTS_PATH}/$PHENO/pheno.config"
+    source "${RESULTS_PATH}/$pheno/pheno.config"
 fi
 
-export PHENO_PATH
-export PHENO
-export PHENO_STR
-export ICD10
-export EPI_PATH="${PHENO_PATH}/epiFiles"
-export DATA_PATH
+export PHENO_PATH=$PHENO_PATH
+export PHENO=$PHENO
+export PHENO_STR=$PHENO_STR
+export ICD10=$ICD10
+export EPI_PATH=$EPI_PATH
+export DATA_PATH=$DATA_PATH
+export RESULTS_PATH=$RESULTS_PATH
+export N_CORES=$N_CORES
+export PRS_INTERACTIVE_HOME=$PRS_INTERACTIVE_HOME
+export WITHDRAWAL_PATH=$WITHDRAWAL_PATH
 
 
 echo "[WORKFLOW] DATA_PATH is set to: $DATA_PATH"
@@ -43,8 +70,19 @@ echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 echo "[WORKFLOW] PHENO_PATH is set to: $PHENO_PATH"
 echo "[WORKFLOW] Scripts directory: $SCRIPTS_DIR"
 echo "PHENOTYPE BEING ANALYZED ...: $PHENO"
-echo "ICD 10 BEING ANALYZED ...: $ICD10"
+echo "ICD 10 BEING ANALYZED ...: $ICD"
 echo "PHENOTYPE STRING TO FILTER FOR IF ICD CODE NOT PRESENT ...: $PHENO_STR"
+
+#make a folder inside root data folder for each phenotype
+
+if [ ! -d "${PHENO_PATH}" ]; then
+    echo "Folder '${PHENO_PATH}' does not exist. Creating it..."
+    mkdir "${PHENO_PATH}" 
+    
+else
+    echo "Folder '${PHENO_PATH}' already exists."	
+fi
+    
 
 
 

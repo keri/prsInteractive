@@ -34,7 +34,7 @@ def train_models(X,y,modelPath,pheno,env_type,i):
     st = time.time()
     parameters_hgb = [{'max_iter':[1000,1500,2000],'learning_rate':[.001,.01,.1,1],'l2_regularization': [0,.1,.5]}]
     clfHGB = HistGradientBoostingClassifier(early_stopping='auto')
-    grid_search_hgb = GridSearchCV(estimator=clfHGB,param_grid=parameters_hgb,scoring='roc_auc',cv=3,n_jobs=60)
+    grid_search_hgb = GridSearchCV(estimator=clfHGB,param_grid=parameters_hgb,scoring='roc_auc',cv=3,n_jobs=80)
     #	grid_search_hgb.fit(X.to_numpy(),y.to_numpy())
     grid_search_hgb.fit(X,y)
     pickle.dump(grid_search_hgb, open(f'{modelPath}/sklearnGradBoostHistClassifier_{env_type}_{i}.pkl', 'wb'))
@@ -126,11 +126,13 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
     
     ########################  DOWNLOAD GENOTYPED DATA FOR FINAL FILTERED FEATURES USED IN FINAL MODEL  ##################################
     
-    modelFeatures = pd.read_csv(f'{scoresPath}/importantFeaturesPostShap.csv')
+#   modelFeatures = pd.read_csv(f'{scoresPath}/importantFeaturesPostShap.csv') 
+    modelFeatures = pd.read_csv(f'{scoresPath}/importantFeaturesForAssociationAnalysis.csv')
     chunk_size=1000
 
     #for a large number of features, split the job into chunks of 2K
     n_chunks = modelFeatures.shape[0] // chunk_size
+    print('number of chunks to process : {n_chunks}')
 
         
     for chunk in range(n_chunks+1):
@@ -252,43 +254,45 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
                 # find index where envGeneticFeature == feature1
                 print('debugging idx feature1[0] out of index')
                 print(featureZscores.loc[featureZscores['envGeneticFeature'].str.contains(feature1)])
-                idxFeature =  featureZscores.index[featureZscores['envGeneticFeature'] == feature1][0]
+                try:
+                    idxFeature =  featureZscores.index[featureZscores['envGeneticFeature'] == feature1][0]
+                    if idxFeature == 0:
+                        featureZscores.loc[idxFeature,'main_E'] = 1
+        
+                    else:
+                        # if the env feature has a high shap_value
+                        featuresGreaterThanE = featureZscores[:idxFeature]
+                except indexError:
+                    featuresGreaterThanE = featureZscores.copy()
+    
+                    
+                # check to the to see if the combined GxG is greater than G, GxG alone
+                #get the indices of all features that contain the E feature
+                #this returns a list of indices for which the combined GxE is present
+                idxCombinedFeatures = featuresGreaterThanE.index[featuresGreaterThanE['envGeneticFeature'].str.contains(feature1)].tolist()
                 
-                if idxFeature == 0:
-                    featureZscores.loc[idxFeature,'main_E'] = 1
+                importantCombinedIndices = []
+                #check to see if the combined shap_value of GxE feature is > G alone
+                for idx in idxCombinedFeatures:
+                    #get the genetic feature combined with E
+                    combinedFeature = featuresGreaterThanE.iloc[idx]['envGeneticFeature']
+                    idxGenetic = featuresGreaterThanE.index[featuresGreaterThanE['envGeneticFeature'] == combinedFeature.replace(f'{feature1},','')]
+                    if idxGenetic.empty: #combined feature is ranked higher
+                        importantCombinedIndices.append(idx)
     
-                else:
-                    # if the env feature has a high shap_value
-                    featuresGreaterThanE = featureZscores[:idxFeature]
-    
-                    
-                    # check to the to see if the combined GxG is greater than G, GxG alone
-                    #get the indices of all features that contain the E feature
-                    #this returns a list of indices for which the combined GxE is present
-                    idxCombinedFeatures = featuresGreaterThanE.index[featuresGreaterThanE['envGeneticFeature'].str.contains(feature1)].tolist()
-                    
-                    importantCombinedIndices = []
-                    #check to see if the combined shap_value of GxE feature is > G alone
-                    for idx in idxCombinedFeatures:
-                        #get the genetic feature combined with E
-                        combinedFeature = featuresGreaterThanE.iloc[idx]['envGeneticFeature']
-                        idxGenetic = featuresGreaterThanE.index[featuresGreaterThanE['envGeneticFeature'] == combinedFeature.replace(f'{feature1},','')]
-                        if idxGenetic.empty: #combined feature is ranked higher
+                    else:
+                        if idxGenetic[0] > idx:
                             importantCombinedIndices.append(idx)
-        
-                        else:
-                            if idxGenetic[0] > idx:
-                                importantCombinedIndices.append(idx)
-                            
-        
-                            
-                    # set epistatic == True for all indices with GxGxE
-                    featureZscores.loc[importantCombinedIndices,'epistatic'] = 1
-                    
-                with open(importantFeaturesFile,mode='a',newline='') as f:
-                    featureZscores.to_csv(f,index=False,header=False)
-                    f.close()
-                    #create_plots(shap_df,explainer,shap_values,figPath,feature1,env_type)
+                        
+    
+                        
+                # set epistatic == True for all indices with GxGxE
+                featureZscores.loc[importantCombinedIndices,'epistatic'] = 1
+                
+            with open(importantFeaturesFile,mode='a',newline='') as f:
+                featureZscores.to_csv(f,index=False,header=False)
+                f.close()
+                #create_plots(shap_df,explainer,shap_values,figPath,feature1,env_type)
             
             
             

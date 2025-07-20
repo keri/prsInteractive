@@ -112,38 +112,38 @@ def main(data_path,results_path):
 
 
 if __name__ == "__main__":
-#   parser = argparse.ArgumentParser(description="creating hla and covar data file...")
-#   parser.add_argument("--data_folder", help="Path to the input data folder")
-#   
-#   parser.add_argument("--results_folder", help="Path to the results data folder")
-#
-#   
-#   args = parser.parse_args()
-#   
-#   # Prefer command-line input if provided; fallback to env var
-#   data_path = args.data_folder or os.environ.get("DATA_PATH")
-#   results_path = args.data_folder or os.environ.get("RESULTS_PATH")
+  parser = argparse.ArgumentParser(description="creating hla and covar data file...")
+  parser.add_argument("--data_folder", help="Path to the input data folder")
   
-    data_path = "/Users/kerimulterer/prsInteractive/testData"
-    results_path = "/Users/kerimulterer/prsInteractive/results"
+  parser.add_argument("--results_folder", help="Path to the results data folder")
 
-    if not data_path:
-        raise ValueError("You must provide a data path via --data_folder or set the DATA_PATH environment variable.")
+  
+  args = parser.parse_args()
+  
+  # Prefer command-line input if provided; fallback to env var
+  data_path = args.data_folder or os.environ.get("DATA_PATH")
+  results_path = args.data_folder or os.environ.get("RESULTS_PATH")
+  
+#   data_path = "/Users/kerimulterer/prsInteractive/testData"
+#   results_path = "/Users/kerimulterer/prsInteractive/results"
+
+  if not data_path:
+      raise ValueError("You must provide a data path via --data_folder or set the DATA_PATH environment variable.")
         
-    print(f"[PYTHON] Reading from: {data_path}")
+  print(f"[PYTHON] Reading from: {data_path}")
     
     
     
-    if not results_path:
-        raise ValueError("You must provide a results path via --results_path or set the RESULTS_PATH environment variable.")
-    
-    print(f"[PYTHON] Writing to: {results_path}")
+  if not results_path:
+      raise ValueError("You must provide a results path via --results_path or set the RESULTS_PATH environment variable.")
+  
+  print(f"[PYTHON] Writing to: {results_path}")
 
-            
-    success = main(data_path,results_path)
-    if success:
-      print("\n✅ environmental,covar, and hla data processing completed successfully!")
-      sys.exit(0)
-    else:
-      print("\n❌ environmental,covar, and hla data processing failed!")
-      sys.exit(1)
+          
+  success = main(data_path,results_path)
+  if success:
+    print("\n✅ environmental,covar, and hla data processing completed successfully!")
+    sys.exit(0)
+  else:
+    print("\n❌ environmental,covar, and hla data processing failed!")
+    sys.exit(1)
