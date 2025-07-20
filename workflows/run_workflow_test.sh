@@ -151,6 +151,7 @@ CONFIG_FILE="$PHENO_PATH/pheno.config"
 # Add entries
 {
 	echo "GENE_ENV_FILE=$PHENO_PATH/scores/cardioMetabolicimportantFeaturesPostShap.csv"
+	echo "ENV_TYPE=$ENV_TYPE"
 } >> "$CONFIG_FILE"
 
 source $CONFIG_FILE

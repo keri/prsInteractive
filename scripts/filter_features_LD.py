@@ -106,7 +106,7 @@ def filter_main_in_ld(ld2,featuresMain):
 		#find the main features that are in LD with ldSnp
 		mainLD2 = featuresMain[(featuresMain['feature'].isin(ldTemp['SNP_B'].tolist()+[ldSnp]))]
 		if mainLD2.shape[0] > 1:
-			featuresToPrune = mainLD2.sort_values(['coefs'],ascending=False)['feature'].tolist()[1:]
+			featuresToPrune = mainLD2.sort_values(['shap_zscore'],ascending=False)['feature'].tolist()[1:]
 			for f in featuresToPrune:
 				mainFeaturesInLD.append(f)
 		else:

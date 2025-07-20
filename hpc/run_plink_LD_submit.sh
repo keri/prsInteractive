@@ -14,7 +14,6 @@
 
 pheno=$1
 
-
 #pheno="myocardialInfarction"
 
 
@@ -52,14 +51,14 @@ if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
 else
 	echo "sourcing $pheno env variables."
 	#source pheno specific environment variables
-	source "${RESULTS_PATH}/$PHENO/pheno.config"
+	source "${RESULTS_PATH}/$pheno/pheno.config"
 fi
 
 echo "[DIR] scripts directory : $SCRIPTS_DIR"
 
 export PHENO_PATH=$PHENO_PATH
 
-python "$SCRIPTS_DIR/helper/create_LD_SnpList.py"
+python "$SCRIPTS_DIR/helper/create_LD_snpList.py"
 
 wait 
 
