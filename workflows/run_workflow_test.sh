@@ -193,8 +193,8 @@ Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
 # Add entries
 {
 	echo "FEATURE_SCORES_FILE=$PHENO_PATH/scores/featureScoresReducedFinalModel.csv"
-	echo "FINAL_MODEL_SCORES=$PHENO_PATH/scoresmodelScoresReducedFinalModel.csv"
-	echo "FINAL_MODEL_PROBABILITIES=$PHENO_PATH/scorespredictProbsReducedFinalModel.csv"
+	echo "FINAL_MODEL_SCORES=$PHENO_PATH/scores/modelScoresReducedFinalModel.csv"
+	echo "FINAL_MODEL_PROBABILITIES=$PHENO_PATH/scores/predictProbsReducedFinalModel.csv"
 } >> "$CONFIG_FILE"
 
 source $CONFIG_FILE
