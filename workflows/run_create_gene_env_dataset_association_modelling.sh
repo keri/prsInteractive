@@ -53,5 +53,3 @@ echo "python script for model training started!"
 deactivate ukb_env
 
 #run R script for association analysis
-
-

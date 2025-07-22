@@ -4,10 +4,10 @@
 #SBATCH --job-name=glmFinalModel
 #SBATCH -o  /nfs/scratch/projects/ukbiobank/err_out/%A_glmFinalModel.out
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_glmFinalModel.err
-#SBATCH --partition=bigmem
-#SBATCH --cpus-per-task=40
+#SBATCH --partition=longrun
+#SBATCH --cpus-per-task=80
 #SBATCH --mem=400G
-#SBATCH --time=7:00:00
+#SBATCH --time=20:00:00
 #
 
 
@@ -16,7 +16,7 @@ module load GCC/11.2.0
 module load OpenMPI/4.1.1
 module load R/4.2.0
 
-pheno=$pheno
+pheno=$1
 # Source config
 source ../env.config # because you're in prsInteractive/hpc
 

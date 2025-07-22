@@ -28,8 +28,16 @@ The prs Insteractive pipeline was developed using genotyped, imputed HLA, and en
 ```
 
 
-# INPUT FILES NEEDED 
+# INPUT FILES IN PRS/DATA/
 
+
+hla_participant.csv #imputed HLA data
+participant.csv #created on DNA nexus for study cohort
+participant_environment.csv #created on the DNA nexus with environment variables
+ukb_hla_v2.txt #downloaded from UKBiobank showcase
+variant_calls/#bed/bim/bam files for chromosomes
+withdrawals.csv (used to remove withdrawals in download)
+withdrawalsID.txt (used to remove withdrawals in plink steps)
 
 ## participant.csv 
 
@@ -68,7 +76,7 @@ File downloaded from cohort created using cohort browser on DNA nexus platform.
 | Age at recruitment  |
 
     
-## raw variant calls in bed format
+## variants/raw variant calls in bed format
 
 | variant files separated into chromosomes c(#) | 
 |----------|
@@ -81,20 +89,22 @@ File downloaded from cohort created using cohort browser on DNA nexus platform.
 
 ## participant_environment.csv
 
+### Workflow can use as input any clinical marker which includes blood counts, blood chemistry, and lifestyle data available at initial screening and follow up visits for all participants.
+
 | mandatory Fields | 
 |----------|
 | Participant ID  |
 | EHF and environmental data  |
 
-Electronic health record data for clinical markers for blood chemistry, blood counts, and cardiometabolic features.
+- Electronic health record data for clinical markers for blood chemistry, blood counts, and cardiometabolic features.
 
-Features used in analysis are listed in Supplemental Table S13 of thesis.
+- Features used in analysis are listed in Supplemental Table S13 of thesis.
 
-Workflow can use as input any clinical marker which includes blood counts, blood chemistry, and lifestyle data available at initial screening and follow up visits for all participants.
+
     
 
 ## withdrawals.csv
- A list of eid's provided by UK Biobank of people who have opted out of research. File consists of one column with no heading or index.
+### A list of eid's provided by UK Biobank of people who have opted out of research. File consists of one column with no heading or index.
   
   
   
@@ -114,21 +124,20 @@ Workflow can use as input any clinical marker which includes blood counts, blood
 ```
 
 
-# WORKFLOW: 
+# WORKFLOW OVERVIEW: 
 
 ## G, GxG, and GxGxE Analysis Overview using T2D data as an example
 
 ![PRS Pipeline Workflow](READMEfigures/simplifiedWorkflow.png)
 
 
-############### RUNNING TEST WORKFLOW ON LOCAL MACHINE ##################
-# clone github repository to local machine
+# RUN TEST WORKFLOW
 
-# INSTALL miniconda
+## clone github repository to local machine
 
-[miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install, "Install instructions")
+## INSTALL [miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install, "Install instructions")
 
-# Test Workflow overview
+## Test Workflow overview
 
 ## creates and activates a conda environment ukb_env
 
@@ -155,34 +164,52 @@ bash run_workflow_test.sh
 
 
 
-####################  HPC INSTRUCTIONS ###########
-#   STEPS IN ANALYSIS 
+# RUN HPC WORKLOW 
 
-## 1) check to see if a conda environment has been created in /prsInteractive/ukb_env
-- if ukb_env is not present, create ukb_env in root directory prsInteractive:
-  Create environment from environment.yml file
-  This will create a conda "ukb_env" folder with all of the dependencies in the prsInteractive/ directory
 
-  - If on the raapoi hpc path/to/prsInteractive, 
-  
-  - In an interactive session run:
+## setup environment variables and create and activate conda environment
+
+
+- create hla, environmental, and covariate data in prsInteractive/results/:
+
++ environmental data
++ hla data
++ covariate data
++ pheno.config file
+
+- create pheno specific directories in results/pheno/
+
++ scores/
++ figures/
++ models/
++ epiFiles/
+
+* pheno = phenotype spelled in camel font and no spaces (i.e. type2Diabetes, myocardialInfarction)
+* icd10 code = substring present in the UK Biobank data
+* pheno substring = will be exact spelling found in UKB data to check for if icd10 not present. this will have spaces so will need to wrap in " "
+* n = number of cores to pass to the epistatic analysis, with 40 cores being the norm and will take approximately 48 hours
+
+```bash
+
+$ cd /path/to/directory/prsInteractive
+
+
+$ bash ../envSetUp.sh $pheno $icd10 "${phenoStr}" $n (# of cores on local machine)
+
+
+```
+
+## run the workflow in order
   
   ```bash 
-  
-  $ cd /path/to/directory/prsInteractive
-  $ module load Miniconda3/4.9.2
-  $ source $(conda info --base)/etc/profile.d/conda.sh 
-  $ conda env create --prefix ./ukb_env -f environment.yml
+
+
   
   ```
   
-  
-## 2) with conda env "ukb_env" present run the workflow:
 
-  * pheno = phenotype spelled in camel font and no spaces (i.e. type2Diabetes, myocardialInfarction)
-  * icd10 code = substring present in the UK Biobank data
-  * pheno substring = will be exact spelling found in UKB data to check for if icd10 not present. this will have spaces so will need to wrap in " "
-  * n = number of cores to pass to the epistatic analysis, with 40 cores being the norm and will take approximately 48 hours
+
+
   
   #run command lines:
   
@@ -324,3 +351,4 @@ bash run_workflow_test.sh
 
   
 
+    
