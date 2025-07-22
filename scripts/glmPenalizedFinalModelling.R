@@ -562,7 +562,7 @@ if (!file.exists(predictions_file)) {
 }
 
 # ###### FEATURE SCORE FILE ##########
-
+#feature_scores_file = paste0(scores_path,'/importantFeaturesForAssociationAnalysis.csv')
 feature_scores_file = paste0(scores_path,'/featureScoresReducedFinalModel.csv')
 feature_scores_colnames = c("coefs","model","feature")
 

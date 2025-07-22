@@ -16,6 +16,8 @@ module load GCC/11.2.0
 module load OpenMPI/4.1.1
 module load R/4.2.0
 
+module load plink/1.90
+
 pheno=$1
 # Source config
 source ../env.config # because you're in prsInteractive/hpc
@@ -43,6 +45,7 @@ export TEST_PATH=$TEST_PATH
 export TRAINING_ENV_GEN_FILE=$GENE_ENV_TRAINING
 export TEST_ENV_GEN_FILE=$GENE_ENV_TEST
 
+bash "$SCRIPTS_DIR/run_plink_LD.sh" $pheno
 
 # Pass to R script
 Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \

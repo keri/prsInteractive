@@ -101,25 +101,132 @@ File downloaded from cohort created using cohort browser on DNA nexus platform.
 - Features used in analysis are listed in Supplemental Table S13 of thesis.
 
 
-    
-
 ## withdrawals.csv
 ### A list of eid's provided by UK Biobank of people who have opted out of research. File consists of one column with no heading or index.
   
-  
+
+# OUTPUT FILES AND DIRECTORIES
   
 # Output files and folder structure:
 
 ```
 .
-└── type2Diabetes_test
+.pheno/
+├── finalModel.ld
+├── finalModel.log
+├── finalModel.prune.in
+├── finalModel.prune.out
+├── finalModel.tags.list
+├── finalModelLDSnps.txt
+├── geneEnvironmentHoldout.csv
+├── geneEnvironmentTest.csv
+├── geneEnvironmentTraining.csv
+├── holdoutCombined.bed
+├── holdoutCombined.bim
+├── holdoutCombined.fam
+├── holdoutCombined.log
+├── holdoutCombined.raw
+├── holdoutCombinedRaw.log
+├── holdoutID.txt
+├── merged_allChromosomes.bed
+├── merged_allChromosomes.bim
+├── merged_allChromosomes.fam
+├── merged_allChromosomes.log
+├── merged_allChromosomes.snplist
+├── combinedID.txt
+├── testCombined.raw
+├── testCombinedRaw.log
+├── testID.txt
+├── trainingCombined.raw
+├── trainingCombinedRaw.log
+├── trainingID.txt
+├── pheno.config
 ├── epiFiles
-│   └── preSummaryFiles
+│   ├── preSummaryFiles
+│   │   ├── trainingEpi.epi.cc
+│   │   ├── trainingEpi.epi.cc.1
+│   │   ├── trainingEpi.epi.cc.10
+│   │   ├── trainingEpi.epi.cc.11
+│   │   ├── trainingEpi.epi.cc.12
+│   │   ├── trainingEpi.epi.cc.13
+│   │   ├── trainingEpi.epi.cc.14
+│   │   ├── trainingEpi.epi.cc.15
+│   │   ├── trainingEpi.epi.cc.16
+│   │   ├── trainingEpi.epi.cc.17
+│   │   ├── trainingEpi.epi.cc.18
+│   │   ├── trainingEpi.epi.cc.2
+│   │   ├── trainingEpi.epi.cc.3
+│   │   ├── trainingEpi.epi.cc.4
+│   │   ├── trainingEpi.epi.cc.5
+│   │   ├── trainingEpi.epi.cc.6
+│   │   ├── trainingEpi.epi.cc.7
+│   │   ├── trainingEpi.epi.cc.8
+│   │   ├── trainingEpi.epi.cc.9
+│   │   ├── trainingEpi.epi.cc.summary.1
+│   │   ├── trainingEpi.epi.cc.summary.10
+│   │   ├── trainingEpi.epi.cc.summary.11
+│   │   ├── trainingEpi.epi.cc.summary.12
+│   │   ├── trainingEpi.epi.cc.summary.13
+│   │   ├── trainingEpi.epi.cc.summary.14
+│   │   ├── trainingEpi.epi.cc.summary.15
+│   │   ├── trainingEpi.epi.cc.summary.16
+│   │   ├── trainingEpi.epi.cc.summary.17
+│   │   ├── trainingEpi.epi.cc.summary.18
+│   │   ├── trainingEpi.epi.cc.summary.2
+│   │   ├── trainingEpi.epi.cc.summary.3
+│   │   ├── trainingEpi.epi.cc.summary.4
+│   │   ├── trainingEpi.epi.cc.summary.5
+│   │   ├── trainingEpi.epi.cc.summary.6
+│   │   ├── trainingEpi.epi.cc.summary.7
+│   │   ├── trainingEpi.epi.cc.summary.8
+│   │   ├── trainingEpi.epi.cc.summary.9
+│   │   └── trainingEpi.log
+│   ├── trainingCombinedEpi.epi.cc.summary
+│   ├── trainingCombinedEpi.epi.cc.summary.filtered
+│   └── trainingCombinedEpi.log
 ├── figures
+│   ├── AUC_metrics_table_{prs1/prs2..}.{nfeatures}.holdout.{mixed/protect/risk}.csv
+│   ├── AUC_metrics_table_{prs1/prs2..}.{nfeatures}.validation.{mixed/protect/risk}.csv
+│   ├── {prs1/prs2..}.{nfeatures}.holdout.{mixed/protect/risk}.AUC.png
+│   ├── {prs1/prs2..}.{nfeatures}.validation.{mixed/protect/risk}.AUC.png
+│   ├── {prs1/prs2..}.{nfeatures}.holdout.{mixed/protect/risk}.boxplot.png
+│   ├── {prs1/prs2..}.{nfeatures}.validation.{mixed/protect/risk}.boxplot.png
+│   ├── {prs1/prs2..}.{nfeatures}.holdout.{mixed/protect/risk}.densityPlot.png
+│   ├── {prs1/prs2..}.{nfeatures}.validation.{mixed/protect/risk}.densityPlot.png
+│   ├── {prs1/prs2..}.{nfeatures}.holdout.{mixed/protect/risk}.prevalencePlot.png
+│   ├── {prs1/prs2..}.{nfeatures}.validation.{mixed/protect/risk}.prevalencePlot.png
+│   ├── importantFeatureZscores.{batchIteration}.cardio.png
+│   ├── importantFeatureZscores.{batchIteration}.epi.png
+│   ├── importantFeatureZscores.{batchIteration}.main.png
+│   ├── shap_summary_plot.{batchIteration}.cardio.png
+│   ├── shap_summary_plot.{batchIteration}.epi.png
+│   └── shap_summary_plot.{batchIteration}.main.png
 ├── models
-└── scores
+│   ├── imp_mean_{epi/main}_{batchIteration}.pkl
+│   ├── sklearnGradBoostHistClassifier_cardioMetabolic_{env1/env2..}.pkl
+│   ├── sklearnGradBoostHistClassifier_{epi/main}_{batchIteration}.pkll
+│   └── sklearnNaiveBayes_{epi/main}_{batchIteration}.pkl
+└─── scores
+    ├── cardio.{nFeaturesInPRS}.holdout.{mixed/protect/risk}.prs.csv
+    ├── cardio.{nFeaturesInPRS}.validation.{mixed/protect/risk}.prs.csv
+    ├── epi.{nFeaturesInPRS}.holdout.{mixed/protect/risk}.prs.csv
+    ├── epi.{nFeaturesInPRS}.validation.{mixed/protect/risk}.prs.csv
+    ├── epi+main.{nFeaturesInPRS}.holdout.{mixed/protect/risk}.prs.csv
+    ├── epi+main.{nFeaturesInPRS}.validation.{mixed/protect/risk}.prs.csv
+    ├── main.{nFeaturesInPRS}.holdout.{mixed/protect/risk}.prs.csv
+    ├── main.{nFeaturesInPRS}.validation.{mixed/protect/risk}.prs.csv
+    ├── all.{nFeaturesInPRS}.holdout.{mixed/protect/risk}.prs.csv
+    ├── all.{nFeaturesInPRS}.validation.{mixed/protect/risk}.prs.csv
+    ├── cardioMetabolicimportantFeaturesPostShap.csv
+    ├── cardioMetabolicModelScores.csv
+    ├── featureScores.csv
+    ├── importantFeaturesForAssociationAnalysis.csv
+    ├── importantFeaturesPostShap.csv
+    └── sklearnModelScoresSections.csv
 
-7 directories
+
+6 directories
+
 
 ```
 
@@ -184,10 +291,11 @@ bash run_workflow_test.sh
 + models/
 + epiFiles/
 
-* pheno = phenotype spelled in camel font and no spaces (i.e. type2Diabetes, myocardialInfarction)
-* icd10 code = substring present in the UK Biobank data
-* pheno substring = will be exact spelling found in UKB data to check for if icd10 not present. this will have spaces so will need to wrap in " "
-* n = number of cores to pass to the epistatic analysis, with 40 cores being the norm and will take approximately 48 hours
+* pheno = phenotype spelled in camel font and no spaces (i.e. type2Diabetes)
+* icd10 code = substring present in the UK Biobank data (i.e. E11)
+* pheno substring = will be exact spelling found in UKB data to check for if icd10 not present. this will have spaces so will need to wrap in " " (i.e. "type 2 diabetes")
+* n = number of cores to pass to the epistatic analysis, with 40 cores being the norm and will take approximately 48 hours (i.e. 20)
+
 
 ```bash
 
@@ -200,149 +308,112 @@ $ bash ../envSetUp.sh $pheno $icd10 "${phenoStr}" $n (# of cores on local machin
 ```
 
 ## run the workflow in order
+
+### 1) cleans variants, starts fast-epistasis analysis using plink and begins batch feature reduction step for main (single SNPs)
   
   ```bash 
 
+$ cd path/to/prsInteractive/hpc
 
+$ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string"} {n}
   
   ```
   
 
+### 2) when fast-epistasis is complete, run the batch feature reduction for epi features
 
-
-  
-  #run command lines:
   
   ```bash 
   
-  $ cd path/to/prsInteractive/hpc
+$ cd path/to/prsInteractive/hpc
   
-  $ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string"} {n}
-  #i.e. sbatch run_data_cleaning_workflow_submit.sh myocardialInfarction I21 "myocardial infarction" 40
+$ sbatch run_model_batches_submit.sh pheno "epi"
   
   ````
-    
-  #### sbatch run_data_cleaning_workflow_submit.sh has the following scripts
+
+### 3) when feature reduction is complete for main and epi, run the GxGxE interaction analysis
+
+#### envStr = user decision which will be saved as ENV_TYPE and used in file names (i.e. cardioMetabolic was used in thesis)
+
+```bash 
+
+$ cd path/to/prsInteractive/hpc
+
+$ sbatch run_gene_environment_feature_discovery_submit.sh pheno "envStr"
+
+````
+
+### 4) create combined EnvGeno matrix to be used downstream 
+
+```bash 
+
+$ cd path/to/prsInteractive/hpc
+
+$ sbatch run_create_gene_env_data_submit.sh pheno 
+
+````
+
+### 4) create combined EnvGeno matrix to be used downstream 
+
+```bash 
+
+$ cd path/to/prsInteractive/hpc
+
+$ sbatch run_create_gene_env_data_submit.sh pheno 
+
+````
+
+
   
-  ```bash
+# Running analysis with WDL workflow
   
-  # create phenotype data and train test split IDs
-  $ python "${SCRIPTS_DIR}/create_pheno_train_test_split.py"
-  
-  # create hla (and environmental data files?)
-  $ python "${SCRIPTS_DIR}/clean_environment_hla_covar_data.py"
-  
-  # Run the variant call cleaning
-  $ bash "${SCRIPTS_DIR}/plink_clean_variant_calls.sh"
-  
-  # merge separate chromosome files into one
-  $ bash "${SCRIPTS_DIR}/merge_chromosomes.sh"
-  
-  # run epistatic interaction analysis
-  $ sbatch multiprocessing_fast_epistasis_submit.sh
-  
-  # start the queues of batch runs for single SNPs
-  $ sbatch run_model_model_batches_submit.sh {pheno} main 
-  
-  ```
-  
-## 3) After epistatic analysis is complete, run the batch models with 
-  
-  pheno = name of folder created and entered in run_data_cleaning_workflow_submit.sh
-  data_type = main (if running single SNPs) or epi (if running with epi-pairs created from epistatic analysis
-  
-  input files include:
-  * $PHENO_FOLDER/trainingCombined.raw
-  * $PHENO_FOLDER/testCombined.raw
-  * $PHENO_FOLDER/epiFiles/trainingCombinedEpi.epi.cc.summary 
-  
-  output files include: 
-  * $PHENO_PATH/scores/featureScores.csv
-  * $PHENO_PATH/scores/importantFeaturesPostShap.csv
-  * $PHENO_PATH/score/sklearnModelScoresSection.csv
-  * $PHENO_PATH/pheno_config.sh
-  
-  
-  batch script generates a number of hpc jobs running 5 models with of 3K epi features each
-  
-  ```bash 
-  
-  $ cd $ROOT_DIRECTORY/hpc/
-  
-  #scripts removes redundant epi pairs and creates a filtered summary file
-  #each hpc job takes approximately 6 hours using 800GB of RAM and 50 cpus
-  $ sbatch run_model_epi_models.sh pheno
-  
-  ```
-  
-  ### When the models are completed: 
-  
-  Features located in "importantFeaturesPostShap.csv" are used as input in the final association models
-  
-  Before modelling: The gene-environment datasets for training, test, holdout datasets are created with steps:
-  * impute and mean-center training data, use imputation model and mean to imput and mean-center test and holdout data
-  * combine datasets and scaled training data set, use trained scaler from training data to scaled test and holdout data
-  
-  
-  ```bash 
-  
-  $ cd $ROOT_DIRECTORY/hpc/
-  
-  #scripts removes redundant epi pairs and creates a filtered summary file
-  #each hpc job takes approximately 6 hours using 800GB of RAM and 50 cpus
-  $ sbatch run_model_epi_models.sh pheno
-  
-  ```
-  
-  # Running analysis with WDL workflow
-  
-  ########## WORKING IN PROGRESS ########
-  
-  ### These instructions use the cromwell backend to compile .wdl workflow
-  ###
-  ### cromwell specific features include a cromwell.config file and command line instruction to start run
-  ###
-  
-  ### Input
-  
-  All inputs are required for from the root directory and annotated in the pipelineInputs.json file
-  Phenotype specific inputs are updated in first step
-  ###
-  
-  ### Download cromwell 
-  
-  Instructions for download can be found here: [cromwell download] (https://cromwell.readthedocs.io/en/latest/tutorials/FiveMinuteIntro/)
-  
-  
-  
-  #### Step 1: Setup Environment needed to run workflow
-  
-  #### inputs:
-    * config/default.config
-    * data/
-      - covar.txt
-      - hla_participant.csv
-      - participant.csv
-      - participant_environment.csv
-      - ukb_hla_V2.txt
-      - withdrawals.csv
-  
-  #### this step creates:
-  * .env 
-  * pipelineInputs.json
-  * directories for the phenotype
-    - results/<pheno>
-  * results/<pheno>/summary.txt #file of inputs used
-  * results/<pheno>/pheno_config.sh file
-  
-  ```
-  cd /prsInteractive
-  
-  tar -czf scripts.tar.gz scripts
-  
-  ./envSetUp.sh <phenotype> <icd10> <phenotype string used in search> <n cores for epistatic analysis> <platform: (hpc,local,dnanexus) to run analysis>
-  
-  ```
+########## WORKING IN PROGRESS ########
+
+### These instructions use the cromwell backend to compile .wdl workflow
+###
+### cromwell specific features include a cromwell.config file and command line instruction to start run
+###
+
+### Input
+
+All inputs are required for from the root directory and annotated in the pipelineInputs.json file
+Phenotype specific inputs are updated in first step
+###
+
+### Download cromwell 
+
+Instructions for download can be found here: [cromwell download] (https://cromwell.readthedocs.io/en/latest/tutorials/FiveMinuteIntro/)
+
+
+
+#### Step 1: Setup Environment needed to run workflow
+
+#### inputs:
+  * config/default.config
+  * data/
+    - covar.txt
+    - hla_participant.csv
+    - participant.csv
+    - participant_environment.csv
+    - ukb_hla_V2.txt
+    - withdrawals.csv
+
+#### this step creates:
+* .env 
+* pipelineInputs.json
+* directories for the phenotype
+  - results/<pheno>
+* results/<pheno>/summary.txt #file of inputs used
+* results/<pheno>/pheno_config.sh file
+
+```
+cd /prsInteractive
+
+tar -czf scripts.tar.gz scripts
+
+./envSetUp.sh <phenotype> <icd10> <phenotype string used in search> <n cores for epistatic analysis> <platform: (hpc,local,dnanexus) to run analysis>
+
+```
   
   
   
