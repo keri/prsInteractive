@@ -363,6 +363,26 @@ $ sbatch run_create_gene_env_data_submit.sh pheno
 
 ````
 
+### 5) run final association analysis with reduced features 
+
+```bash 
+
+$ cd path/to/prsInteractive/hpc
+
+$ sbatch run_glmNetFinalModel.sh pheno 
+
+````
+
+### 6) calculate PRS for all models trained on individual and combined features sets 
+
+```bash 
+
+$ cd path/to/prsInteractive/hpc
+
+$ sbatch run_create_gene_env_data_submit.sh pheno 
+
+````
+
 
   
 # Running analysis with WDL workflow

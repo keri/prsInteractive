@@ -63,7 +63,7 @@ def create_saturation_plots(df,featureScores,data_type,figurePath,prsPath):
         n = 10
 #   featureScores2 = featureScores[featureScores['model'] == data_type]
     #protect dataset
-    featureScoresRisk = featureScores[featureScores['lcoefs'] > 0]
+    featureScoresRisk = featureScores[featureScores['coefs'] > 0]
     topN = featureScoresRisk.shape[0]
     #risk dataset
     featureScoresProtect = featureScores[featureScores['coefs'] < 0]
@@ -224,8 +224,9 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,envFileTest,holdoutPathway,e
     cardioEnvHoldout.set_index('IID',inplace=True)
     
 
-    for holdout_str in ['','.holdout']:
-        
+#   for holdout_str in ['','.holdout']:
+    for holdout_str in ['']:
+            
         if holdout_str == '':
             data_pathway = testPathway
             cardioEnvData = cardioEnvTest
@@ -287,6 +288,16 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,envFileTest,holdoutPathway,e
             #create_saturation_plots(mainEpiDf, epiMainFeatures, data_type+f'.{suffix}', figurePath, prsPath)
             else:
                 create_prs_direction(covarDf,covarCoefs,image_str,figurePath,prsPath)
+                
+            #if model == 'all' then separate epi,main,epi+main,and cardio
+            if model == 'all':
+                for sub_model in ['epi','main','epi+main','cardio']:
+                    subFeatures = filteredFeatures[filteredFeatures['model'] == sub_model]['feature'].tolist()
+                    sub_data = prsFeatures[prsFeatures['feature'].isin(subFeatures)]
+                    modelN = sub_data.shape[0]
+                    image_str = f'{model}.{modelN}{holdout_str}' 
+                    create_prs_direction(mainEpiDf,sub_data,f'{image_str}.{sub_model}.FromAll',figurePath,prsPath)
+                
         
         #create PRS for covariate only model
 #       modelN = covarCoefs.shape[0]
@@ -349,17 +360,17 @@ if __name__ == '__main__':
     
 
     
-#   pheno='type2Diabetes_test'
+#   pheno='type2Diabetes'
 #   pheno_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}'
-#   test_env_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/geneEnvironmentTest.csv'
-#   holdout_env_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/geneEnvironmentHoldout.csv'
+#   test_env_file=f'/Users/kerimulterer/prsInteractive/results/{pheno}/geneEnvironmentTest.csv'
+#   holdout_env_file=f'/Users/kerimulterer/prsInteractive/results/{pheno}/geneEnvironmentHoldout.csv'
 #   test_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
 #   holdout_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/holdoutCombined.raw'
 #   results_path='/Users/kerimulterer/prsInteractive/results'
 #   covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
 #   hla_file='/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-#   feature_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/scores/featureScoresReducedFinalModel.csv'
-    
+#   feature_file=f'/Users/kerimulterer/prsInteractive/results/{pheno}/scores/importantFeaturesForAssociationAnalysis.csv'
+#   withdrawal_path = f'/Users/kerimulterer/prsInteractive/data/withdrawals.csv'
     
     
     if not pheno_path:

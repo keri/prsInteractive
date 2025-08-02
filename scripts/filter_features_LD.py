@@ -6,7 +6,7 @@ import os
 
 
 
-def filter_epi_features(epiFeatures,ld2):
+def filter_epi_features(epiFeatures,ld2,rank_feature):
 	'''epiLD is pruned to the feature that is in LD based on plink output with all of ld and feature data from original LD match
 	   epiLD columns = [feature,lasso_coefs_grid_search,feature1,feature2,CHR_A,BP_A,LD_SNP,CHR_B,BP_B,R2]
 		features3 is the feature weights based on the final model containing both epi and main features
@@ -36,6 +36,7 @@ def filter_epi_features(epiFeatures,ld2):
 		
 		'''
 	ldfeaturesToFilter = []
+	
 	
 	epiFeaturesToCheck = epiFeatures['feature'].tolist()
 	for i in range(len(epiFeaturesToCheck)-1):
@@ -80,7 +81,13 @@ def filter_epi_features(epiFeatures,ld2):
 					
 			#get the tag pair with the highest coefficient
 			epiFeaturesTemp = epiFeatures[epiFeatures['feature'].isin(featureToFilter)]
-			epiFeaturesToPrune = epiFeaturesTemp.sort_values(['shap_zscore'],ascending=False)['feature'].tolist()[1:]
+			try:
+				epiFeaturesToPrune = epiFeaturesTemp.sort_values([rank_feature],ascending=False)['feature'].tolist()[1:]
+			except KeyError:
+				print(f'{rank_feature} is not found in dataset ....')
+				print(epiFeatures.head())
+				pass
+				
 			for f in epiFeaturesToPrune:
 				ldfeaturesToFilter.append(f)
 		else:
@@ -89,69 +96,93 @@ def filter_epi_features(epiFeatures,ld2):
 	
 	return(list(set(ldfeaturesToFilter)))
 
-def filter_main_in_ld(ld2,featuresMain):
+def filter_main_in_ld(ld2,featuresMain,rank_feature):
 	#match to feature 1
 	#if both in main, then filter SNP with the lowest beta coefficient
 	mainFeaturesInLD = []
 	#filter data for those in which SNP_A is in main features
 	mainLD1 = featuresMain[(featuresMain['feature'].isin(ld2['SNP_A'].tolist()))]
 	
+
 	#of those main features that is in LD, check to see if SNP_B is also in main 
 	#if so capture the one that has the lowest beta coefficient to be pruned out
 	#do this one feature at a time
 	for ldSnp in mainLD1['feature']:
 		#get the SNP_B in LD with SNP_A
 		ldTemp = ld2[ld2['SNP_A'] == ldSnp]
-		
-		#find the main features that are in LD with ldSnp
-		mainLD2 = featuresMain[(featuresMain['feature'].isin(ldTemp['SNP_B'].tolist()+[ldSnp]))]
-		if mainLD2.shape[0] > 1:
-			featuresToPrune = mainLD2.sort_values(['shap_zscore'],ascending=False)['feature'].tolist()[1:]
-			for f in featuresToPrune:
-				mainFeaturesInLD.append(f)
-		else:
+		try:
+			#find the main features that are in LD with ldSnp
+			mainLD2 = featuresMain[(featuresMain['feature'].isin(ldTemp['SNP_B'].tolist()+[ldSnp]))]
+			if mainLD2.shape[0] > 1:
+				featuresToPrune = mainLD2.sort_values([rank_feature],ascending=False)['feature'].tolist()[1:]
+
+		except KeyError:
+			print(f'{rank_feature} not found in features dataset ...')
+			print(featuresMain.head())
 			pass
+				
+	for f in featuresToPrune:
+		mainFeaturesInLD.append(f)
+
 	return(mainFeaturesInLD)
 
-def main(phenoPath):
+def main(phenoPath,feature_scores_file,pre_post_association):
 	'''run the LD command separately which generates the plink.ld'''
 	
 #	filePath = f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet'
 	ld = pd.read_csv(f'{phenoPath}/finalModel.ld',sep='\s+')
 	ld2 = ld[ld['R2'] > .6]
-	features = pd.read_csv(f'{phenoPath}/scores/importantFeaturesPostShap.csv')
+#	features = pd.read_csv(f'{phenoPath}/scores/importantFeaturesPostShap.csv')
+	features = pd.read_csv(feature_scores_file)
 	
-	#get the main and epi weigths separate as the separate epi+main model performed best
-	featuresMain = features[features['data_type'] == 'main'][['feature','shap_zscore']]
-	featuresEpi = features[(features['data_type'] == 'epi') & (features['feature'].str.contains(','))][['feature','shap_zscore']]
-#	featuresEpi = features2[['feature','lasso_coefs_grid_search']]
+	if pre_post_association == 'post':
+		output_file = 'featureScoresReducedFinalModel.csv'
+	else:
+		output_file = 'importantFeaturesForAssociationAnalysis.csv'
 	
+	try:
+		#get the main and epi weigths separate as the separate epi+main model performed best
+		rank_feature = 'shap_zscore'
+		featuresMain = features[features['data_type'] == 'main'][['feature','shap_zscore']]
+		featuresEpi = features[(features['data_type'] == 'epi') & (features['feature'].str.contains(','))][['feature','shap_zscore']]
+	except KeyError:
+		features = pd.read_csv(f'{phenoPath}/scores/featureScoresReducedFinalModel.csv')
+		rank_feature = [col for col in features.columns if 'coef' in col][0]
+		features2 = features[['model','feature',rank_feature]]
+		featuresMain = features2[features2['model'] == 'main'][['feature',rank_feature]]
+		featuresEpi = features2[(features2['model'] == 'epi') & (features2['feature'].str.contains(','))][['feature',rank_feature]]
+		
+
 
 	#############################################################################################
 	#                              LD FEATURES TO PRUNE FOR MAIN SNPS                           #
 	#############################################################################################
 
 	
-	mainFeaturesToPrune = filter_main_in_ld(ld2,featuresMain)
+	mainFeaturesToPrune = filter_main_in_ld(ld2,featuresMain,rank_feature)
 	
 	#############################################################################################
 	#                              LD FEATURES TO PRUNE FOR EPI PAIRS                           #
 	#############################################################################################
 	
 	
-	epiFeatureToPruneinLD = filter_epi_features(featuresEpi,ld2)
+	epiFeatureToPruneinLD = filter_epi_features(featuresEpi,ld2,rank_feature)
 	
 	featuresToPrune = mainFeaturesToPrune + epiFeatureToPruneinLD
 	
 	featuresFinal = features[~features['feature'].isin(featuresToPrune)]
 	
 
-	featuresFinal.to_csv(f'{phenoPath}/scores/importantFeaturesForAssociationAnalysis.csv')
+	featuresFinal.to_csv(f'{phenoPath}/scores/{output_file}',index=False)
 	
+	
+		
 if __name__ == '__main__':
 	
 	parser = argparse.ArgumentParser(description="creating LD snp list ....")
 	parser.add_argument("--pheno_path", help="Path to the input pheno folder")
+	parser.add_argument("--pre_post_association", help="pre or post association LD")
+	
 	
 	
 	args = parser.parse_args()
@@ -161,8 +192,16 @@ if __name__ == '__main__':
 	pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
 	print(f"[PYTHON] Reading from: {pheno_path}")
 	
+	pre_post_association = args.pre_post_association or os.environ.get("PRE_POST_ASSOCIATION")
+	print(f"pre or post association set to : {pre_post_association}")
+	
+	feature_scores_file = f"{pheno_path}/scores/importantFeaturesPostShap.csv"
+	print(f"[PYTHON] Reading features for LD from: {feature_scores_file}")
+	
+	
 	if not pheno_path:
 		raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
+
 		
-	main(pheno_path)
+	main(pheno_path,feature_scores_file,pre_post_association)
 	

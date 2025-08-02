@@ -4,31 +4,32 @@ import pandas as pd
 import numpy as np
 from sklearn.preprocessing import StandardScaler
 
-#def create_epi_df(epiDf,pairList):
-#   '''input : epiDf with snps as columns + PHENOTYPE
-#           pairList : [snp1pair1,snp2pair1,snp1pair2,snp2pair2...snp1pairN,snp2pairN]'''
-#   epiArrayFinal = pd.DataFrame()
-#   
-#   for pair in pairList:
-#       snps = epiDf[pair.split(',')].sum(axis=1)
-#       snps.columns = pair
-#       epiArrayFinal = pd.concat([epiArrayFinal,snps],axis=1)
-#   epiArrayFinal.columns = pairList 
-#   
-#   return(epiArrayFinal)
-
-def create_epi_df(epiDf, pairList):
+def create_epi_df(epiDf,pairList):
     '''input : epiDf with snps as columns + PHENOTYPE
             pairList : [snp1pair1,snp2pair1,snp1pair2,snp2pair2...snp1pairN,snp2pairN]'''
     epiArrayFinal = pd.DataFrame()
     
     for pair in pairList:
-        snps = epiDf[pair.split(',')].prod(axis=1)
-        snps.name = pair  # Use .name for Series instead of .columns
-        epiArrayFinal = pd.concat([epiArrayFinal, snps], axis=1)
+        snps = epiDf[pair.split(',')].sum(axis=1)
+        #snps = epiDf[pair.split(',')].prod(axis=1)
+        snps.columns = pair
+        epiArrayFinal = pd.concat([epiArrayFinal,snps],axis=1)
     epiArrayFinal.columns = pairList 
     
     return(epiArrayFinal)
+
+#def create_epi_df(epiDf, pairList):
+#   '''input : epiDf with snps as columns + PHENOTYPE
+#           pairList : [snp1pair1,snp2pair1,snp1pair2,snp2pair2...snp1pairN,snp2pairN]'''
+#   epiArrayFinal = pd.DataFrame()
+#   
+#   for pair in pairList:
+#       snps = epiDf[pair.split(',')].prod(axis=1)
+#       snps.name = pair  # Use .name for Series instead of .columns
+#       epiArrayFinal = pd.concat([epiArrayFinal, snps], axis=1)
+#   epiArrayFinal.columns = pairList 
+#   
+#   return(epiArrayFinal)
 
 def get_epi_snps(epiFeatures):
     '''input : list[str:pair1,str:pair2..str:pairN]

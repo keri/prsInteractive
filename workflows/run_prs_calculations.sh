@@ -1,36 +1,10 @@
 #!/bin/bash
 
-#
-#SBATCH --job-name=gene_env_discovery
-#SBATCH -o /nfs/scratch/projects/ukbiobank/err_out/%A_gene_env_discovery.out
-#SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_gene_env_discovery.err
-#SBATCH --partition=bigmem
-#SBATCH --cpus-per-task=80
-#SBATCH --mem=500G
-#SBATCH --time=74:00:00
-#SBATCH --mail-type=BEGIN,END,FAIL
-#SBATCH --mail-user=oconnoas@staff.vuw.ac.nz
-#
-
-################## USE DATA FROM UK BIOBANK ############
-# FILES THAT MUST BE PRESENT:
-#   $PHENO_PATH/scores/importantFeaturesPostShap.csv
-#   $RESULTS_PATH/testCombined.raw
-#   $RESULTS_PATH/trainingCombined.raw
-#   /env.config
-#   $PHENO_PATH/pheno.config
 
 
+#pheno=$1
+pheno="celiacDisease"
 
-module load Miniconda3/4.9.2
-source $(conda info --base)/etc/profile.d/conda.sh 
-conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
-
-pheno=$1
-env_type=$2
-CHUNK_START=$3
-CHUNK_STOP=$4
-INPUT_FILE=$5
 
 # Source config with error handling
 if [ ! -f "../env.config" ]; then
@@ -67,36 +41,48 @@ echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 
 
 # Set phenotype-specific paths
-#INPUT_FILE="$PHENO_PATH/scores/importantFeaturesForAssociationAnalysis.csv"
+
 
 echo "[WORKFLOW] ENV_TYPE is set to: $env_type"
 export PHENO_PATH="$RESULTS_PATH/$pheno"
-export TRAINING_PATH=$TRAINING_PATH
 export TEST_PATH=$TEST_PATH
-export ENV_TYPE=$env_type
+export HOLDOUT_PATH=$HOLDOUT_PATH
 export PHENO=$pheno
 export RESULTS_PATH=$RESULTS_PATH
 export WITHDRAWAL_PATH=$WITHDRAWAL_PATH
+export DATA_PATH=$DATA_PATH
+export HLA_FILE=$HLA_FILE
+export COVAR_FILE=$COVAR_FILE
+export GENE_ENV_TEST=$GENE_ENV_TEST
+export GENE_ENV_HOLDOUT=$GENE_ENV_HOLDOUT
+export FEATURE_SCORES_FILE=$FEATURE_SCORES_FILE
+
 
 echo "[DEBUG] ===== ENVIRONMENT VARIABLES ====="
 echo "PHENOTYPE BEING ANALYZED: $PHENO"
 echo "PHENO_PATH: $PHENO_PATH"
 echo "SCRIPTS_DIR: $SCRIPTS_DIR"
-echo "TRAINING_PATH: $TRAINING_PATH"
 echo "TEST_PATH: $TEST_PATH"
 echo "HOLDOUT_PATH: $HOLDOUT_PATH"
 echo "RESULTS_PATH: $RESULTS_PATH"
-echo "ENV_TYPE: $ENV_TYPE"
+echo "TEST_ENV_GEN_FILE: $GENE_ENV_TEST"
+echo "HOLDOUT_ENV_GEN_FILE: $GENE_ENV_HOLDOUT"
 echo "====================================="
 
 # Check if required files exist before running Python
 echo "[DEBUG] Checking required files..."
 
 required_files=(
-    "$TRAINING_PATH"
+    "$FEATURE_SCORES_FILE"
+    "$GENE_ENV_HOLDOUT"
+    "$GENE_ENV_TEST"
+    "$WITHDRAWAL_PATH"
+    "$COVAR_FILE"
+    "$HLA_FILE"
+    "$HOLDOUT_PATH"
     "$TEST_PATH"
-    "$INPUT_FILE"
-    "${SCRIPTS_DIR}/gene_environment_feature_discovery.py"
+    "${SCRIPTS_DIR}/calculate_prs_for_filtered_main_epi.py"
+    "$SCRIPTS_DIR/run_plink_LD.sh"
 )
 
 for file in "${required_files[@]}"; do
@@ -108,16 +94,19 @@ for file in "${required_files[@]}"; do
     fi
 done
 
-
 echo "[DEBUG] All required files found. Starting Python script..."
 
-export INPUT_FILE=$INPUT_FILE
-export CHUNK_START=$CHUNK_START
-export CHUNK_STOP=$CHUNK_STOP
+export FEATURE_SCORES_FILE=$FEATURE_SCORES_FILE
+#check to see if LD has been done previously before association
+if [ ! -f "$PHENO_PATH/scores/importantFeaturesForAssociationAnalysis.csv" ]; then
+    #run LD script
+    export PRE_POST_ASSOCIATION='post'
+    bash "$SCRIPTS_DIR/run_plink_LD.sh" $pheno
+fi
 
-    
+
 # Run the Python script
-python "${SCRIPTS_DIR}/gene_environment_feature_discovery.py"
+python "${SCRIPTS_DIR}/calculate_prs_for_filtered_main_epi.py"
 
 exit_code=$?
 echo "[DEBUG] Python script exited with code: $exit_code"
@@ -127,9 +116,8 @@ if [ $exit_code -ne 0 ]; then
     exit $exit_code
 fi
 
-echo "[DEBUG] Script started successfully"
+echo "[DEBUG] Script completed successfully"
 
-    
 
 
 

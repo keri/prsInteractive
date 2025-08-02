@@ -7,7 +7,8 @@
 
 
 
-pheno=$1
+#pheno=$1
+pheno='celiacDisease'
 
 #PHENO='type2Diabetes_test'
 #DATA_TYPE='epi'
@@ -45,11 +46,12 @@ export PHENO_PATH=$PHENO_PATH
 export ENV_FILE=$ENV_FILE
 export HLA_FILE=$HLA_FILE
 export GENE_ENV_FILE=$GENE_ENV_FILE
+export WITHDRAWAL_PATH=$WITHDRAWAL_PATH
 #create gene_env datasets for training, validation, and test
 python "$SCRIPTS_DIR/clean_create_environment_data.py"
 
 
 echo "python script for model training started!"
-deactivate ukb_env
+#deactivate ukb_env
 
 #run R script for association analysis

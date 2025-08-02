@@ -44,7 +44,7 @@ def train_models(X,y,modelPath,pheno,env_type,i):
     
     return(grid_search_hgb)
 
-def score_models(X,y,pheno,env_type,modelFile,i,clfHGB,chunk):
+def score_models(X,y,pheno,env_type,modelFile,i,clfHGB,chunk,chunk_start):
     '''load pickled models and score with test set'''
     print('scoring models .....')
     
@@ -65,7 +65,7 @@ def score_models(X,y,pheno,env_type,modelFile,i,clfHGB,chunk):
     jscore = jaccard_score(y,yHat)
     hloss = hamming_loss(y,yHat)
     f1score = f1_score(y,yHat)
-    fields=['gradient boosted classifier',score,balanced_score,auc,mcc,logloss,jscore,hloss,f1score,env_type,i,chunk]
+    fields=['gradient boosted classifier',score,balanced_score,auc,mcc,logloss,jscore,hloss,f1score,env_type,i,chunk,chunk_start]
     
     with open(modelFile,mode='a') as f:
         writer = csv.writer(f)
@@ -79,7 +79,7 @@ def score_models(X,y,pheno,env_type,modelFile,i,clfHGB,chunk):
 
 
 
-def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPath):
+def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPath,input_file,chunk_start=0,chunk_stop=1000):
     ############################   ENVIRONMENT VARIABLES     ######################
 
     figPath = f'{phenoPath}/figures'
@@ -92,7 +92,7 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
     
     if not os.path.exists(f'{modelFile}'):
         # create empty dataframe to capture the scores and snps in each iteration
-        models = pd.DataFrame(columns=['model','test score','balanced score','auc','matthews_corrcoef','log_loss','jaccard_score','hamming_loss','f1_score','env_type','iteration','chunk'])
+        models = pd.DataFrame(columns=['model','test score','balanced score','auc','matthews_corrcoef','log_loss','jaccard_score','hamming_loss','f1_score','env_type','iteration','chunk','start_index'])
         with open(modelFile,mode='w',newline='') as f:
             models.to_csv(f,index=False)
             f.close()
@@ -127,12 +127,24 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
     ########################  DOWNLOAD GENOTYPED DATA FOR FINAL FILTERED FEATURES USED IN FINAL MODEL  ##################################
     
 #   modelFeatures = pd.read_csv(f'{scoresPath}/importantFeaturesPostShap.csv') 
-    modelFeatures = pd.read_csv(f'{scoresPath}/importantFeaturesForAssociationAnalysis.csv')
-    chunk_size=1000
+    modelFeaturesFull = pd.read_csv(input_file)
+    first_col = modelFeaturesFull.columns[0]
+    # Check if first column contains sequential integers
+    if 'Unnamed' in str(first_col):
+        print("⚠️  Detected 'Unnamed' in first column - setting as index")
+        modelFeaturesFull.set_index(first_col,inplace=True)
+        print("✓ First column set as index")
+    else:
+        print("✓ First column appears to be a regular data column - keeping as is")
+    
+    
+    chunk_size=200
+
+    modelFeatures = modelFeaturesFull.iloc[chunk_start:chunk_stop]
 
     #for a large number of features, split the job into chunks of 2K
     n_chunks = modelFeatures.shape[0] // chunk_size
-    print('number of chunks to process : {n_chunks}')
+    print(f'number of chunks to process : {n_chunks}')
 
         
     for chunk in range(n_chunks+1):
@@ -215,7 +227,7 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
             print(testData2.shape)
     
             clfHGB = train_models(trainingData2,y,modelsPath,pheno,env_type,feature1)
-            auc = score_models(testData2, yTest, pheno, env_type, modelFile, feature1, clfHGB,chunk)
+            auc = score_models(testData2, yTest, pheno, env_type, modelFile, feature1, clfHGB,chunk,chunk_start)
             #if auc > .51:
                 #columns = index of features and shap_valueZscores
             topFeatures,featureZscores = calculate_plot_shap_values(clfHGB,trainingData2,testData2,i,figPath,env_type)
@@ -262,7 +274,7 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
                     else:
                         # if the env feature has a high shap_value
                         featuresGreaterThanE = featureZscores[:idxFeature]
-                except indexError:
+                except IndexError:
                     featuresGreaterThanE = featureZscores.copy()
     
                     
@@ -306,6 +318,9 @@ if __name__ == '__main__':
     parser.add_argument("--pheno", help="Phenotype to analyze")
     parser.add_argument("--results_path", help="data path to results")
     parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
+    parser.add_argument("--batch_start", help="index to start processing data")
+    parser.add_argument("--batch_stop", help="index to stop processing data")
+    parser.add_argument("--input_file", help="feature file to use for GxGxE analysis")
     
     
     args = parser.parse_args()
@@ -331,6 +346,15 @@ if __name__ == '__main__':
     
     withdrawal_path = args.withdrawal_path or os.environ.get("WITHDRAWAL_PATH")
     print(f"reading withdrawals from file : {withdrawal_path}")
+    
+    chunk_start = args.batch_start or os.environ.get("CHUNK_START")
+    print(f"starting batch index at : {chunk_start}")
+    
+    chunk_stop = args.batch_stop or os.environ.get("CHUNK_STOP")
+    print(f"stopping batch index at : {chunk_stop}")
+    
+    input_file = args.input_file or os.environ.get("INPUT_FILE")
+    print(f"analyzing features from input file : {input_file}")
     
 
 #   pheno='type2Diabetes_test'
@@ -362,7 +386,10 @@ if __name__ == '__main__':
     
     if not withdrawal_path:
         raise ValueError("You must provide a path to withdrawals --withdrawal_path or set the WITHDRAWAL_PATH environment variable.")
+        
+    if not input_file:
+        raise ValueError("You must provide a path to features file --input_file or set the INPUT_FILE environment variable")
     
-    main(pheno,withdrawal_path,env_type,pheno_path,training_path,test_path,results_path)
+    main(pheno,withdrawal_path,env_type,pheno_path,training_path,test_path,results_path,input_file,int(chunk_start),int(chunk_stop))
     
     
