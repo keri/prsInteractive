@@ -59,7 +59,7 @@ def standardize_prs(prsDf):
     prsCopy['scaled_prs'] = scaled_feature
     return(prsCopy)
 
-def calculate_prs(df,featureScoreDict,features):
+def calculate_prs(df,featureScoreDict,features,scale_prs=True):
     '''calculate PRS for every person using beta coefficients from regression stored in dictionary
        input : nested dictionary {feature1: {coefs:beta},.... featureN:{coefs:beta}}
                features : list of strings '''     
@@ -76,15 +76,21 @@ def calculate_prs(df,featureScoreDict,features):
             prsDf[feature] = dfCopy[feature].apply(lambda x : (featureScoreDict[feature]['coefs'])*x)
         except KeyError:
             print(f'{feature} not in data set ..')
+    
+    if scale_prs:
+        prsDf2 = standardize_prs(prsDf)
+        try:
+            meanDiff = prsDf2.groupby(['PHENOTYPE']).mean()['scaled_prs'].diff().loc[2]
+            print('mean diff for scaled prs',meanDiff)
             
-    prsDf2 = standardize_prs(prsDf)
-    try:
-        meanDiff = prsDf2.groupby(['PHENOTYPE']).mean()['scaled_prs'].diff().loc[2]
-        print('mean diff after box plot created ',meanDiff)
-        
-    except KeyError:
-        meanDiff = np.nan
-        print('unable to calculate mean diff of the 2 populations, possibly due to insufficient numbers in 1 population (cases)  ',meanDiff)
+        except KeyError:
+            meanDiff = np.nan
+            print('unable to calculate mean diff of the 2 populations, possibly due to insufficient numbers in 1 population (cases)  ',meanDiff)
+    else:
+        prsDf2 = prsDf.copy()
+        prsDf2['prs'] = prsDf2.drop(columns=['PHENOTYPE']).sum(axis=1)
+        meanDiff = prsDf2.groupby(['PHENOTYPE']).mean()['prs'].diff().loc[2]
+        print('mean diff for unscaled prs',meanDiff)
         
     return(prsDf2,meanDiff)
 
@@ -96,15 +102,14 @@ def calculate_create_prs_plots(df,featureScoreDict,data_type,figurePath,prsPath,
     prsPath : str(folder to save calculated prs scores columns[IID,PHENOTYPE,prs,scaled_prs]
     direction : str(risk,protect,or mixed)
     features : list(features to include in prs calculation)'''
-    
-    prsDf,meanDiff = calculate_prs(df,featureScoreDict,features)
-#   if 'holdout' in data_type:
-#       #switch the prs and scaled_prs columns to plot prs instead of scaled prs without refactoring all functions
-#       prsDf.rename(columns={'scaled_prs':'scaled_prs_temp'},inplace=True)
-#       prsDf.rename(columns={'prs':'scaled_prs'},inplace=True)
-#       prsDf.rename(columns={'scaled_prs_temp':'prs'},inplace=True)
-        
-    create_prs_plots(prsDf,data_type,figurePath,prsPath,direction)
+    if 'holdout' in data_type:
+        prsDf,meanDiff = calculate_prs(df,featureScoreDict,features,scale_prs=False)
+        #don't create images for holdout until scaled appropriately
+        str_image = f'{data_type}.{direction}'
+        prsDf.to_csv(f'{prsPath}/{str_image}.prs.csv')
+    else:
+        prsDf,meanDiff = calculate_prs(df,featureScoreDict,features,scale_prs=True)
+        create_prs_plots(prsDf,data_type,figurePath,prsPath,direction)
     return(meanDiff)
     
         

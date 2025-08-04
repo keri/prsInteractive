@@ -10,6 +10,7 @@ from matplotlib_venn import venn3, venn2
 import seaborn as sns
 from sklearn import metrics
 import scipy as sp
+from scipy.stats import pearsonr
 import sys
 
 def create_venn_diagram(df,figPath,image_str):
@@ -327,275 +328,91 @@ def draw_auc_plots_prs_iprs(prsDf,figurePath,threshold):
     plt.savefig(f'{figurePath}/{model_type}.AUC.png')
     
     
-#def create_qq_plot_groups(combinedPRS,figurePath,suffix):
-#   ''' use input to color cases in different colors based on group:
-#   input : dataframe columns = ['PHENOTYPE', 'prs', 'scaled_prs', 'prs_main', 'scaled_prs_main',
-#   'epi_helps', 'diff', 'color', 'normalized_diff', 'bin_EpiMain',
-#   'bin_Main', 'prs_Final', 'scaled_prs_Final', 'bin_Final', 'bin_limits',
-#   'caseANDControlGroup', 'caseORControlGroup'] 
-#   output : correlation plot with groups colors'''
-#   
-#   cases = combinedPRS[combinedPRS['PHENOTYPE'] == 2]
-#   cases['color'] = 'black'
-#   controls = combinedPRS[combinedPRS['PHENOTYPE'] == 1]
-#   controls['color'] = '#776cb1'
-#   
-#   #assign colors based on categories
-#   #category 1 : high risk cases > 8 main decile AND epi helps == 0
-#   #category 2 : high risk cases > 8 epi decile AND epi helps == 1
-#   #category 3 : cases for which model doesn't work well main decile < 9 AND epi helps == 0
-#   #category 4 : cases for which model doesn't work well epi decils < 9 AND epi helps == 1
-#   
-#   for group in ['high risk cases PRS','high risk cases iPRS','cases predicted low risk PRS','cases predicted low risk iPRS','all','high risk','low risk']:
-#       if group == 'high risk cases PRS':
-#           fig,ax = plt.subplots(figsize=(10,10))
-#           cases.loc[((cases['bin_Main'] == 9) & (cases['epi_helps'] == 0)),'color'] == 'rgb(211,0,63,0)'
-#           cases.loc[((cases['bin_Main'] == 10) & (cases['epi_helps'] == 0)),'color'] == 'rgb(201,0,22,0)'
-#           
-#           model_type = f'HighRiskPRS.{suffix}'
-#       #   ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c='#776cb1',s=40,alpha=.6,label='Controls')
-#           ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c=controls['color'].values,s=40,alpha=.6,label='Controls')
-#       #   ax.scatter(x=epiCases['scaled_prs'].values,y=mainCases['scaled_prs'].values,marker="+",c='black',s=40,alpha=.9,label='Cases')
-#           ax.scatter(x=cases['scaled_prs'].values,y=cases['scaled_prs'].values,marker="+",c=cases['color'].values,s=40,alpha=.9,label='Cases')
-#       #   ax.plot([main['scaled_prs'].min(),main['scaled_prs'].max()],[linreg.intercept+linreg.slope*epi['scaled_prs'].min(),linreg.intercept+linreg.slope*epi['scaled_prs'].max()])
-#           
-#           ax.set_xlabel('epi')
-#           ax.set_ylabel('main only')
-#           ax.grid(True) 
-#           ax.set_title(f'Standardized High Risk PRS Cases : Main V Epi')
-#           handles,labels = ax.get_legend_handles_labels()
-#           ax.legend(handles,labels,loc='upper left',fontsize=15)
-#       #   rsquared = round((linreg.rvalue*linreg.rvalue),2)
-#           ax.text(-3.8, 3, f'{group}',fontsize=15)
-#           plt.savefig(f'{figurePath}/PRSHigh.QQColorPlot.png')
-#           ax.clear()
-#           cases['color'] = 'black'
-#           
-#       if group == 'high risk cases iPRS':
-#           cases.loc[((cases['bin_EpiMain'] == 9) & (cases['epi_helps'] == 1)),'color'] == 'rgb(0, 0, 205,.6)'
-#           cases.loc[((cases['bin_EpiMain'] == 10) & (cases['epi_helps'] == 1)),'color'] == 'rgb(0, 0, 128,.6)'
-#           
-#           model_type = f'HighRiskiPRS.{suffix}'
-#       #   ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c='#776cb1',s=40,alpha=.6,label='Controls')
-#           ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c=controls['color'].values,s=40,alpha=.6,label='Controls')
-#       #   ax.scatter(x=epiCases['scaled_prs'].values,y=mainCases['scaled_prs'].values,marker="+",c='black',s=40,alpha=.9,label='Cases')
-#           ax.scatter(x=cases['scaled_prs'].values,y=cases['scaled_prs'].values,marker="+",c=cases['color'].values,s=40,alpha=.9,label='Cases')
-#       #   ax.plot([main['scaled_prs'].min(),main['scaled_prs'].max()],[linreg.intercept+linreg.slope*epi['scaled_prs'].min(),linreg.intercept+linreg.slope*epi['scaled_prs'].max()])
-#           
-#           ax.set_xlabel('epi')
-#           ax.set_ylabel('main only')
-#           ax.grid(True) 
-#           ax.set_title(f'Standardized High Risk iPRS Cases : Main V Epi')
-#           handles,labels = ax.get_legend_handles_labels()
-#           ax.legend(handles,labels,loc='upper left',fontsize=15)
-#       #   rsquared = round((linreg.rvalue*linreg.rvalue),2)
-#           ax.text(-3.8, 3, f'{group}',fontsize=15)
-#           plt.savefig(f'{figurePath}/iPRSHigh.QQColorPlot.png')
-#           ax.clear()
-#           cases['color'] = 'black'
-#           
-#       if group == 'high risk':
-#           fig,ax = plt.subplots(figsize=(10,10))
-#           cases.loc[((cases['bin_Main'] == 9) & (cases['epi_helps'] == 0)),'color'] == 'rgb(211,0,63,0)'
-#           cases.loc[((cases['bin_Main'] == 10) & (cases['epi_helps'] == 0)),'color'] == 'rgb(201,0,22,0)'
-#           cases.loc[((cases['bin_EpiMain'] == 9) & (cases['epi_helps'] == 1)),'color'] == 'rgb(0, 0, 205,.6)'
-#           cases.loc[((cases['bin_EpiMain'] == 10) & (cases['epi_helps'] == 1)),'color'] == 'rgb(0, 0, 128,.6)'
-#           model_type = f'HighRiskPRSANDiPRS.{suffix}'
-#       #   ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c='#776cb1',s=40,alpha=.6,label='Controls')
-#           ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c=controls['color'].values,s=40,alpha=.6,label='Controls')
-#       #   ax.scatter(x=epiCases['scaled_prs'].values,y=mainCases['scaled_prs'].values,marker="+",c='black',s=40,alpha=.9,label='Cases')
-#           ax.scatter(x=cases['scaled_prs'].values,y=cases['scaled_prs'].values,marker="+",c=cases['color'].values,s=40,alpha=.9,label='Cases')
-#       #   ax.plot([main['scaled_prs'].min(),main['scaled_prs'].max()],[linreg.intercept+linreg.slope*epi['scaled_prs'].min(),linreg.intercept+linreg.slope*epi['scaled_prs'].max()])
-#           
-#           ax.set_xlabel('epi')
-#           ax.set_ylabel('main only')
-#           ax.grid(True) 
-#           ax.set_title(f'Standardized High Risk PRS & iPRS Cases : Main V Epi')
-#           handles,labels = ax.get_legend_handles_labels()
-#           ax.legend(handles,labels,loc='upper left',fontsize=15)
-#       #   rsquared = round((linreg.rvalue*linreg.rvalue),2)
-#           ax.text(-3.8, 3, f'{group}',fontsize=15)
-#           plt.savefig(f'{figurePath}/iPRS_PRSHigh.QQColorPlot.png')
-#           ax.clear()
-#           cases['color'] = 'black'
-#           
-#       if group == 'all':
-#           fig,ax = plt.subplots(figsize=(10,10))
-#           cases.loc[((cases['bin_Main'] == 9) & (cases['epi_helps'] == 0)),'color'] == 'rgb(211,0,63,0)'
-#           cases.loc[((cases['bin_Main'] == 10) & (cases['epi_helps'] == 0)),'color'] == 'rgb(201,0,22,0)'
-#           cases.loc[((cases['bin_EpiMain'] == 9) & (cases['epi_helps'] == 1)),'color'] == 'rgb(0, 0, 205,.6)'
-#           cases.loc[((cases['bin_EpiMain'] == 10) & (cases['epi_helps'] == 1)),'color'] == 'rgb(0, 0, 128,.6)'
-#           cases.loc[((cases['bin_Main'] < 9) & (cases['epi_helps'] == 0)),'color'] == 'rgb(240,128,128)'
-#           cases.loc[((cases['bin_EpiMain'] < 9) & (cases['epi_helps'] == 1)),'color'] == 'rgb(176, 224, 230,.6)'
-#           model_type = f'HighANDLowRiskPRSANDiPRS.{suffix}'
-#       #   ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c='#776cb1',s=40,alpha=.6,label='Controls')
-#           ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c=controls['color'].values,s=40,alpha=.6,label='Controls')
-#       #   ax.scatter(x=epiCases['scaled_prs'].values,y=mainCases['scaled_prs'].values,marker="+",c='black',s=40,alpha=.9,label='Cases')
-#           ax.scatter(x=cases['scaled_prs'].values,y=cases['scaled_prs'].values,marker="+",c=cases['color'].values,s=40,alpha=.9,label='Cases')
-#       #   ax.plot([main['scaled_prs'].min(),main['scaled_prs'].max()],[linreg.intercept+linreg.slope*epi['scaled_prs'].min(),linreg.intercept+linreg.slope*epi['scaled_prs'].max()])
-#           
-#           ax.set_xlabel('epi')
-#           ax.set_ylabel('main only')
-#           ax.grid(True) 
-#           ax.set_title(f'Standardized High & Low Risk PRS & iPRS Cases : Main V Epi')
-#           handles,labels = ax.get_legend_handles_labels()
-#           ax.legend(handles,labels,loc='upper left',fontsize=15)
-#       #   rsquared = round((linreg.rvalue*linreg.rvalue),2)
-#           ax.text(-3.8, 3, f'{group}',fontsize=15)
-#           plt.savefig(f'{figurePath}/iPRS_PRSHighANDLow.QQColorPlot.png')
-#           ax.clear()
-#           cases['color'] = 'black'
-#           
-#       if group == 'cases predicted low risk PRS':
-#           fig,ax = plt.subplots(figsize=(10,10))
-#           cases.loc[((cases['bin_Main'] < 9) & (cases['epi_helps'] == 0)),'color'] == 'rgb(240,128,128)'
-#           model_type = f'LowRiskPRS.{suffix}'
-#       #   ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c='#776cb1',s=40,alpha=.6,label='Controls')
-#           ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c=controls['color'].values,s=40,alpha=.6,label='Controls')
-#       #   ax.scatter(x=epiCases['scaled_prs'].values,y=mainCases['scaled_prs'].values,marker="+",c='black',s=40,alpha=.9,label='Cases')
-#           ax.scatter(x=cases['scaled_prs'].values,y=cases['scaled_prs'].values,marker="+",c=cases['color'].values,s=40,alpha=.9,label='Cases')
-#       #   ax.plot([main['scaled_prs'].min(),main['scaled_prs'].max()],[linreg.intercept+linreg.slope*epi['scaled_prs'].min(),linreg.intercept+linreg.slope*epi['scaled_prs'].max()])
-#           
-#           ax.set_xlabel('epi')
-#           ax.set_ylabel('main only')
-#           ax.grid(True) 
-#           ax.set_title(f'Standardized Low Risk PRS Cases : Main V Epi')
-#           handles,labels = ax.get_legend_handles_labels()
-#           ax.legend(handles,labels,loc='upper left',fontsize=15)
-#       #   rsquared = round((linreg.rvalue*linreg.rvalue),2)
-#           ax.text(-3.8, 3, f'{group}',fontsize=15)
-#           plt.savefig(f'{figurePath}/PRSLow.QQColorPlot.png')
-#           ax.clear()
-#           cases['color'] = 'black'
-#           
-#       if group == 'cases predicted low risk iPRS':
-#           fig,ax = plt.subplots(figsize=(10,10))
-#           cases.loc[((cases['bin_EpiMain'] < 9) & (cases['epi_helps'] == 1)),'color'] == 'rgb(176, 224, 230,.6)'
-#           model_type = f'LowRiskiPRS.{suffix}'
-#       #   ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c='#776cb1',s=40,alpha=.6,label='Controls')
-#           ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c=controls['color'].values,s=40,alpha=.6,label='Controls')
-#       #   ax.scatter(x=epiCases['scaled_prs'].values,y=mainCases['scaled_prs'].values,marker="+",c='black',s=40,alpha=.9,label='Cases')
-#           ax.scatter(x=cases['scaled_prs'].values,y=cases['scaled_prs'].values,marker="+",c=cases['color'].values,s=40,alpha=.9,label='Cases')
-#       #   ax.plot([main['scaled_prs'].min(),main['scaled_prs'].max()],[linreg.intercept+linreg.slope*epi['scaled_prs'].min(),linreg.intercept+linreg.slope*epi['scaled_prs'].max()])
-#           
-#           ax.set_xlabel('epi')
-#           ax.set_ylabel('main only')
-#           ax.grid(True) 
-#           ax.set_title(f'Standardized Low Risk iPRS Cases : Main V Epi')
-#           handles,labels = ax.get_legend_handles_labels()
-#           ax.legend(handles,labels,loc='upper left',fontsize=15)
-#       #   rsquared = round((linreg.rvalue*linreg.rvalue),2)
-#           ax.text(-3.8, 3, f'{group}',fontsize=15)
-#           plt.savefig(f'{figurePath}/iPRSLow.QQColorPlot.png')
-#           ax.clear()
-#           cases['color'] = 'black'
-#           
-#       if group == 'low risk':
-#           fig,ax = plt.subplots(figsize=(10,10))
-#           cases.loc[((cases['bin_Main'] < 9) & (cases['epi_helps'] == 0)),'color'] == 'rgb(240,128,128)'
-#           cases.loc[((cases['bin_EpiMain'] < 9) & (cases['epi_helps'] == 1)),'color'] == 'rgb(176, 224, 230,.6)'
-#           model_type = f'LowRiskPRSANDiPRS.{suffix}'
-#       #   ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c='#776cb1',s=40,alpha=.6,label='Controls')
-#           ax.scatter(x=controls['scaled_prs'].values,y=controls['scaled_prs_main'].values,marker=".",c=controls['color'].values,s=40,alpha=.6,label='Controls')
-#       #   ax.scatter(x=epiCases['scaled_prs'].values,y=mainCases['scaled_prs'].values,marker="+",c='black',s=40,alpha=.9,label='Cases')
-#           ax.scatter(x=cases['scaled_prs'].values,y=cases['scaled_prs'].values,marker="+",c=cases['color'].values,s=40,alpha=.9,label='Cases')
-#       #   ax.plot([main['scaled_prs'].min(),main['scaled_prs'].max()],[linreg.intercept+linreg.slope*epi['scaled_prs'].min(),linreg.intercept+linreg.slope*epi['scaled_prs'].max()])
-#           
-#           ax.set_xlabel('epi')
-#           ax.set_ylabel('main only')
-#           ax.grid(True) 
-#           ax.set_title(f'Standardized Low Risk PRS & iPRS Cases : Main V Epi')
-#           handles,labels = ax.get_legend_handles_labels()
-#           ax.legend(handles,labels,loc='upper left',fontsize=15)
-#       #   rsquared = round((linreg.rvalue*linreg.rvalue),2)
-#           ax.text(-3.8, 3, f'{group}',fontsize=15)
-#           plt.savefig(f'{figurePath}/iPRS_PRSLow.QQColorPlot.png')
-#           ax.clear()
-#           cases['color'] = 'black'
+def draw_correlation_plot(cases,controls,str_text,figurePath,rsquared,pvalue):
+    fig,ax = plt.subplots(figsize=(10,10))
+
+    ax.scatter(x=controls['scaled_prs_epi'].values,y=controls['scaled_prs_main'].values,marker=".",c=controls['color'],s=controls['size'],alpha=controls['alpha'],label='Controls')
+    ax.scatter(x=cases['scaled_prs_epi'].values,y=cases['scaled_prs_main'].values,marker="+",c=cases['color'],s=cases['size'],alpha=cases['alpha'],label='Cases')
+
     
+    ax.set_xlabel('epi only')
+    ax.set_ylabel('main only')
+    ax.grid(True) 
+    ax.set_title(f'Standardized {str_text} : Main V Epi')
+    handles,labels = ax.get_legend_handles_labels()
+    ax.legend(handles,labels,loc='upper left',fontsize=15)
+    rsquaredRound = round(rsquared,2)
     
-#def create_prs_iprs_qq_plots(combinedPRS,figurePath,suffix):
-#   '''filepaths to prs scores using columns = [IID,prs,scaled_prs,PHENOTYPE]'''
-#   
-#   
-#   epiMain = combinedPRS[combinedPRS['model'] == 'epi+main']
-#   main = combinedPRS[combinedPRS['model'] == 'main']
-#   epi = combinedPRS[combinedPRS['model'] == 'epi']
-#   
-#   mainCases = combinedPRS[(combinedPRS['model'] == 'main') & (combinedPRS['PHENOTYPE'] == 2)]
-#   mainControls = combinedPRS[(combinedPRS['model'] == 'main') & (combinedPRS['PHENOTYPE'] == 1)]
-#   epiCases = combinedPRS[(combinedPRS['model'] == 'epi') & (combinedPRS['PHENOTYPE'] == 2)]
-#   epiControls = combinedPRS[(combinedPRS['model'] == 'epi') & (combinedPRS['PHENOTYPE'] == 1)]
-#   epiMainCases = combinedPRS[(combinedPRS['model'] == 'epi+main') & (combinedPRS['PHENOTYPE'] == 2)]
-#   epiMainControls = combinedPRS[(combinedPRS['model'] == 'epi+main') & (combinedPRS['PHENOTYPE'] == 1)]
-#   
-#   suffix = suffix
-#   
-#   ############ Main v Epi+Main ##############################
-#   
-#   fig,ax = plt.subplots(figsize=(10,10))
-#   linreg = sp.stats.linregress(epiMain['scaled_prs'].values, main['scaled_prs'].values)
-#   model_type = f'mainVmain+epi.{suffix}'
-#   ax.scatter(x=epiMainControls['scaled_prs'].values,y=mainControls['scaled_prs'].values,marker=".",c='#776cb1',s=40,alpha=.6,label='Controls')
-#   ax.scatter(x=epiMainCases['scaled_prs'].values,y=mainCases['scaled_prs'].values,marker="+",c='black',s=40,alpha=.9,label='Cases')
-##   ax.plot([epiMain['scaled_prs'].min(),epiMain['scaled_prs'].max()],[linreg.intercept+linreg.slope*main['scaled_prs'].min(),linreg.intercept+linreg.slope*main['scaled_prs'].max()])
-#   
-#   ax.set_xlabel('epi + main')
-#   ax.set_ylabel('main only')
-#   ax.grid(True) 
-#   ax.set_title(f'Standardized Risk Scores : Main V Main+Epi')
-#   rsquared = round((linreg.rvalue*linreg.rvalue),2)
-#   ax.text(-3.8, 3, f'r squared = {rsquared}',fontsize=15)
-#   handles,labels = ax.get_legend_handles_labels()
-#   ax.legend(handles,labels,loc='upper left',fontsize=15)
-#
-#   plt.savefig(f'{figurePath}/{model_type}.QQWithR2.png')
-#   ax.clear()
-#   
-#   ############ Main v Epi ##############################
-#   
-#   fig,ax = plt.subplots(figsize=(10,10))
-#   linreg = sp.stats.linregress(main['scaled_prs'].values, epi['scaled_prs'].values)
-#   
-#   model_type = f'{suffix}'
-#   ax.scatter(x=epiControls['scaled_prs'].values,y=mainControls['scaled_prs'].values,marker=".",c='#776cb1',s=40,alpha=.6,label='Controls')
-#   ax.scatter(x=epiCases['scaled_prs'].values,y=mainCases['scaled_prs'].values,marker="+",c='black',s=40,alpha=.9,label='Cases')
-##   ax.plot([main['scaled_prs'].min(),main['scaled_prs'].max()],[linreg.intercept+linreg.slope*epi['scaled_prs'].min(),linreg.intercept+linreg.slope*epi['scaled_prs'].max()])
-#   
-#   ax.set_xlabel('epi')
-#   ax.set_ylabel('main only')
-#   ax.grid(True) 
-#   ax.set_title(f'Standardized Risk Scores : Main V Epi')
-#   handles,labels = ax.get_legend_handles_labels()
-#   ax.legend(handles,labels,loc='upper left',fontsize=15)
-#   rsquared = round((linreg.rvalue*linreg.rvalue),2)
-#   ax.text(-3.8, 3, f'r squared = {rsquared}',fontsize=15)
-#   plt.savefig(f'{figurePath}/{model_type}.QQWithR2.png')
-#   
-#   ax.clear()
-#   
-#   ############ Epi v Epi+Main ##############################
-#   
-#   fig,ax = plt.subplots(figsize=(10,10))
-#   
-#   model_type = f'epiVMainepi.{suffix}'
-#   linreg = sp.stats.linregress(epiMain['scaled_prs'].values, epi['scaled_prs'].values)
-#   
-#   ax.scatter(x=epiMainControls['scaled_prs'].values,y=epiControls['scaled_prs'].values,marker=".",c='#776cb1',s=40,alpha=.6,label='Controls')
-#   ax.scatter(x=epiMainCases['scaled_prs'].values,y=epiCases['scaled_prs'].values,marker="+",c='black',s=40,alpha=.9,label='Cases')
-##   ax.plot([epiMain['scaled_prs'].min(),epiMain['scaled_prs'].max()],[linreg.intercept+linreg.slope*epi['scaled_prs'].min(),linreg.intercept+linreg.slope*epi['scaled_prs'].max()])
-#   
-#   ax.set_xlabel('epi + main')
-#   ax.set_ylabel('epi only')
-#   ax.grid(True) 
-#   ax.set_title(f'Standardized Risk Scores : Epi V Epi + Main')
-#   handles,labels = ax.get_legend_handles_labels()
-#   labels.append('r squared')
-#   ax.legend(handles,labels,loc='upper left',fontsize=15)
-#   rsquared = round((linreg.rvalue*linreg.rvalue),2)
-#   ax.text(-3.8, 3, f'r squared = {rsquared}',fontsize=15)
-#   plt.savefig(f'{figurePath}/{model_type}.QQWithR2.png')
-#   
+    # rsquared,pvalue = calculate_rsquared(pd.concat([cases,controls]))
+    # Add text anchored to the bottom-right of the plot
+    plt.text(
+        1.0, .01,               # Position (relative to the axes)
+        f'pearson r-sqared : {rsquaredRound}',        # Text to display
+        transform=plt.gca().transAxes,  # Use Axes coordinates (0, 0 is bottom-left, 1, 1 is top-right)
+        fontsize=12,             # Text size
+        verticalalignment='bottom',    # Align text vertically to the bottom
+        horizontalalignment='right'    # Align text horizontally to the right
+    )
+    
+    plt.text(
+        .7, .05,               # Position (relative to the axes)
+        f'p value : {pvalue}',        # Text to display
+        transform=plt.gca().transAxes,  # Use Axes coordinates (0, 0 is bottom-left, 1, 1 is top-right)
+        fontsize=12,             # Text size
+        verticalalignment='bottom',    # Align text vertically to the bottom
+        horizontalalignment='right'    # Align text horizontally to the right
+    )
+    
+    plt.savefig(f'{figurePath}/{str_text}.QQColorPlot.png')
+    ax.clear()
+    cases['color'] = 'black'
+    
+def create_qq_plot_groups(combinedPRS,figurePath):
+    ''' use input to color cases in different colors based on group:
+    input : dataframe columns = ['IID', 'PHENOTYPE', 'prs_epiMain', 'scaled_prs_epiMain', 'prs_main',
+        'scaled_prs_main', 'prs_epi', 'scaled_prs_epi', 'use_epiMain',
+        'use_epi', 'use_main', 'color', 'bin_epi+main', 'bin_main', 'bin_epi',
+        'scaled_prs_final_group', 'scaled_ungrouped_optimized_prs',
+        'ungrouped_bin_Final', 'grouped_optimized_prs',
+        'scaled_grouped_optimized_prs', 'grouped_bin_Final']
+    output : correlation plot with groups colors'''
+    combinedPRS['size'] = 40
+    combinedPRS['alpha'] = .6
+    cases = combinedPRS[combinedPRS['PHENOTYPE'] == 2]
+    cases['color'] = 'black'
+    controls = combinedPRS[combinedPRS['PHENOTYPE'] == 1]
+    controls['color'] = '#776cb1'
+    
+    #assign colors based on categories
+    
+    ### GET pearson correlation coefficient for epi v main
+#	correlationEpiMain, p_valueEpiMain = pearsonr(combinedPRS['main'], combinedPRS['epi'])
+#	correlationCardioMain, p_valueCardioMain = pearsonr(combinedPRS['main'], combinedPRS['epi'])
+
+    
+    for use_all in [False,True]:
+
+        cases.loc[cases['bin_cardio'] > 8,'color'] = '#f2de19'
+        cases.loc[cases['bin_epi+main'] > 8 ,'color'] = '#39c700'
+        cases.loc[cases['bin_epi'] > 8,'color'] = '#19f0f2'
+        cases.loc[cases['bin_main'] > 8,'color'] = '#C90016'
+
+        
+        
+        if use_all:
+            str_text = 'combinedPRS.withAll'
+            cases.loc[cases['bin_all'] > 8,'color'] = '#c4771f'
+
+        else:
+            str_text = 'combinedPRS'
+
+        cases.loc[cases['color'] != 'black','size'] = 60
+        cases.loc[cases['color'] != 'black','alpha'] = 1
+        
+        corr, p_value = pearsonr(combinedPRS['scaled_prs_main'], combinedPRS['scaled_prs_epi'])
+        
+        draw_correlation_plot(cases,controls,str_text,figurePath,corr,p_value)
+
 def create_auc_dataframe(df,thresholds=[]):
     y_true = true_positive(df)
     
@@ -906,10 +723,7 @@ def create_optimized_prevalence_plot(df,figurePath,image_str):
 
         figurePath = fig path for test or holdout set
         '''
-    ####################   GET CARDIO AND GENO SEPARATE AND TOGETHER  ###########
-    
-    cardio_models = df[df['model'].str.contains('cardio')]
-    geno_models = df[~df['model'].str.contains('cardio')]
+
     
     
     ####################################################################
@@ -921,65 +735,15 @@ def create_optimized_prevalence_plot(df,figurePath,image_str):
     
 
     ###########################  PREVALENCE PLOT ################################
-    title = 'Prevalence Across Centiles optimized'
+    title = 'Centile Prevalence Across PRS models '
     
-    for model in cardio_models['model'].unique():
-        plotDf = cardio_models[cardio_models['model'] == model]
-        marker = plotDf['marker'].tolist()[0]
-        color = plotDf['color'].tolist()[0]
-        ax.scatter(x=plotDf['prevalence'],y=np.array(plotDf['bin'])-1,c=color,s=200,marker=marker,alpha=.7)
-        ax.plot(plotDf['prevalence'],np.array(plotDf['bin'])-1,color=color,alpha=.4,linestyle='dashed')
-        
-    ax.set_ylabel('deciles')
-    ax.set_xlabel('prevalence')
-    ax.set_title(title)
-    #	xlabels = [f"{i}\n{j}" for i,j in enumerate(bin_limits,start=1)]
-    #	xlabels = df['bin_limits'].unique().tolist()
-    yticks = list(range(0,10))
-    ylabels = [str(i) for i in range(1,11)]
-    ax.set_yticks(yticks,labels=ylabels)
-    
-    plt.savefig(f'{figurePath}/PRScrCardioFeatures{image_str}.scatter.png')
-    
-    ##########################  PLOT GENO NO CARDIO  ###############################
-    fig,ax = plt.subplots(figsize=(10,10))
-    title = 'PRScr geno models across deciles'
-    
-    for model in geno_models['model'].unique():
-        plotDf = geno_models[geno_models['model'] == model]
-        marker = plotDf['marker'].tolist()[0]
-        color = plotDf['color'].tolist()[0]
-        ax.scatter(x=plotDf['prevalence'],y=np.array(plotDf['bin'])-1,color=color,s=200,marker=marker,alpha=.7)
-        ax.plot(plotDf['prevalence'],np.array(plotDf['bin'])-1,color=color,alpha=.4,linestyle='dashed')
-        
-    ax.set_ylabel('deciles')
-    ax.set_xlabel('prevalence')
-    ax.set_title(title)
-    #	xlabels = [f"{i}\n{j}" for i,j in enumerate(bin_limits,start=1)]
-    #	xlabels = df['bin_limits'].unique().tolist()
-    yticks = list(range(0,10))
-    ylabels = [str(i) for i in range(1,11)]
-    ax.set_yticks(yticks,labels=ylabels)
-    
-    plt.savefig(f'{figurePath}/PRScrGenoFeatures{image_str}.scatter.png')
-    
-    
-    ##########################  PLOT BOTH GENO AND CARDIO TOGETHER  ###############################
-    
-    title = 'PRScr models across deciles with ExGxG'
-    fig,ax = plt.subplots(figsize=(10,10))
-    #models are 3 PRScr models, cardio_main, cardio
-    models = [col for col in df['model'].unique() if 'PRScr' in col] + ['cardio']
-    
-#   for model in df['model'].unique():
-    for model in models:
+    for model in df['model'].unique():
         plotDf = df[df['model'] == model]
         marker = plotDf['marker'].tolist()[0]
         color = plotDf['color'].tolist()[0]
         ax.scatter(x=plotDf['prevalence'],y=np.array(plotDf['bin'])-1,c=color,s=200,marker=marker,alpha=.7)
         ax.plot(plotDf['prevalence'],np.array(plotDf['bin'])-1,color=color,alpha=.4,linestyle='dashed')
         
-        
     ax.set_ylabel('deciles')
     ax.set_xlabel('prevalence')
     ax.set_title(title)
@@ -989,45 +753,13 @@ def create_optimized_prevalence_plot(df,figurePath,image_str):
     ylabels = [str(i) for i in range(1,11)]
     ax.set_yticks(yticks,labels=ylabels)
     
-    plt.savefig(f'{figurePath}/PRScrAll{image_str}.scatter.png')
+    plt.savefig(f'{figurePath}/prevalenceAcrossModels{image_str}.scatter.png')
+    
+
+
     
     
-    ##########################  PLOT ALL WITH PRScr geno and PRScr_epi  ###############################
-    
-    fig,ax = plt.subplots(figsize=(10,10))
-    data_types_to_plot = [col for col in df['model'].unique() if '+cardio' not in col]
-    for model in data_types_to_plot:
-        plotDf = df[df['model'] == model]
-        marker = plotDf['marker'].tolist()[0]
-        color = plotDf['color'].tolist()[0]
-        ax.scatter(x=plotDf['prevalence'],y=np.array(plotDf['bin'])-1,c=color,s=200,marker=marker,alpha=.7)
-        ax.plot(plotDf['prevalence'],np.array(plotDf['bin'])-1,color=color,alpha=.4,linestyle='dashed')
-        
-        
-    ax.set_ylabel('deciles')
-    ax.set_xlabel('prevalence')
-    ax.set_title(title)
-    #	xlabels = [f"{i}\n{j}" for i,j in enumerate(bin_limits,start=1)]
-    #	xlabels = df['bin_limits'].unique().tolist()
-    yticks = list(range(0,10))
-    ylabels = [str(i) for i in range(1,11)]
-    ax.set_yticks(yticks,labels=ylabels)
-    
-    plt.savefig(f'{figurePath}/PRScrGenoWithCardio{image_str}.scatter.png')
-    
-    
-    
-    #def draw_pie(r1,r2,xpos,ypos,size,ax=None):
-    #	x = [0] + np.cos(np.linspace(0, 2 * np.pi * r1, 10)).tolist()
-    #	y = [0] + np.sin(np.linspace(0, 2 * np.pi * r1, 10)).tolist()
-    #	xy1 = np.column_stack([x, y])
-    #	
-    #	x = [0] + np.cos(np.linspace(2 * np.pi * r1, 2 * np.pi, 10)).tolist()
-    #	y = [0] + np.sin(np.linspace(2 * np.pi * r1, 2 * np.pi, 10)).tolist()
-    #	xy2 = np.column_stack([x, y])
-    #	ax.scatter([xpos],[ypos],marker=xy1,s=size,facecolor='blue',alpha=.7)
-    #	ax.scatter([xpos],[ypos],marker=xy2,s=size,facecolor='red',alpha=.7)
-    #	return(ax)
+
     
 def plot_important_features_modelling(pheno):
     filePath = f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/reducedSHAP'

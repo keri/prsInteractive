@@ -6,8 +6,8 @@
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_calculate_prs.err
 #SBATCH --partition=quicktest
 #SBATCH --cpus-per-task=2
-#SBATCH --mem=120G
-#SBATCH --time=03:00:00
+#SBATCH --mem=30G
+#SBATCH --time=01:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=oconnoas@staff.vuw.ac.nz
 #
@@ -118,6 +118,16 @@ echo "[DEBUG] Python script exited with code: $exit_code"
 
 if [ $exit_code -ne 0 ]; then
     echo "ERROR: Python script failed with exit code $exit_code"
+    exit $exit_code
+fi
+
+python "${SCRIPTS_DIR}/combine_prs.py" 
+
+exit_code=$?
+echo "[DEBUG] Python combine_prs.py script exited with code: $exit_code"
+
+if [ $exit_code -ne 0 ]; then
+    echo "ERROR: Python combine_prs.py script failed with exit code $exit_code"
     exit $exit_code
 fi
 

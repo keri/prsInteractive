@@ -31,6 +31,122 @@ library(argparse)
 
 registerDoMC(cores = 20)
 
+get_main_cardio_features <- function(feature_file_path, results_path) {
+
+  
+  cat("=== PROCESSING MAIN CARDIO FEATURES ===\n")
+  cat("Feature file:", feature_file_path, "\n")
+  cat("Results path:", results_path, "\n")
+  
+  # Step 1: Read the feature file
+  if (!file.exists(feature_file_path)) {
+    stop(paste("Feature file not found:", feature_file_path))
+  }
+  
+  feature_data <- fread(feature_file_path)
+  cat("Loaded feature data with", nrow(feature_data), "rows and", ncol(feature_data), "columns\n")
+  cat("Columns:", paste(names(feature_data), collapse = ", "), "\n")
+  
+  # Step 2: Filter for main_E features (main_E == 1)
+  main_E_features <- feature_data[main_E == 1]
+  cat("Found", nrow(main_E_features), "main_E features\n")
+  
+  if (nrow(main_E_features) == 0) {
+    stop("No main_E features found in the data")
+  }
+  
+  # Step 3: Extract unique environmental feature names
+  main_cardio_feature_list <- unique(main_E_features$envFeature)
+  main_cardio_feature_list <- main_cardio_feature_list[!is.na(main_cardio_feature_list)]
+  
+  cat("Main cardio features to extract:\n")
+  for(i in 1:min(10, length(main_cardio_feature_list))) {
+    cat(sprintf("  %d. %s\n", i, main_cardio_feature_list[i]))
+  }
+  if(length(main_cardio_feature_list) > 10) {
+    cat(sprintf("  ... and %d more\n", length(main_cardio_feature_list) - 10))
+  }
+  
+  # Step 4: Read participant environment data
+  participant_env_file <- file.path(results_path, "participant_environment.csv")
+  
+  if (!file.exists(participant_env_file)) {
+    stop(paste("Participant environment file not found:", participant_env_file))
+  }
+  
+  cat("\nReading participant environment data from:", participant_env_file, "\n")
+  participant_env <- fread(participant_env_file)
+  
+  # Handle different possible column names for participant ID
+  if ("Participant ID" %in% names(participant_env)) {
+    setnames(participant_env, "Participant ID", "IID")
+  } else if (!"IID" %in% names(participant_env)) {
+    # Check for other common ID column names
+    id_cols <- c("ID", "id", "ParticipantID", "participant_id")
+    found_id_col <- intersect(id_cols, names(participant_env))
+    if (length(found_id_col) > 0) {
+      setnames(participant_env, found_id_col[1], "IID")
+      cat("Renamed", found_id_col[1], "to IID\n")
+    } else {
+      stop("No IID or participant ID column found in environment data")
+    }
+  }
+  
+  # 
+
+  # Ensure IID is integer type for consistent merging
+  participant_env[, IID := as.integer(IID)]
+  
+  cat("Participant environment data shape:", nrow(participant_env), "x", ncol(participant_env), "\n")
+  cat("Available columns:", paste(head(names(participant_env), 15), collapse = ", "), 
+      if(ncol(participant_env) > 15) "..." else "", "\n")
+  
+  # Step 5: Check which main cardio features are available in participant data
+  available_features <- intersect(main_cardio_feature_list, names(participant_env))
+  missing_features <- setdiff(main_cardio_feature_list, names(participant_env))
+  
+  cat("\nFeature availability check:\n")
+  cat("Available features:", length(available_features), "/", length(main_cardio_feature_list), "\n")
+  
+  if (length(missing_features) > 0) {
+    cat("Missing features:\n")
+    for(i in 1:min(10, length(missing_features))) {
+      cat(sprintf("  %s\n", missing_features[i]))
+    }
+    if(length(missing_features) > 10) {
+      cat(sprintf("  ... and %d more\n", length(missing_features) - 10))
+    }
+  }
+  
+  if (length(available_features) == 0) {
+    stop("No main cardio features found in participant environment data")
+  }
+  
+  # Remove features with too much missing data (>5%)
+  high_quality_features <- c()
+  for(feature in available_features) {
+    missing_rate <- sum(is.na(participant_env[[feature]])) / nrow(participant_env)
+    
+    if(missing_rate <= 0.05) {
+      high_quality_features <- c(high_quality_features, feature)
+    } else {
+      cat(sprintf("Excluding %s: Participant Data %.1f%%, (>5%% threshold)\n", 
+                  feature, missing_rate*100))
+    }
+  }
+  
+  cat("\nFeatures passing 5% missing data threshold:", length(high_quality_features), "/", length(available_features), "\n")
+  
+  
+  # Update datasets to include only high-quality features
+  final_columns <- c("IID", high_quality_features)
+  cardio_env_data <- participant_env[, ..final_columns]
+  
+  cat("\nExtracted cardio environment data with", ncol(cardio_env_data), "columns\n")
+  
+  return(cardio_env_data)
+}
+
 
 
 calculate_nagelkerke_rsquared <- function(yTest,yProba) {
@@ -241,176 +357,6 @@ create_epi_df <- function(epiDf, pairList, cardio_df=data.table()) {
 }
 
 
-
-
-#get_geno_dataset <- function(file_path, data_path, columns_to_get) {
-# 
-# library(data.table)
-# start_time <- Sys.time()
-# 
-# cat("Reading file with mixed separators...\n")
-# 
-# # Read the file manually since header and data have different separators
-# all_lines <- readLines(file_path)
-# 
-# # Parse header (tab-separated)
-# header_line <- all_lines[1]
-# col_names <- unlist(strsplit(header_line, "\t"))
-# cat("Found", length(col_names), "columns from tab-separated header\n")
-# cat("First 10 columns:", paste(head(col_names, 10), collapse = ", "), "\n")
-# 
-# # Parse data lines (space-separated)
-# data_lines <- all_lines[-1]
-# cat("Processing", length(data_lines), "data rows...\n")
-# 
-# # Parse first data line to check field count
-# first_data <- unlist(strsplit(data_lines[1], "\\s+"))
-# cat("First data line has", length(first_data), "fields\n")
-# cat("First 10 data values:", paste(head(first_data, 10), collapse = ", "), "\n")
-# 
-# # Adjust column names if needed
-# if (length(first_data) != length(col_names)) {
-#   cat("Adjusting column count from", length(col_names), "to", length(first_data), "\n")
-#   if (length(first_data) < length(col_names)) {
-#     col_names <- col_names[1:length(first_data)]
-#   } else {
-#     # Add extra column names if data has more fields
-#     extra_cols <- paste0("extra_", 1:(length(first_data) - length(col_names)))
-#     col_names <- c(col_names, extra_cols)
-#   }
-# }
-# 
-# cat("Using", length(col_names), "column names\n")
-# 
-# # Create a temporary file with consistent separators
-# temp_file <- tempfile()
-# cat("Creating temporary file with consistent formatting...\n")
-# 
-# # Write header with tabs
-# writeLines(paste(col_names, collapse = "\t"), temp_file)
-# 
-# # Process and write data lines
-# cat("Converting data lines to tab-separated format...\n")
-# 
-# # Process in chunks for better memory management
-# chunk_size <- 100
-# for (i in seq(1, length(data_lines), chunk_size)) {
-#   end_idx <- min(i + chunk_size - 1, length(data_lines))
-#   chunk_lines <- data_lines[i:end_idx]
-#   
-#   # Convert each line from space-separated to tab-separated
-#   processed_lines <- character(length(chunk_lines))
-#   for (j in 1:length(chunk_lines)) {
-#     fields <- unlist(strsplit(chunk_lines[j], "\\s+"))
-#     # Pad or truncate to match column count
-#     if (length(fields) < length(col_names)) {
-#       fields <- c(fields, rep(NA, length(col_names) - length(fields)))
-#     } else if (length(fields) > length(col_names)) {
-#       fields <- fields[1:length(col_names)]
-#     }
-#     processed_lines[j] <- paste(fields, collapse = "\t")
-#   }
-#   
-#   # Append to temp file
-#   write.table(processed_lines, temp_file, append = TRUE, quote = FALSE, 
-#               row.names = FALSE, col.names = FALSE, sep = "\t")
-#   
-#   if (i %% 500 == 1) cat("Processed", min(end_idx, length(data_lines)), "of", length(data_lines), "rows\n")
-# }
-# 
-# cat("Reading processed file...\n")
-# 
-# # Now read the properly formatted file
-# main_data <- fread(temp_file, sep = "\t", header = TRUE, na.strings = c("", "NA"))
-# 
-# # Clean up temp file
-# unlink(temp_file)
-# 
-# cat("Successfully loaded data:", nrow(main_data), "x", ncol(main_data), "\n")
-# 
-# # Check column names
-# cat("Column names (first 15):", paste(head(names(main_data), 15), collapse = ", "), "\n")
-# 
-# # Find SNP columns
-# found_snps <- intersect(columns_to_get, names(main_data))
-# missing_snps <- setdiff(columns_to_get, names(main_data))
-# 
-# cat("Found", length(found_snps), "of", length(columns_to_get), "requested SNP columns\n")
-# if (length(missing_snps) > 0 && length(missing_snps) <= 10) {
-#   cat("Missing SNPs:", paste(missing_snps, collapse = ", "), "\n")
-# }
-# 
-# # Select columns
-# essential_cols <- c("IID", "PHENOTYPE")
-# final_columns <- c(essential_cols, found_snps)
-# 
-# # Ensure all selected columns exist
-# final_columns <- intersect(final_columns, names(main_data))
-# main_data <- main_data[, final_columns, with = FALSE]
-# 
-# cat("Selected", ncol(main_data), "columns\n")
-# 
-# # Convert data types
-# cat("Converting data types...\n")
-# if ("PHENOTYPE" %in% names(main_data)) {
-#   main_data[, PHENOTYPE := as.numeric(PHENOTYPE)]
-# }
-# 
-# # Convert SNP columns to numeric
-# snp_cols <- setdiff(names(main_data), c("IID", "PHENOTYPE"))
-# for (col in snp_cols) {
-#   main_data[, (col) := as.numeric(get(col))]
-# }
-# 
-# # Handle withdrawals
-# if ("IID" %in% names(main_data) && nrow(main_data) > 0) {
-#   withdrawal_path <- paste0(data_path, "/withdrawals.csv")
-#   if (file.exists(withdrawal_path)) {
-#     cat("Processing withdrawals...\n")
-#     withdrawn <- fread(withdrawal_path, header = FALSE)
-#     setnames(withdrawn, "V1", "IID")
-#     
-#     initial_count <- nrow(main_data)
-#     main_data <- main_data[!IID %in% withdrawn$IID]
-#     removed_count <- initial_count - nrow(main_data)
-#     cat("Removed", removed_count, "withdrawn participants\n")
-#   }
-# }
-# 
-# # Handle phenotype recoding
-# if ("PHENOTYPE" %in% names(main_data) && nrow(main_data) > 0) {
-#   cat("Recoding phenotypes (1->0, 2->1)...\n")
-#   pheno_before <- table(main_data$PHENOTYPE, useNA = "ifany")
-#   cat("Before recoding:\n")
-#   print(pheno_before)
-#   
-#   main_data[PHENOTYPE == 1, PHENOTYPE := 0]
-#   main_data[PHENOTYPE == 2, PHENOTYPE := 1]
-#   
-#   pheno_after <- table(main_data$PHENOTYPE, useNA = "ifany")
-#   cat("After recoding (0=control, 1=case):\n")
-#   print(pheno_after)
-# }
-# 
-# end_time <- Sys.time()
-# time_taken <- round(difftime(end_time, start_time, units = "mins"), 2)
-# cat("Processing completed in", time_taken, "minutes\n")
-# 
-# # Final summary
-# cat("\n=== FINAL SUMMARY ===\n")
-# cat("Dimensions:", nrow(main_data), "x", ncol(main_data), "\n")
-# if (nrow(main_data) > 0) {
-#   cat("Sample data (first 3 rows, first 5 columns):\n")
-#   print(main_data[1:min(3, nrow(main_data)), 1:min(5, ncol(main_data))])
-# }
-# 
-# return(main_data)
-#}
-
-# More robust genetic data loading function
-
-# Large file genetic data loader for files too big for memory mapping
-
 get_geno_dataset <- function(data_file,data_path,columns_to_get){
   
   start_time <- Sys.time()
@@ -536,16 +482,17 @@ check_merge_compatibility <- function(df1, df2, merge_col = "IID") {
 
 
 results_path <- '/Users/kerimulterer/prsInteractive/results'
-pheno_path <- '/Users/kerimulterer/prsInteractive/results/celiacDisease'
+pheno_path <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
 data_path <- '/Users/kerimulterer/prsInteractive/data'
 hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-# training_file <- '/Users/kerimulterer/prsInteractive/results/celiacDisease/trainingCombined.raw'
-training_file <- '/Users/kerimulterer/prsInteractive/results/celiacDisease/trainingCombined.raw'
-test_file <- '/Users/kerimulterer/prsInteractive/results/celiacDisease/testCombined.raw'
-# test_file <- '/Users/kerimulterer/prsInteractive/results/celiacDisease/testCombined_final.raw'
-training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/celiacDisease/geneEnvironmentTraining.csv'
-test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/celiacDisease/geneEnvironmentTest.csv'
+# training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw'
+training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw'
+test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined.raw'
+# test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined_final.raw'
+training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTraining.csv'
+test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTest.csv'
 covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
+
 
 scores_path = paste0(pheno_path,'/scores')
 #covar_pathway = paste0(results_path,'/covar.txt')
@@ -670,6 +617,13 @@ cat("Environment data IID columns set to integer type\n")
 
 epi_cardio_features = setdiff(names(envTraining), "IID")
 
+############## MAIN CARDIO FEATURES TO MODEL ##########
+
+main_cardio_file=paste0(pheno_path,'/scores/','cardioMetabolicimportantFeaturesPostShap.csv')
+main_cardio_df = get_main_cardio_features(main_cardio_file,results_path)
+main_cardio_features = setdiff(names(main_cardio_df),'IID')
+
+
 ################### ARRAY TYPE DATA #####################
 #get the genotype batch : column Genotype measurement batch
 # array_path = paste0(machine_path,'/ukbiobank/tanigawaData/participant.csv')
@@ -705,6 +659,9 @@ trainingDf = merge(trainingDf,hlaData, by = "IID", all.x = TRUE)
 
 trainingDf = merge(trainingDf,envTraining, by = "IID", all.x = TRUE)
 
+#merge with cardio main features
+trainingDf = merge(trainingDf,main_cardio_df, by= "IID", all.x = TRUE)
+
 ################# TEST data #####################
 testDf = get_geno_dataset(test_file,data_path,columns_to_get)
 
@@ -723,41 +680,9 @@ testDf = merge(testDf,hlaData, by = "IID", all.x = TRUE)
 
 testDf = merge(testDf,envTest, by = "IID", all.x = TRUE)
 
-#####################################################################################
-#                        PROCESS DATA FOR MODELLING                                 #
-#                        1) impute missing data with the mean                       #
-#####################################################################################
+#merge with cardio main features
+testDf = merge(testDf,main_cardio_df, by= "IID", all.x = TRUE)
 
-# Loop through each column except IID and impute missing values with the mean
-#numeric_cols <- names(trainingDf)[sapply(trainingDf, is.numeric) & names(trainingDf) != "IID"]
-#
-#cat("Processing", length(numeric_cols), "numeric columns for imputation\n")
-#
-## Calculate means ONLY from training data
-#cat("Calculating training means...\n")
-#train_means <- trainingDf[, lapply(.SD, function(x) mean(x, na.rm = TRUE)), .SDcols = numeric_cols]
-#
-## Convert train_means to a named vector for easier access
-#mean_vector <- as.numeric(train_means)
-#names(mean_vector) <- names(train_means)
-#
-#cat("Applying imputation to training data...\n")
-## Apply training means to training data
-#for (col in numeric_cols) {
-# mean_val <- mean_vector[col]
-# trainingDf[is.na(get(col)), (col) := mean_val]
-#}
-#
-#cat("Applying imputation to test data...\n")
-## Apply same training means to test data
-#for (col in numeric_cols) {
-# if (col %in% names(testDf)) {  # Check if column exists in test data
-#   mean_val <- mean_vector[col]
-#   testDf[is.na(get(col)), (col) := mean_val]
-# }
-#}
-#
-#cat("Imputation completed successfully\n")
 
 #####################################################################################
 #                        PROCESS DATA FOR MODELLING                                 #
@@ -792,7 +717,7 @@ for (col in numeric_cols) {
   # Apply to training data
   missing_count_train <- sum(is.na(trainingDf[[col]]))
   if (missing_count_train > 0) {
-    cat("Imputing", missing_count_train, "missing values in training", col, "with mean", round(train_mean, 4), "\n")
+    #cat("Imputing", missing_count_train, "missing values in training", col, "with mean", round(train_mean, 4), "\n")
     trainingDf[is.na(get(col)), (col) := train_mean]
   }
   
@@ -800,7 +725,7 @@ for (col in numeric_cols) {
   if (col %in% names(testDf)) {
     missing_count_test <- sum(is.na(testDf[[col]]))
     if (missing_count_test > 0) {
-      cat("Imputing", missing_count_test, "missing values in test", col, "with mean", round(train_mean, 4), "\n")
+      #cat("Imputing", missing_count_test, "missing values in test", col, "with mean", round(train_mean, 4), "\n")
       testDf[is.na(get(col)), (col) := train_mean]
     }
   } else {
@@ -861,7 +786,8 @@ dataset_list = list(
   list('epi+main',c(epi_main_features,covariate_columns,hla_columns)),
   list('cardio',c(epi_cardio_features,covariate_columns,hla_columns)),
   list('all',c(epi_cardio_features,epi_main_features,hla_columns,covariate_columns)),
-  # list('cardio_main',c(main_cardio_features,covariate_columns)),
+  list('cardio_main',c(main_cardio_features,covariate_columns)),
+  list('all+main_cardio',c(epi_cardio_features,epi_main_features,hla_columns,main_cardio_features,covariate_columns)),
   list('covariate',c(covariate_columns))
   
 )

@@ -3,6 +3,9 @@
 import pandas as pd
 import numpy as np
 
+
+    
+
 def create_risk_bins(training_df, n_bins=1000):
     """
     Create risk bins for PRS scores and calculate bin statistics.
@@ -176,7 +179,7 @@ def assign_risk_thresholds(holdout_df, bin_stats, training_scalers=None, thresho
         
     return holdout_processed
 
-def save_bin_statistics(bin_stats, training_stats=None, filename_prefix='prs_statistics'):
+def save_bin_statistics(bin_stats, training_stats=None, filename_prefix='training_prs_statistics'):
     """
     Save bin statistics and training statistics to CSV files.
     
@@ -200,7 +203,7 @@ def save_bin_statistics(bin_stats, training_stats=None, filename_prefix='prs_sta
         training_stats_df.to_csv(training_stats_filename)
         print(f"Training statistics saved to {training_stats_filename}")
         
-def load_bin_statistics(filename_prefix='prs_statistics'):
+def load_bin_statistics(filename_prefix='training_prs_statistics'):
     """
     Load bin statistics and training statistics from CSV files.
     
@@ -333,45 +336,62 @@ def scale_holdout_data_manually(holdout_df, training_stats):
 # Example usage and main execution
 if __name__ == "__main__":
     
-    # Example: Create sample data for demonstration
-    print("Creating sample data for demonstration...")
-    np.random.seed(42)
+    pheno='type2Diabetes'
+    scoresPath = f'/Users/kerimulterer/prsInteractive/results/{pheno}/scores'
+    trainingPath = f'{scoresPath}/combinedPRSGroups.csv'
+    holdoutPath = f'{scoresPath}/combinedPRSGroups.holdout.csv'
+#   # Example: Create sample data for demonstration
+#   print("Creating sample data for demonstration...")
+#   np.random.seed(42)
+#   
+#   # Sample training data
+#   n_train = 10000
+#   training_data = {
+#       'scaled_prs_main': np.random.normal(0, 1, n_train),
+#       'scaled_prs_epi': np.random.normal(0, 1, n_train),
+#       'scaled_prs_epi+main': np.random.normal(0, 1, n_train),
+#       'scaled_prs_cardio': np.random.normal(0, 1, n_train),
+#       'scaled_prs_all': np.random.normal(0, 1, n_train)
+#   }
+#   
+#   # Create training DataFrame with IID as index
+#   training_df = pd.DataFrame(training_data)
+#   training_df.index.name = 'IID'
+#   training_df.index = [f'TRAIN_{i}' for i in range(len(training_df))]
+#   
+#   # Sample holdout data (unscaled PRS)
+#   n_holdout = 2000
+#   holdout_data = {
+#       'prs_main': np.random.normal(2, 3, n_holdout),        # Different mean/std
+#       'prs_epi': np.random.normal(-1, 2, n_holdout),
+#       'prs_epi+main': np.random.normal(1, 2.5, n_holdout),
+#       'prs_cardio': np.random.normal(0.5, 1.5, n_holdout),
+#       'prs_all': np.random.normal(-0.5, 2, n_holdout)
+#   }
+#   
+#   # Create holdout DataFrame with IID as index
+#   holdout_df = pd.DataFrame(holdout_data)
+#   holdout_df.index.name = 'IID'
+#   holdout_df.index = [f'HOLDOUT_{i}' for i in range(len(holdout_df))]
     
-    # Sample training data
-    n_train = 10000
-    training_data = {
-        'scaled_prs_main': np.random.normal(0, 1, n_train),
-        'scaled_prs_epi': np.random.normal(0, 1, n_train),
-        'scaled_prs_epi+main': np.random.normal(0, 1, n_train),
-        'scaled_prs_cardio': np.random.normal(0, 1, n_train),
-        'scaled_prs_all': np.random.normal(0, 1, n_train)
-    }
+    #download combinedPRS training Data
+    trainingDf = pd.read_csv(trainingPath)
     
-    # Create training DataFrame with IID as index
-    training_df = pd.DataFrame(training_data)
-    training_df.index.name = 'IID'
-    training_df.index = [f'TRAIN_{i}' for i in range(len(training_df))]
-    
-    # Sample holdout data (unscaled PRS)
-    n_holdout = 2000
-    holdout_data = {
-        'prs_main': np.random.normal(2, 3, n_holdout),        # Different mean/std
-        'prs_epi': np.random.normal(-1, 2, n_holdout),
-        'prs_epi+main': np.random.normal(1, 2.5, n_holdout),
-        'prs_cardio': np.random.normal(0.5, 1.5, n_holdout),
-        'prs_all': np.random.normal(-0.5, 2, n_holdout)
-    }
-    
-    # Create holdout DataFrame with IID as index
-    holdout_df = pd.DataFrame(holdout_data)
-    holdout_df.index.name = 'IID'
-    holdout_df.index = [f'HOLDOUT_{i}' for i in range(len(holdout_df))]
+    try:	
+        trainingDf.set_index('IID',inplace=True)
+    except ValueError: #the IID is an index so needs to be reindexed
+        trainingDf.rename(columns={'Unnamed: 0':'IID'},inplace=True)
+        trainingDf.set_index('IID',inplace=True)
+
     
     # Step 1: Create risk bins from training data
-    bin_stats = create_risk_bins(training_df, n_bins=1000)
+    bin_stats = create_risk_bins(trainingDf, n_bins=1000)
     
     # Step 2: Calculate training statistics for manual scaling
-    training_stats = calculate_training_statistics(training_df)
+    training_stats = calculate_training_statistics(trainingDf)
+    
+    holdoutDf = combine_holdout_prs(scoresPath)
+    
     
     # Step 3: Assign risk thresholds to holdout data
     holdout_processed = assign_risk_thresholds(

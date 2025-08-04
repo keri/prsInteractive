@@ -89,3 +89,4 @@ Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
     echo "FINAL_MODEL_PROBABILITIES=$PHENO_PATH/scores/predictProbsReducedFinalModel.csv"
 } >> "${RESULTS_PATH}/$pheno/pheno.config"
     
+bash run_prs_calculations.sh $pheno

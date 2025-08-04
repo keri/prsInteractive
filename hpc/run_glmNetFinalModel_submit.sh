@@ -6,8 +6,8 @@
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_glmFinalModel.err
 #SBATCH --partition=longrun
 #SBATCH --cpus-per-task=80
-#SBATCH --mem=400G
-#SBATCH --time=20:00:00
+#SBATCH --mem=200G
+#SBATCH --time=10:00:00
 #
 
 
@@ -66,3 +66,6 @@ Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
     echo "FINAL_MODEL_SCORES=$PHENO_PATH/scores/modelScoresReducedFinalModel.csv"
     echo "FINAL_MODEL_PROBABILITIES=$PHENO_PATH/scores/predictProbsReducedFinalModel.csv"
 } >> "${RESULTS_PATH}/$pheno/pheno.config"
+
+
+bash "run_prs_calculations_submit.sh" $pheno

@@ -145,41 +145,9 @@ File downloaded from cohort created using cohort browser on DNA nexus platform.
 │   ├── preSummaryFiles
 │   │   ├── trainingEpi.epi.cc
 │   │   ├── trainingEpi.epi.cc.1
-│   │   ├── trainingEpi.epi.cc.10
-│   │   ├── trainingEpi.epi.cc.11
-│   │   ├── trainingEpi.epi.cc.12
-│   │   ├── trainingEpi.epi.cc.13
-│   │   ├── trainingEpi.epi.cc.14
-│   │   ├── trainingEpi.epi.cc.15
-│   │   ├── trainingEpi.epi.cc.16
-│   │   ├── trainingEpi.epi.cc.17
-│   │   ├── trainingEpi.epi.cc.18
-│   │   ├── trainingEpi.epi.cc.2
-│   │   ├── trainingEpi.epi.cc.3
-│   │   ├── trainingEpi.epi.cc.4
-│   │   ├── trainingEpi.epi.cc.5
-│   │   ├── trainingEpi.epi.cc.6
-│   │   ├── trainingEpi.epi.cc.7
-│   │   ├── trainingEpi.epi.cc.8
-│   │   ├── trainingEpi.epi.cc.9
+│   │   ├── trainingEpi.epi.cc.N
 │   │   ├── trainingEpi.epi.cc.summary.1
-│   │   ├── trainingEpi.epi.cc.summary.10
-│   │   ├── trainingEpi.epi.cc.summary.11
-│   │   ├── trainingEpi.epi.cc.summary.12
-│   │   ├── trainingEpi.epi.cc.summary.13
-│   │   ├── trainingEpi.epi.cc.summary.14
-│   │   ├── trainingEpi.epi.cc.summary.15
-│   │   ├── trainingEpi.epi.cc.summary.16
-│   │   ├── trainingEpi.epi.cc.summary.17
-│   │   ├── trainingEpi.epi.cc.summary.18
-│   │   ├── trainingEpi.epi.cc.summary.2
-│   │   ├── trainingEpi.epi.cc.summary.3
-│   │   ├── trainingEpi.epi.cc.summary.4
-│   │   ├── trainingEpi.epi.cc.summary.5
-│   │   ├── trainingEpi.epi.cc.summary.6
-│   │   ├── trainingEpi.epi.cc.summary.7
-│   │   ├── trainingEpi.epi.cc.summary.8
-│   │   ├── trainingEpi.epi.cc.summary.9
+│   │   ├── trainingEpi.epi.cc.summary.N
 │   │   └── trainingEpi.log
 │   ├── trainingCombinedEpi.epi.cc.summary
 │   ├── trainingCombinedEpi.epi.cc.summary.filtered
@@ -274,14 +242,15 @@ bash run_workflow_test.sh
 # RUN HPC WORKLOW 
 
 
-## setup environment variables and create and activate conda environment
+## setup environment variables, cleans input files for use in analysis, and creates and activate conda environment
 
+#### output of this step:
 
-- create hla, environmental, and covariate data in prsInteractive/results/:
+##### Directory prsInteractive/results/ will contain:
 
-+ environmental data
-+ hla data
-+ covariate data
++ participant_environment.csv
++ participant_hla.csv
++ covar.csv and covar.txt (.txt for use in plink if needed)
 + pheno.config file
 
 - create pheno specific directories in results/pheno/
@@ -335,6 +304,11 @@ $ sbatch run_model_batches_submit.sh pheno "epi"
 
 #### envStr = user decision which will be saved as ENV_TYPE and used in file names (i.e. cardioMetabolic was used in thesis)
 
+##### Output in results/{pheno}: 
+
++ models/ :pickled gradient boosted models from for individual G, GxGxE, GxG , and E features
++ cardioMetabolicimportantFeaturesPostShap.csv (used downstream)
+
 ```bash 
 
 $ cd path/to/prsInteractive/hpc
@@ -354,6 +328,14 @@ $ sbatch run_create_gene_env_data_submit.sh pheno
 ````
 
 ### 4) create combined EnvGeno matrix to be used downstream 
+#### E features were mean centered, combined, and scaled after combining
+#### statistics for validation set were used to transform features in holdout set
+
+##### Output in results/{pheno}: 
+
++ geneEnvironmentTest.csv
++ geneEnvironmentHoldout.csv
+ 
 
 ```bash 
 
@@ -365,26 +347,29 @@ $ sbatch run_create_gene_env_data_submit.sh pheno
 
 ### 5) run final association analysis with reduced features 
 
+#### This will also calculate PRS across models for both validation and holdout sets.
+
+#### Holdout sets will be scaled using mean and standard deviation of scaled validation set
+
+#### Different scenarios are considered for LD occurring before or after glmNet modelling, due to previous workflow version in which it was done post modelling
+
+##### Output in results/{pheno}: 
+
++ scores/ = individual PRS csv files with file name [{model}.{nFeatures}.mixed.prs.csv] if model = all then [{model}.{nFeatures}.{model}.FromAll.mixed.prs.csv]
++ figures/ = plots of prs calculations to include: AUC, AUC table, prevalence, boxplot, and prevalence plots with same file name (different suffix)
++ figures/ = combinedPRS.QQColorPlot.png (without combined (all) model results) and combinedPRS.withAll.QQColorPlot.png (with the high risk people from combined model)
++ figures/ = {prs prefix}.saturationPlot.png : saturation plot of mean diff in PRS calculations using top N features at a time. This is separated into risk, protect, and combined features 
+
 ```bash 
 
 $ cd path/to/prsInteractive/hpc
 
 $ sbatch run_glmNetFinalModel.sh pheno 
 
-````
-
-### 6) calculate PRS for all models trained on individual and combined features sets 
-
-```bash 
-
-$ cd path/to/prsInteractive/hpc
-
-$ sbatch run_create_gene_env_data_submit.sh pheno 
-
-````
+````  
 
 
-  
+
 # Running analysis with WDL workflow
   
 ########## WORKING IN PROGRESS ########
@@ -418,22 +403,7 @@ Instructions for download can be found here: [cromwell download] (https://cromwe
     - ukb_hla_V2.txt
     - withdrawals.csv
 
-#### this step creates:
-* .env 
-* pipelineInputs.json
-* directories for the phenotype
-  - results/<pheno>
-* results/<pheno>/summary.txt #file of inputs used
-* results/<pheno>/pheno_config.sh file
 
-```
-cd /prsInteractive
-
-tar -czf scripts.tar.gz scripts
-
-./envSetUp.sh <phenotype> <icd10> <phenotype string used in search> <n cores for epistatic analysis> <platform: (hpc,local,dnanexus) to run analysis>
-
-```
   
   
   

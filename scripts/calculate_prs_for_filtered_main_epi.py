@@ -21,29 +21,37 @@ from helper.data_wrangling import *
 def create_prs_direction(df,featureScores,image_str,figurePath,prsPath):
     dfCopy = df.copy()
     featureScoreDict = get_feature_coef_dictionaries(featureScores)
-    for direction in ['risk','protect','mixed']:
-
-        if direction == 'protect':
-            featureScoresTemp = featureScores[featureScores['coefs'] < 0]
-            features = featureScoresTemp['feature'].tolist()
+    direction='mixed'
+#   for direction in ['risk','protect','mixed']:
+#
+#       if direction == 'protect':
+#           featureScoresTemp = featureScores[featureScores['coefs'] < 0]
+#           features = featureScoresTemp['feature'].tolist()
+##           featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
+#           print('# of features in protect PRS :',len(features))
+#           meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,figurePath,prsPath,direction,features)
+#       elif direction == 'risk':
+#           featureScoresTemp = featureScores[featureScores['coefs'] > 0]
+#           features = featureScoresTemp['feature'].tolist()
+#           print('# of features in risk PRS :',len(features))
+#           
+##           featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
+#           meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,figurePath,prsPath,direction,features)
+#       else:
+#           featureScoresTemp = featureScores[featureScores['coefs'] != 0]
+#           #mixed for both main and epi
+#           features = featureScoresTemp['feature'].tolist()
+#           print('# of features in mixed PRS :',len(features))
+#           #sort featureScores
+##           featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
+#           meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,figurePath,prsPath,direction,features)
+    featureScoresTemp = featureScores[featureScores['coefs'] != 0]
+    #mixed for both main and epi
+    features = featureScoresTemp['feature'].tolist()
+    print('# of features in mixed PRS :',len(features))
+    #sort featureScores
 #           featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
-            print('# of features in protect PRS :',len(features))
-            meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,figurePath,prsPath,direction,features)
-        elif direction == 'risk':
-            featureScoresTemp = featureScores[featureScores['coefs'] > 0]
-            features = featureScoresTemp['feature'].tolist()
-            print('# of features in risk PRS :',len(features))
-            
-#           featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
-            meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,figurePath,prsPath,direction,features)
-        else:
-            featureScoresTemp = featureScores[featureScores['coefs'] != 0]
-            #mixed for both main and epi
-            features = featureScoresTemp['feature'].tolist()
-            print('# of features in mixed PRS :',len(features))
-            #sort featureScores
-#           featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
-            meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,figurePath,prsPath,direction,features)
+    meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,figurePath,prsPath,direction,features)
     featureScoreDict.clear()
     
 
@@ -51,14 +59,19 @@ def create_prs_direction(df,featureScores,image_str,figurePath,prsPath):
 def create_saturation_plots(df,featureScores,data_type,figurePath,prsPath):
     dfCopy = df.copy()
     featureScores.sort_values(['coefs'],ascending=False,inplace=True)
-    figurePathSaturation = f'{figurePath}/'
-    prsPathSaturation = f'{prsPath}/'
+#   figurePathSaturation = f'{figurePath}/'
+#   prsPathSaturation = f'{prsPath}/'
     featureScoreDict = get_feature_coef_dictionaries(featureScores)
-    
+    if 'holdout' in data_type:
+        scale_prs=False
+    else:
+        scale_prs=True
     #create saturation plot for increments of 20 if main and 10 if epi
 #   for data_type in ['main','epi']:
     if 'main' in data_type:
         n = 20
+    elif 'all' in data_type:
+        n=20
     else:
         n = 10
 #   featureScores2 = featureScores[featureScores['model'] == data_type]
@@ -81,21 +94,23 @@ def create_saturation_plots(df,featureScores,data_type,figurePath,prsPath):
         #risk
         direction='risk'
         featuresRisk = featureScoresRisk.head(i)['feature'].tolist()
-        prsDf, meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresRisk)
+        prsDf, meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresRisk,scale_prs=scale_prs)
         meanDiffs.append(meanDiff)
         directionList.append(direction)
         nFeatures.append(i)
+        
         #protect
         direction='protect'
         featuresProtect = featureScoresProtect.tail(i)['feature'].tolist()
-        prsDf, meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresProtect)
+        prsDf, meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresProtect,scale_prs=scale_prs)
         meanDiffs.append(meanDiff)
         directionList.append(direction)
         nFeatures.append(i)
+        
         #mixed
         direction='mixed'
         featuresBoth = featuresRisk + featuresProtect
-        prsDf,meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresBoth)
+        prsDf,meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresBoth,scale_prs=scale_prs)
         meanDiffs.append(meanDiff)
         directionList.append(direction)
         nFeatures.append(i)        
@@ -106,21 +121,21 @@ def create_saturation_plots(df,featureScores,data_type,figurePath,prsPath):
     #risk
     direction='risk'
     featuresRisk = featureScoresRisk['feature'].tolist()
-    prsDf,meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresRisk)
+    prsDf,meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresRisk,scale_prs=scale_prs)
     meanDiffs.append(meanDiff)
     directionList.append(direction)
     nFeatures.append(topN)
     #protect
     direction='protect'
     featuresProtect = featureScoresProtect['feature'].tolist()
-    prsDf,meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresProtect)
+    prsDf,meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresProtect,scale_prs=scale_prs)
     meanDiffs.append(meanDiff)
     directionList.append(direction)
     nFeatures.append(topN)
     #mixed
     direction='mixed'
     featuresBoth = featureScores['feature'].tolist()
-    prsDf,meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresBoth)
+    prsDf,meanDiff = calculate_prs(dfCopy,featureScoreDict,featuresBoth,scale_prs=scale_prs)
     meanDiffs.append(meanDiff)
     directionList.append(direction)
     nFeatures.append(topN)
@@ -129,13 +144,13 @@ def create_saturation_plots(df,featureScores,data_type,figurePath,prsPath):
     
     diffDf = pd.DataFrame({'number_features':nFeatures,'risk_direction':directionList,'mean_diff':meanDiffs})
     diffDf.set_index('number_features', inplace=True)
-    diffDf.to_csv(f'{prsPathSaturation}/{data_type}.saturationPrs.csv')
+    diffDf.to_csv(f'{prsPath}/{data_type}.saturationPrs.csv')
     #set title 
     title = f'Saturation Plot for {data_type} in batches of {n} features'
     diffDf.groupby('risk_direction')['mean_diff'].plot(figsize=(10,10),legend=True,title=title,xticks=range(0,topN,n),rot=45)
-    plt.savefig(f'{figurePathSaturation}/{data_type}.saturationPlot.png')
+    plt.savefig(f'{figurePath}/{data_type}.saturationPlot.png')
     plt.clf()
-#   diffDf.to_csv(f'{prsPathSaturation}/{data_type}.saturationPrs.csv')
+
         
     featureScoreDict.clear()
     
@@ -178,8 +193,10 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,envFileTest,holdoutPathway,e
     
     #get all other models that are not covariate
     filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'covariate']
+    #remove main clinical features from data
+    filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'cardio_main']
+    filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'all+main_cardio']
     
-
     #filters the covar features out of each model type
     filteredFeatures = filteredFeatures[~filteredFeatures['feature'].isin(covarFeatures)]
 #   filteredFeatures = filteredFeatures[~filteredFeatures['feature'].str.contains('Intercept')]
@@ -223,9 +240,10 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,envFileTest,holdoutPathway,e
     cardioEnvHoldout = pd.read_csv(envFileHoldout)
     cardioEnvHoldout.set_index('IID',inplace=True)
     
+    
 
-#   for holdout_str in ['','.holdout']:
-    for holdout_str in ['']:
+    for holdout_str in ['','.holdout']:
+#   for holdout_str in ['']:
             
         if holdout_str == '':
             data_pathway = testPathway
@@ -285,9 +303,11 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,envFileTest,holdoutPathway,e
 #           else:
             if model != "covariate":
                 create_prs_direction(mainEpiDf,prsFeatures,image_str,figurePath,prsPath)
-            #create_saturation_plots(mainEpiDf, epiMainFeatures, data_type+f'.{suffix}', figurePath, prsPath)
+                create_saturation_plots(mainEpiDf, prsFeatures, image_str, figurePath, prsPath)
+                    
             else:
                 create_prs_direction(covarDf,covarCoefs,image_str,figurePath,prsPath)
+                
                 
             #if model == 'all' then separate epi,main,epi+main,and cardio
             if model == 'all':

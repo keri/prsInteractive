@@ -1,11 +1,42 @@
 #!/usr/bin/env python3
 
 import pandas as pd
+import os
 
 
 
-pheno = 'celiacDisease'
-filePath = f'/Users/kerimulterer/prsInteractive/results/{pheno}'
+
+
+def add_row_efficient(output_path, new_row_data, columns=None):
+    """
+    Efficiently add row to CSV file without reading entire file.
+    """
+    
+    if os.path.exists(output_path):
+        # File exists - append without reading full file
+        print(f"Appending to existing file: {output_path}")
+        
+        # Create DataFrame for new row
+        if isinstance(new_row_data, dict):
+            new_df = pd.DataFrame([new_row_data])
+        else:
+            new_df = pd.DataFrame([new_row_data], columns=columns)
+            
+        # Append to file (no header since file exists)
+        new_df.to_csv(output_path, mode='a', header=False, index=False)
+        
+    else:
+        # File doesn't exist - create new
+        print(f"Creating new file: {output_path}")
+        
+        # Create DataFrame
+        if isinstance(new_row_data, dict):
+            df = pd.DataFrame([new_row_data])
+        else:
+            df = pd.DataFrame([new_row_data], columns=columns)
+            
+        # Save with header
+        df.to_csv(output_path, index=False)
 
 def calculate_precision_recall(fp, tp, fn):
     if (fp + tp) == 0:
@@ -38,10 +69,10 @@ def calculate_fp_fn_tp_percentile(df, cohort, phenotype_col='PHENOTYPE'):
     
     # Calculate confusion matrix components
     # Assuming: 1 = case, 0 = control
-    tp = hr[hr[phenotype_col] == 1].shape[0]  # True positives: cases in high risk
-    fp = hr[hr[phenotype_col] == 0].shape[0]  # False positives: controls in high risk
-    fn = lr[lr[phenotype_col] == 1].shape[0]  # False negatives: cases in low risk
-    tn = lr[lr[phenotype_col] == 0].shape[0]  # True negatives: controls in low risk
+    tp = hr[hr[phenotype_col] == 2].shape[0]  # True positives: cases in high risk
+    fp = hr[hr[phenotype_col] == 1].shape[0]  # False positives: controls in high risk
+    fn = lr[lr[phenotype_col] == 2].shape[0]  # False negatives: cases in low risk
+    tn = lr[lr[phenotype_col] == 1].shape[0]  # True negatives: controls in low risk
     
     precision, recall = calculate_precision_recall(fp, tp, fn)
     
@@ -106,26 +137,55 @@ def calculate_cases_exclusive(df,cohorts,cohort):
         
     return([n_missed_all_others,extra_cases,percent_improvement])
         
-        
-prs_stats = pd.DataFrame(index=['false_positive','false_negative','true_positive','true_negative','precision','recall','n_missed_all_others','n_missed_with_main','percent_improvement_to_main'])
+def calculate_precision_recall_improvement(scorePath,model_type='prs'):
+    outputPath = f'{scoresPath}/model_recall_precision_improvement.csv'
+    stats_columns = ['model_type','model','data','false_positive','false_negative','true_positive','true_negative','precision','recall','n_missed_all_others','n_missed_with_main','percent_improvement_to_main']
+    if model_type == "prs":
+        for h in ['test','holdout',]:
+            if h == 'test':
+                filePath = f'{scorePath}/combinedPRSGroups.csv'
+            else:
+                filePath = f'{scorePath}/CombinedPRSGroups.holdout.csv'
+            df = pd.read_csv(filePath)
+            cohorts = [col for col in df.columns if 'scaled_prs' in col]
 
-for h in ['test','holdout',]:
-    if h == 'test':
-        df = pd.read_csv(f'{filePath}/combinedPRSGroups.csv')
-        cohorts = [col for col in df.columns if 'bin_' in col]
-    else:
-        df = pd.read_csv(f'{filePath}/CombinedPRSGroups.holdout.csv')
-        cohorts = [col for col in df.columns if 'decile_bin_' in col]
+            for cohort in cohorts:
+                fp_fn_list = calculate_fp_fn_tp(df[cohorts+['PHENOTYPE']],cohort)
+                missed_list = calculate_cases_exclusive(df[cohorts+['PHENOTYPE']],cohorts,cohort)
+                values = fp_fn_list + missed_list
+                row = [model_type,cohort.split('_')[-1],h]+values
+                add_row_efficient(outputPath, row, columns=stats_columns)
+    else: #calculate stats for trained models
+        filePath = f'{scoresPath}/predictProbsReducedFinalModel.csv'
+        phenotype = pd.read_csv(f'{scorePath}/combinedPRSGroups.csv',usecols=['IID','PHENOTYPE'])
+        df = pd.read_csv(filePath)
         
-    for cohort in cohorts:
-        fp_fn_list = calculate_fp_fn_tp(df[cohorts+['PHENOTYPE']],cohort)
-        missed_list = calculate_cases_exclusive(df[cohorts+['PHENOTYPE']],cohorts,cohort)
-        values = fp_fn_list + missed_list
-        prs_stats[cohort.split('_')[-1]+'_'+h] = values
+        #cohorts in the model column
+        cohorts = df['model'].unique()
+        
+        df = df.merge(phenotype,on='IID',how='left')
+        
+        # Convert to wide format
+        df_wide = df.pivot(index=['IID', 'PHENOTYPE'], columns='model', values='yProba')
     
+        # Reset index to make IID and PHENOTYPE regular columns
+        df_wide = df_wide.reset_index()
+        
+        # Flatten column names (remove multi-level index)
+        df_wide.columns.name = None
+        
+        for cohort in cohorts:
+            fp_fn_list = calculate_fp_fn_tp(df[cohorts+['PHENOTYPE']],cohort)
+            missed_list = calculate_cases_exclusive(df[cohorts+['PHENOTYPE']],cohorts,cohort)
+            values = fp_fn_list + missed_list
+            row = [model_type,cohort.split('_')[-1],'test']+values
+            add_row_efficient(outputPath, row, columns=stats_columns)
         
 
-prs_stats.reset_index(inplace=True)        
-prs_stats.rename(columns={'index':'stats'},inplace=True)
-prs_stats.to_csv(f'{filePath}/prs_statistics.csv',index=False)
-        
+            
+
+if __name__ == '__main__':
+    
+    pheno = 'celiacDisease'
+    scorePath = f'/Users/kerimulterer/prsInteractive/results/{pheno}/scores'
+    calculate_precision_recall_improvement(scorePath,type='model')
