@@ -290,13 +290,13 @@ $ bash ../envSetUp.sh $pheno $icd10 "${phenoStr}" $n (# of cores on local machin
 + epiFiles/ : trainingCombinedEpi.epi.cc.summary
 + scores/ : importantFeaturesPostShap.csv
   
-  ```
+```
 
 $ cd path/to/prsInteractive/hpc
 
 $ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string"} {n}
   
-  ```
+```
   
 
 ### 2) when fast-epistasis is complete, run the batch feature reduction for epi features
@@ -311,13 +311,13 @@ $ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string
 + models/ : pickled gradient boosted for each batch used to filter GxG features previously filtered
 + scores/ : importantFeaturesPostShap.csv appended with epi features
 
-  ```
+```
   
 $ cd path/to/prsInteractive/hpc
   
 $ sbatch run_model_batches_submit.sh pheno "epi"
   
-  ````
+````
 
 ### 3) run the GxGxE interaction analysis
 
