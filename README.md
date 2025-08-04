@@ -242,11 +242,11 @@ bash run_workflow_test.sh
 # RUN HPC WORKLOW 
 
 
-## setup environment variables, cleans input files for use in analysis, and creates and activate conda environment
+## Pre step: setup environment variables, cleans input files for use in analysis, and creates and activate conda environment
 
-#### output of this step:
+### output of this step:
 
-##### Directory prsInteractive/results/ will contain:
+#### Directory prsInteractive/results/ will contain:
 
 + participant_environment.csv
 + participant_hla.csv
@@ -276,9 +276,20 @@ $ bash ../envSetUp.sh $pheno $icd10 "${phenoStr}" $n (# of cores on local machin
 
 ```
 
-## run the workflow in order
+## Run worflow
 
-### 1) cleans variants, starts fast-epistasis analysis using plink and begins batch feature reduction step for main (single SNPs)
+### 1) clean variants, starts fast-epistasis analysis using plink and begins batch feature reduction step for main (single SNPs)
+
+#### input:
++ data/variant_calls/raw bed files for each chromosomes
++ ouput from envSetUp.sh
+
+#### output to results/{pheno}/:
+
++ holdoutCombined.raw, testCombined.raw, trainingCombined.raw, testID.txt, holdoutID.txt, trainingID.txtmerged_allChromosomes.bed/bim/fam
++ updated pheno.config file to include updated file to create env variables downstream
++ epiFiles/ : trainingCombinedEpi.epi.cc.summary
++ scores/ : importantFeaturesPostShap.csv
   
   ```bash 
 
@@ -291,7 +302,16 @@ $ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string
 
 ### 2) when fast-epistasis is complete, run the batch feature reduction for epi features
 
-  
+#### input to results/{pheno}/ :
+ + output from step 2
+ + scripts/filter_redundant_epi_pairs.py
+
+#### output to results/{pheno}/
+
++ epiFiles/ : trainingCombinedEpi.epi.cc.summary.filtered
++ models/ : pickled gradient boosted for each batch used to filter GxG features previously filtered
++ scores/ : importantFeaturesPostShap.csv appended with epi features
+
   ```bash 
   
 $ cd path/to/prsInteractive/hpc
@@ -300,11 +320,15 @@ $ sbatch run_model_batches_submit.sh pheno "epi"
   
   ````
 
-### 3) when feature reduction is complete for main and epi, run the GxGxE interaction analysis
+### 3) run the GxGxE interaction analysis
 
 #### envStr = user decision which will be saved as ENV_TYPE and used in file names (i.e. cardioMetabolic was used in thesis)
 
-##### Output in results/{pheno}: 
+#### input from results/{pheno}/ :
+
++ .raw files, participant_hla, participant_env, and covar files
+
+#### Output in results/{pheno}: 
 
 + models/ :pickled gradient boosted models from for individual G, GxGxE, GxG , and E features
 + cardioMetabolicimportantFeaturesPostShap.csv (used downstream)
@@ -319,23 +343,20 @@ $ sbatch run_gene_environment_feature_discovery_submit.sh pheno "envStr"
 
 ### 4) create combined EnvGeno matrix to be used downstream 
 
-```bash 
-
-$ cd path/to/prsInteractive/hpc
-
-$ sbatch run_create_gene_env_data_submit.sh pheno 
-
-````
-
-### 4) create combined EnvGeno matrix to be used downstream 
 #### E features were mean centered, combined, and scaled after combining
-#### statistics for validation set were used to transform features in holdout set
+
+#### statistics for validation set were used to transform features in holdout set 
+
+#### input from results/ :
+
++ participant_hla, participant_env, and covar files
++ {pheno}/ : .raw files 
++ {pheno}/scores/ : cardioMetabolicimportantFeaturesPostShap.csv 
 
 ##### Output in results/{pheno}: 
 
 + geneEnvironmentTest.csv
 + geneEnvironmentHoldout.csv
- 
 
 ```bash 
 
@@ -353,12 +374,18 @@ $ sbatch run_create_gene_env_data_submit.sh pheno
 
 #### Different scenarios are considered for LD occurring before or after glmNet modelling, due to previous workflow version in which it was done post modelling
 
+#### input from results/{pheno}:
+
++ output from previous steps
+
 ##### Output in results/{pheno}: 
 
-+ scores/ = individual PRS csv files with file name [{model}.{nFeatures}.mixed.prs.csv] if model = all then [{model}.{nFeatures}.{model}.FromAll.mixed.prs.csv]
-+ figures/ = plots of prs calculations to include: AUC, AUC table, prevalence, boxplot, and prevalence plots with same file name (different suffix)
-+ figures/ = combinedPRS.QQColorPlot.png (without combined (all) model results) and combinedPRS.withAll.QQColorPlot.png (with the high risk people from combined model)
-+ figures/ = {prs prefix}.saturationPlot.png : saturation plot of mean diff in PRS calculations using top N features at a time. This is separated into risk, protect, and combined features 
++ scores/ : individual PRS csv files with file name [{model}.{nFeatures}.mixed.prs.csv] if model = all then [{model}.{nFeatures}.{model}.FromAll.mixed.prs.csv]
++ scores/ : modelScoresReducedFinalModel.csv, predictProbsReducedFinalModel.csv, featureScoresReducedFinalModel.csv, featureScoresReducedFinalModel.filtered.csv (the additional GxGxE filter post modelling)
++ scores/ : combinedPRSGroups.csv, combinedPRSGroups.holdout.csv, combinedORPRSGroups.csv, combinedPrevalencePRSGroups.csv
++ figures/ : plots of prs calculations to include: AUC, AUC table, prevalence, boxplot, and prevalence plots with same file name (different suffix)
++ figures/ : combinedPRS.QQColorPlot.png (without combined (all) model results) and combinedPRS.withAll.QQColorPlot.png (with the high risk people from combined model)
++ figures/ : {prs prefix}.saturationPlot.png : saturation plot of mean diff in PRS calculations using top N features at a time. This is separated into risk, protect, and combined features 
 
 ```bash 
 
@@ -367,8 +394,11 @@ $ cd path/to/prsInteractive/hpc
 $ sbatch run_glmNetFinalModel.sh pheno 
 
 ````  
+### 6) calculate PRS statistics 
 
+#### input from results/{pheno}:
 
++ scores/ : combinedPRSGroups.csv
 
 # Running analysis with WDL workflow
   
@@ -387,21 +417,21 @@ Phenotype specific inputs are updated in first step
 
 ### Download cromwell 
 
-Instructions for download can be found here: [cromwell download] (https://cromwell.readthedocs.io/en/latest/tutorials/FiveMinuteIntro/)
+Instructions for download can be found here: [cromwell download](https://cromwell.readthedocs.io/en/latest/tutorials/FiveMinuteIntro/)
 
 
 
 #### Step 1: Setup Environment needed to run workflow
 
 #### inputs:
-  * config/default.config
-  * data/
-    - covar.txt
-    - hla_participant.csv
-    - participant.csv
-    - participant_environment.csv
-    - ukb_hla_V2.txt
-    - withdrawals.csv
+* config/default.config
+* data/
+- covar.txt
+- hla_participant.csv
+- participant.csv
+- participant_environment.csv
+- ukb_hla_V2.txt
+- withdrawals.csv
 
 
   
@@ -412,4 +442,3 @@ Instructions for download can be found here: [cromwell download] (https://cromwe
 
   
 
-    
