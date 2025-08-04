@@ -266,13 +266,12 @@ bash run_workflow_test.sh
 * n = number of cores to pass to the epistatic analysis, with 40 cores being the norm and will take approximately 48 hours (i.e. 20)
 
 
-```bash
+```
 
 $ cd /path/to/directory/prsInteractive
 
 
 $ bash ../envSetUp.sh $pheno $icd10 "${phenoStr}" $n (# of cores on local machine)
-
 
 ```
 
@@ -291,7 +290,7 @@ $ bash ../envSetUp.sh $pheno $icd10 "${phenoStr}" $n (# of cores on local machin
 + epiFiles/ : trainingCombinedEpi.epi.cc.summary
 + scores/ : importantFeaturesPostShap.csv
   
-  ```bash 
+  ```
 
 $ cd path/to/prsInteractive/hpc
 
@@ -312,7 +311,7 @@ $ sbatch run_data_cleaning_workflow_submit.sh {pheno} {icd10 code}  {"sub string
 + models/ : pickled gradient boosted for each batch used to filter GxG features previously filtered
 + scores/ : importantFeaturesPostShap.csv appended with epi features
 
-  ```bash 
+  ```
   
 $ cd path/to/prsInteractive/hpc
   
@@ -333,7 +332,7 @@ $ sbatch run_model_batches_submit.sh pheno "epi"
 + models/ :pickled gradient boosted models from for individual G, GxGxE, GxG , and E features
 + cardioMetabolicimportantFeaturesPostShap.csv (used downstream)
 
-```bash 
+```
 
 $ cd path/to/prsInteractive/hpc
 
@@ -358,7 +357,7 @@ $ sbatch run_gene_environment_feature_discovery_submit.sh pheno "envStr"
 + geneEnvironmentTest.csv
 + geneEnvironmentHoldout.csv
 
-```bash 
+```
 
 $ cd path/to/prsInteractive/hpc
 
@@ -387,7 +386,7 @@ $ sbatch run_create_gene_env_data_submit.sh pheno
 + figures/ : combinedPRS.QQColorPlot.png (without combined (all) model results) and combinedPRS.withAll.QQColorPlot.png (with the high risk people from combined model)
 + figures/ : {prs prefix}.saturationPlot.png : saturation plot of mean diff in PRS calculations using top N features at a time. This is separated into risk, protect, and combined features 
 
-```bash 
+```
 
 $ cd path/to/prsInteractive/hpc
 
