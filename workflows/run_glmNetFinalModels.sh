@@ -67,7 +67,21 @@ export TEST_PATH=$TEST_PATH
 export TRAINING_ENV_GEN_FILE=$GENE_ENV_TRAINING
 export TEST_ENV_GEN_FILE=$GENE_ENV_TEST
 
-bash "$SCRIPTS_DIR/run_plink_LD.sh" $pheno
+
+
+### CHECK TO SEE IF LD HAS BEEN DONE
+if [ ! -f "$PHENO_PATH/scores/importantFeaturesForAssociationAnalysis.csv" ]; then
+    #run LD script
+    export PRE_POST_ASSOCIATION='pre'
+    bash "$SCRIPTS_DIR/run_plink_LD.sh" $pheno
+fi
+
+#check to see LD was completed
+if [ ! -f "$PHENO_PATH/scores/importantFeaturesForAssociationAnalysis.csv" ]; then
+    FEATURES_FOR_MODEL_FILE="$PHENO_PATH/scores/importantFeaturesPostShap.csv"
+else
+    FEATURES_FOR_MODEL_FILE="$PHENO_PATH/scores/importantFeaturesForAssociationAnalysis.csv"
+fi
 
 # Pass to R script
 Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
@@ -80,7 +94,7 @@ Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
 --test_env_gen_file "$GENE_ENV_TEST" \
 --training_file "$TRAINING_PATH" \
 --test_file "$TEST_PATH" 
-
+--feature_model_file "$FEATURES_FOR_MODEL_FILE"
 
 # Add entries
 {
@@ -90,3 +104,7 @@ Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
 } >> "${RESULTS_PATH}/$pheno/pheno.config"
     
 bash run_prs_calculations.sh $pheno
+
+#calculate peformance of trained models and PRS calculations for main v other
+#need PHENO_PATH exported or added as an --pheno_path argument
+python "${SCRIPTS_DIR}/calculate_prs_stats.py"

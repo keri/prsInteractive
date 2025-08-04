@@ -2,12 +2,31 @@
 
 import pandas as pd
 import os
+import argparse
+
+def add_iid_simple(long_df, phenotype_df):
+    
+    """
+    Simplest approach - directly repeat phenotype data to match long_df length.
+    """
+    
+    n_models = len(long_df['model'].unique())
+    n_individuals = len(phenotype_df)
+    
+    print(f"Adding IID for {n_models} models × {n_individuals} individuals")
+    
+    # Create result DataFrame
+    result_df = long_df.copy()
+    
+    # Simply repeat the phenotype data n_models times
+    result_df['IID'] = list(phenotype_df['IID']) * n_models
+
+    
+    return result_df
 
 
 
-
-
-def add_row_efficient(output_path, new_row_data, columns=None):
+def add_row_efficient(output_path, new_df):
     """
     Efficiently add row to CSV file without reading entire file.
     """
@@ -16,27 +35,15 @@ def add_row_efficient(output_path, new_row_data, columns=None):
         # File exists - append without reading full file
         print(f"Appending to existing file: {output_path}")
         
-        # Create DataFrame for new row
-        if isinstance(new_row_data, dict):
-            new_df = pd.DataFrame([new_row_data])
-        else:
-            new_df = pd.DataFrame([new_row_data], columns=columns)
-            
         # Append to file (no header since file exists)
         new_df.to_csv(output_path, mode='a', header=False, index=False)
         
     else:
         # File doesn't exist - create new
         print(f"Creating new file: {output_path}")
-        
-        # Create DataFrame
-        if isinstance(new_row_data, dict):
-            df = pd.DataFrame([new_row_data])
-        else:
-            df = pd.DataFrame([new_row_data], columns=columns)
             
         # Save with header
-        df.to_csv(output_path, index=False)
+        new_df.to_csv(output_path, index=False)
 
 def calculate_precision_recall(fp, tp, fn):
     if (fp + tp) == 0:
@@ -85,7 +92,7 @@ def calculate_fp_fn_tp_percentile(df, cohort, phenotype_col='PHENOTYPE'):
     print(f"Recall/Sensitivity: {recall:.4f}")
     print(f"Specificity: {specificity:.4f}")
     
-    return [fp, fn, tp, tn, precision, recall, specificity, sensitivity]
+    return {'false_pos':fp, 'false_neg': fn, 'true_pos': tp, 'true_neg': tn, 'precision':precision, 'recall':recall, 'specificity': specificity, 'sensitivity': sensitivity}
 
 # Alternative version if your phenotypes are coded as 1=control, 2=case
 def calculate_fp_fn_tp_percentile_alt_coding(df, cohort, phenotype_col='PHENOTYPE'):
@@ -105,87 +112,174 @@ def calculate_fp_fn_tp_percentile_alt_coding(df, cohort, phenotype_col='PHENOTYP
     
     precision, recall = calculate_precision_recall(fp, tp, fn)
     
-    return [fp, fn, tp, tn, precision, recall]
+    # Additional metrics
+    specificity = tn / (tn + fp) if (tn + fp) > 0 else 0
+    sensitivity = recall  # Same as recall
+    
+    return {'false_pos':fp, 'false_neg': fn, 'true_pos': tp, 'true_neg': tn, 'precision':precision, 'recall':recall, 'specificity': specificity, 'sensitivity': sensitivity}
         
-def calculate_percent_improvement(extra_cases,n_main):
-    return(extra_cases/(n_main+extra_cases))
+def calculate_cases_exclusive(df, cohort, threshold_percentile=80, case_value=1,main_col='main'):
+    """
+    Calculate cases found exclusively by a cohort compared to others.
     
-def calculate_cases_exclusive(df,cohorts,cohort):
-    main_col = [col for col in df.columns if '_main' in col][0]
+    Args:
+        df: DataFrame with PRS scores and PHENOTYPE
+        cohort: Column name of the cohort to analyze
+        threshold_percentile: Percentile threshold for high-risk (default 80th = top 20%)
+        case_value: Value representing cases in PHENOTYPE column (usually 1)
+    """
     
-    #n cases found with main
-    n_main = df[(df[main_col] > 8) & (df['PHENOTYPE'] == 2)].shape[0]
+    print(f"\n=== Analyzing exclusive cases for {cohort} ===")
     
-    #get the hr cases for cohort
-    hr = df[(df[cohort] > 8) & (df['PHENOTYPE'] == 2)]
-    #count number of these not found in main
-    extra_cases = df[(df[main_col] < 9) & (df[cohort] > 8) & (df['PHENOTYPE'] == 2)].shape[0]
+    # Calculate dynamic thresholds instead of hardcoded 8
+    main_threshold = df[main_col].quantile(threshold_percentile / 100)
+    cohort_threshold = df[cohort].quantile(threshold_percentile / 100)
     
-    #percent improvement compared to main
-    percent_improvement = calculate_percent_improvement(extra_cases, n_main)
+    print(f"Main threshold (top {100-threshold_percentile}%): {main_threshold:.4f}")
+    print(f"{cohort} threshold (top {100-threshold_percentile}%): {cohort_threshold:.4f}")
     
-    print('number of high risk cases = ',hr.shape[0])
-    temp = hr.drop(columns=[cohort])
-    print(f'number missed with main and found with {cohort} = {extra_cases}')
-    rest_of_cohorts = [col for col in temp.columns if col != 'PHENOTYPE']
-    rest_of_cohorts = [col for col in rest_of_cohorts if 'PRScr' not in col]
-    for c in rest_of_cohorts:
-        temp = temp[temp[c] < 9]
+    # Count cases found with main model
+    n_main = df[(df[main_col] >= main_threshold) & (df['PHENOTYPE'] == case_value)].shape[0]
+    print(f"Cases found with main model: {n_main}")
     
-    n_missed_all_others = temp.shape[0]
-    print(f'number missed with all others and found with {cohort} = {n_missed_all_others}')
-        
-    return([n_missed_all_others,extra_cases,percent_improvement])
-        
-def calculate_precision_recall_improvement(scorePath,model_type='prs'):
+    # Count high-risk cases for current cohort
+    hr_cohort = df[(df[cohort] >= cohort_threshold) & (df['PHENOTYPE'] == case_value)]
+    print(f"High-risk cases with {cohort}: {hr_cohort.shape[0]}")
+    
+    # Count cases found by cohort but missed by main
+    extra_cases_vs_main = df[
+        (df[main_col] < main_threshold) & 
+        (df[cohort] >= cohort_threshold) & 
+        (df['PHENOTYPE'] == case_value)
+    ].shape[0]
+    
+    print(f"Extra cases found by {cohort} vs main: {extra_cases_vs_main}")
+    
+    # Get all PRS columns (excluding PHENOTYPE and other non-PRS columns)
+    prs_columns = [col for col in df.columns 
+                   if col not in ['PHENOTYPE', 'IID'] 
+                   and not col.startswith('PRScr')  # Exclude any score columns
+                   and col != cohort]  # Exclude current cohort
+    
+    print(f"Comparing against PRS models: {prs_columns}")
+    
+    # Find cases that are high-risk ONLY in the current cohort
+    # (low-risk in ALL other PRS models)
+    condition_low_in_others = pd.Series([True] * len(df))
+    
+    for other_col in prs_columns:
+        if other_col in df.columns:
+            other_threshold = df[other_col].quantile(threshold_percentile / 100)
+            condition_low_in_others = condition_low_in_others & (df[other_col] < other_threshold)
+            
+    # Cases found exclusively by current cohort
+    unique_cases = df[
+        condition_low_in_others & 
+        (df[cohort] >= cohort_threshold) & 
+        (df['PHENOTYPE'] == case_value)
+    ]
+    
+    n_unique_cases = unique_cases.shape[0]
+    
+    # Calculate improvement percentages
+    percent_improvement_vs_main = calculate_percent_improvement(extra_cases_vs_main, n_main)
+    percent_improvement_unique = calculate_percent_improvement(n_unique_cases, n_main)
+    
+    print(f"Cases found ONLY by {cohort} (missed by all others): {n_unique_cases}")
+    print(f"Improvement vs main: {percent_improvement_vs_main:.2f}%")
+    print(f"Unique contribution: {percent_improvement_unique:.2f}%")
+    
+    return {
+        'cohort': cohort,
+        'main_cases': n_main,
+        'cohort_high_risk_cases': hr_cohort.shape[0],
+        'extra_vs_main': extra_cases_vs_main,
+        'unique_cases': n_unique_cases,
+        'improvement_vs_main_pct': percent_improvement_vs_main,
+        'unique_contribution_pct': percent_improvement_unique,
+        'main_threshold': main_threshold,
+        'cohort_threshold': cohort_threshold
+    }
+    
+def calculate_percent_improvement(extra_cases, baseline_cases):
+    """Calculate percentage improvement."""
+    if baseline_cases == 0:
+        return 0 if extra_cases == 0 else float('inf')
+    return (extra_cases / baseline_cases) * 100
+
+
+def calculate_precision_recall_improvement(scoresPath,model_type='prs'):
     outputPath = f'{scoresPath}/model_recall_precision_improvement.csv'
-    stats_columns = ['model_type','model','data','false_positive','false_negative','true_positive','true_negative','precision','recall','n_missed_all_others','n_missed_with_main','percent_improvement_to_main']
+
     if model_type == "prs":
-        for h in ['test','holdout',]:
-            if h == 'test':
-                filePath = f'{scorePath}/combinedPRSGroups.csv'
+        for h in ['validation','holdout',]:
+            if h == 'validation':
+                filePath = f'{scoresPath}/combinedPRSGroups.csv'
             else:
-                filePath = f'{scorePath}/CombinedPRSGroups.holdout.csv'
+                filePath = f'{scoresPath}/CombinedPRSGroups.holdout.csv'
             df = pd.read_csv(filePath)
             cohorts = [col for col in df.columns if 'scaled_prs' in col]
 
             for cohort in cohorts:
-                fp_fn_list = calculate_fp_fn_tp(df[cohorts+['PHENOTYPE']],cohort)
-                missed_list = calculate_cases_exclusive(df[cohorts+['PHENOTYPE']],cohorts,cohort)
-                values = fp_fn_list + missed_list
-                row = [model_type,cohort.split('_')[-1],h]+values
-                add_row_efficient(outputPath, row, columns=stats_columns)
+                fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(df[cohorts+['PHENOTYPE']],cohort)
+                performance_values = calculate_cases_exclusive(df, cohort, threshold_percentile=80, case_value=2,main_col='scaled_prs_main')
+                tempDf = pd.DataFrame(fp_fn_dict | performance_values,index=[0])
+                tempDf['data_type'] = 'prs'
+                tempDf['data_subset'] = h
+                add_row_efficient(outputPath, tempDf)
     else: #calculate stats for trained models
         filePath = f'{scoresPath}/predictProbsReducedFinalModel.csv'
         phenotype = pd.read_csv(f'{scorePath}/combinedPRSGroups.csv',usecols=['IID','PHENOTYPE'])
         df = pd.read_csv(filePath)
         
-        #cohorts in the model column
-        cohorts = df['model'].unique()
+        #remove covariate model
+        df = df[df['model'] != 'covariate']
         
-        df = df.merge(phenotype,on='IID',how='left')
-        
+        if 'IID' not in df.columns:
+            df = add_iid_simple(df, phenotype)
+
         # Convert to wide format
-        df_wide = df.pivot(index=['IID', 'PHENOTYPE'], columns='model', values='yProba')
-    
-        # Reset index to make IID and PHENOTYPE regular columns
-        df_wide = df_wide.reset_index()
+        df_wide = df.pivot(index=['IID'], columns='model', values='yProba')
+        df_wide.reset_index(inplace=True)
         
         # Flatten column names (remove multi-level index)
         df_wide.columns.name = None
         
+        df_wide = df_wide.merge(phenotype,on='IID',how='left')
+        
+        #cohorts in the model column
+        cohorts = df['model'].unique()
+        
+
+        
         for cohort in cohorts:
-            fp_fn_list = calculate_fp_fn_tp(df[cohorts+['PHENOTYPE']],cohort)
-            missed_list = calculate_cases_exclusive(df[cohorts+['PHENOTYPE']],cohorts,cohort)
-            values = fp_fn_list + missed_list
-            row = [model_type,cohort.split('_')[-1],'test']+values
-            add_row_efficient(outputPath, row, columns=stats_columns)
+            fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(df_wide[cohorts.tolist()+['PHENOTYPE']],cohort)
+#           missed_list = calculate_cases_exclusive(df_wide[cohorts.tolist()+['PHENOTYPE']],cohort)
+            performance_values = calculate_cases_exclusive(df_wide, cohort, threshold_percentile=80, case_value=2)
+            tempDf = pd.DataFrame(fp_fn_dict | performance_values,index=[0])
+            tempDf['data_type'] = 'penalized_model'
+            tempDf['data_subset'] = 'validation'
+            add_row_efficient(outputPath, tempDf)
         
 
             
 
 if __name__ == '__main__':
     
-    pheno = 'celiacDisease'
-    scorePath = f'/Users/kerimulterer/prsInteractive/results/{pheno}/scores'
-    calculate_precision_recall_improvement(scorePath,type='model')
+    parser = argparse.ArgumentParser(description="calculating model performance of G vs other using predictions of trained models and PRS calculations....")
+    parser.add_argument("--pheno_path", help="Path to the input pheno folder")
+
+
+    args = parser.parse_args()
+    
+    # Prefer command-line input if provided; fallback to env var
+    pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
+    print(f"[PYTHON] Reading from: {pheno_path}")
+    
+    if not pheno_path:
+        raise ValueError("You must provide a data pheno path via --pheno_path or set the PHENO_PATH environment variable.")
+    
+
+    scorePath = f'{pheno_path}/scores'
+    for t in ['model','prs']:
+        calculate_precision_recall_improvement(scorePath,model_type=t)

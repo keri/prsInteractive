@@ -7,18 +7,12 @@
 #SBATCH --partition=bigmem
 #SBATCH --cpus-per-task=80
 #SBATCH --mem=500G
-#SBATCH --time=74:00:00
+#SBATCH --time=85:00:00
 #SBATCH --mail-type=BEGIN,END,FAIL
 #SBATCH --mail-user=oconnoas@staff.vuw.ac.nz
 #
 
-################## USE DATA FROM UK BIOBANK ############
-# FILES THAT MUST BE PRESENT:
-#   $PHENO_PATH/scores/importantFeaturesPostShap.csv
-#   $RESULTS_PATH/testCombined.raw
-#   $RESULTS_PATH/trainingCombined.raw
-#   /env.config
-#   $PHENO_PATH/pheno.config
+
 
 
 

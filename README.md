@@ -365,7 +365,7 @@ $ sbatch run_create_gene_env_data_submit.sh pheno
 
 ````
 
-### 5) run final association analysis with reduced features 
+### 5) run final association analysis with reduced features, calculate prs for holdout and validation data, calculate performance improvement of main v other for trained model and PRS calculations
 
 #### This will also calculate PRS across models for both validation and holdout sets.
 
@@ -382,9 +382,11 @@ $ sbatch run_create_gene_env_data_submit.sh pheno
 + scores/ : individual PRS csv files with file name [{model}.{nFeatures}.mixed.prs.csv] if model = all then [{model}.{nFeatures}.{model}.FromAll.mixed.prs.csv]
 + scores/ : modelScoresReducedFinalModel.csv, predictProbsReducedFinalModel.csv, featureScoresReducedFinalModel.csv, featureScoresReducedFinalModel.filtered.csv (the additional GxGxE filter post modelling)
 + scores/ : combinedPRSGroups.csv, combinedPRSGroups.holdout.csv, combinedORPRSGroups.csv, combinedPrevalencePRSGroups.csv
++ scores/ : model_recall_precision_improvement.csv
 + figures/ : plots of prs calculations to include: AUC, AUC table, prevalence, boxplot, and prevalence plots with same file name (different suffix)
 + figures/ : combinedPRS.QQColorPlot.png (without combined (all) model results) and combinedPRS.withAll.QQColorPlot.png (with the high risk people from combined model)
 + figures/ : {prs prefix}.saturationPlot.png : saturation plot of mean diff in PRS calculations using top N features at a time. This is separated into risk, protect, and combined features 
+
 
 ```
 
@@ -393,11 +395,7 @@ $ cd path/to/prsInteractive/hpc
 $ sbatch run_glmNetFinalModel.sh pheno 
 
 ````  
-### 6) calculate PRS statistics 
 
-#### input from results/{pheno}:
-
-+ scores/ : combinedPRSGroups.csv
 
 # Running analysis with WDL workflow
   

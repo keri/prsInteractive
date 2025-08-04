@@ -20,8 +20,6 @@ def get_hla_columns(hlaFile):
 
 def calculate_mean_for_features(df):
     return df[['coefs']].mean(axis=0)
-
-def graph_mean_diffs(meanDiffsDict):
     
 
 def calculate_mean_diff_across_models(scoresPath,hlaFile,featureFile):

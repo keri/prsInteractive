@@ -407,11 +407,11 @@ get_epi_snps <- function(epiFeatures) {
   return(epiSnps)
 }
 
-get_important_features <- function(feature_pathway){
+get_important_features <- function(feature_file){
 
   #file has 3 columns : [feature,data_type:(main,epi)]
 # feature_file = paste0(feature_pathway,'/importantFeaturesForAssociationAnalysis.csv')
-  feature_file = paste0(feature_pathway,'/importantFeaturesPostShap.csv')
+  #feature_file = paste0(feature_pathway,'/importantFeaturesPostShap.csv')
   important_features = read.csv(feature_file)
 
   epi_main_features = c(important_features$feature)
@@ -467,6 +467,7 @@ check_merge_compatibility <- function(df1, df2, merge_col = "IID") {
 # parser$add_argument("--test_file", required = TRUE)
 # parser$add_argument("--training_env_gen_file", required = TRUE)
 # parser$add_argument("--test_env_gen_file", required = TRUE)
+# parser$add_argument("--feature_model_file" ,required = TRUE)
 # 
 # args <- parser$parse_args()
 # 
@@ -479,6 +480,7 @@ check_merge_compatibility <- function(df1, df2, merge_col = "IID") {
 # training_env_gen_file <- args$training_env_gen_file
 # test_env_gen_file <- args$test_env_gen_file
 # covar_file <- args$covar_file
+# feature_model_file <- args$feature_model_file
 
 
 results_path <- '/Users/kerimulterer/prsInteractive/results'
@@ -492,7 +494,7 @@ test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombi
 training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTraining.csv'
 test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTest.csv'
 covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
-
+feature_model_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes/scores/importantFeaturesPostShap.csv'
 
 scores_path = paste0(pheno_path,'/scores')
 #covar_pathway = paste0(results_path,'/covar.txt')
@@ -891,6 +893,7 @@ for (dataset in dataset_list) {
   yProba <- data.frame(yProba_vector)
   colnames(yProba) = 'yProba'
   yProba$model = rep(data_type,length(yProba))
+  yProba$IID = trainingDf$IID
   
   #Check if the file exists
   if (!file.exists(predictions_file)) {
