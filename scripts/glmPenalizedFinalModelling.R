@@ -29,7 +29,7 @@ library(DescTools)
 library(stringr)
 library(argparse)
 
-registerDoMC(cores = 20)
+registerDoMC(cores = 80)
 
 get_main_cardio_features <- function(feature_file_path, results_path) {
 
@@ -323,7 +323,7 @@ download_covariate_data <- function(covar_file) {
 
 
 
-create_epi_df <- function(epiDf, pairList, cardio_df=data.table()) {
+create_epi_df <- function(epiDf, pairList,combo="sum") {
   # Convert epiDf to data.table if it is not already
   epiDf <- as.data.table(epiDf)
   
@@ -334,13 +334,17 @@ create_epi_df <- function(epiDf, pairList, cardio_df=data.table()) {
   for (pair in pairList) {
     
     snps <- strsplit(pair, ",")[[1]]
-    # Multiply the columns corresponding to the SNPs (element-wise product)
-#   snps_product <- apply(epiDf[, ..snps], 1, prod)
-    snps_sum <- rowSums(epiDf[, ..snps])
     
+
+    
+    if (combo == "sum") {
+      snps_combined <- rowSums(epiDf[, ..snps, drop = FALSE])
+    } else {
+      snps_combined <- apply(epiDf[, ..snps, drop = FALSE], 1, prod)
+    }
     # Create a data.table for the multiplied SNPs with column name as pair
 #   temp_dt <- data.table(temp = snps_product)
-    temp_dt <- data.table(temp = snps_sum)
+    temp_dt <- data.table(temp = snps_combined)
     setnames(temp_dt, "temp", pair)
     
     # Concatenate with the final result
@@ -789,7 +793,7 @@ dataset_list = list(
   list('cardio',c(epi_cardio_features,covariate_columns,hla_columns)),
   list('all',c(epi_cardio_features,epi_main_features,hla_columns,covariate_columns)),
   list('cardio_main',c(main_cardio_features,covariate_columns)),
-  list('all+main_cardio',c(epi_cardio_features,epi_main_features,hla_columns,main_cardio_features,covariate_columns)),
+  list('all+cardio_main',c(epi_cardio_features,epi_main_features,hla_columns,main_cardio_features,covariate_columns)),
   list('covariate',c(covariate_columns))
   
 )

@@ -263,7 +263,7 @@ def main(phenoPath):
 	
 if __name__ == '__main__':
 	
-	
+	parser = argparse.ArgumentParser(description="Combining PRS calculations ....")
 	parser.add_argument("--pheno_path",help="path to pheno directory")
 	
 	
@@ -272,9 +272,9 @@ if __name__ == '__main__':
 	# Prefer command-line input if provided; fallback to env var
 	pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
 	print(f"[PYTHON] Reading from: {pheno_path}")
-#	pheno = sys.argv[1]
-##	pheno = 'celiacDisease'
-#	phenoPath = f'/Users/kerimulterer/prsInteractive/results/{pheno}'
+
+#	pheno = 'celiacDisease'
+#	pheno_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}'
 	if not pheno_path:
 		raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
 	main(pheno_path)

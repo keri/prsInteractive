@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 import shap
-import fasttreeshap
+#import fasttreeshap
 shap.initjs()
 
 
@@ -30,7 +30,7 @@ def get_top_shap_features(shap_values,data_type):
     elif data_type == 'topFeatures.HighCases':
         topFeatures = shap_values4[(shap_values4 > 2) | (shap_values4 < -2) ]
     else:#this can be changed for some of the epi features which are much higher than main for some phenotypes
-        topFeatures = shap_values4[shap_values4 > 2].sort_values(ascending=True)
+        topFeatures = shap_values4[shap_values4 > 2 | (shap_values4 < -2)].sort_values(ascending=True)
     
     topFeaturesMean = shap_values3.loc[topFeatures.index]
     return(topFeatures,shap_values3,shap_values4)
@@ -56,28 +56,58 @@ def plot_and_save_top_features(featuresZscore,i,figPath,data_type):
     except IndexError:
         pass
         
-def calculate_plot_shap_values(model,X_test,y_test,i,figPath,data_type):
+#def calculate_plot_shap_values(model,X_test,y_test,i,figPath,data_type):
+#   
+#   #features = X_test.columns.tolist()
+#   clfHGB = model.best_estimator_
+#   features = clfHGB.feature_names_in_
+#   explainer = fasttreeshap.TreeExplainer(clfHGB, algorithm='auto',n_jobs=-1)
+#   shap_explainer = explainer(X_test,check_additivity=False)
+#   shap_values = shap_explainer.values
+#   index = X_test.index
+#   
+#   #shap_file = f"{trainingPath}/featureShapValue_{data_type}_{i}.csv"
+#   #get the shap values in dataframe form
+#   shap_df = pd.DataFrame(data=shap_values, columns=features, index=index)
+#   #shap_df.to_csv(shap_file)
+#   
+#   topFeatures,featureMean,shap_valuesZscores = get_top_shap_features(shap_df,data_type)
+#   
+#   create_summary_plots(figPath,shap_values,X_test,i,data_type)
+#   
+#   plot_and_save_top_features(topFeatures,i,figPath,data_type)
+#   
+#   return(topFeatures,shap_valuesZscores)
+
+def calculate_plot_shap_values(model, X_test, y_test, i, figPath, data_type):
     
-    #features = X_test.columns.tolist()
-    clfHGB = model.best_estimator_
-    features = clfHGB.feature_names_in_
-    explainer = fasttreeshap.TreeExplainer(clfHGB, algorithm='auto',n_jobs=-1)
-    shap_explainer = explainer(X_test,check_additivity=False)
-    shap_values = shap_explainer.values
+    # Get the best XGBoost estimator
+    clfXGB = model.best_estimator_
+    features = clfXGB.feature_names_in_
+    
+    # Use shap with XGBoost model
+    explainer = shap.TreeExplainer(clfXGB)
+    shap_values = explainer.shap_values(X_test)
+    
+    # Handle multi-class output (shap_values might be a list)
+    if isinstance(shap_values, list):
+        shap_values = shap_values[1]  # For binary classification, use positive class
+    
     index = X_test.index
     
-    #shap_file = f"{trainingPath}/featureShapValue_{data_type}_{i}.csv"
-    #get the shap values in dataframe form
+    # Get the shap values in dataframe form
     shap_df = pd.DataFrame(data=shap_values, columns=features, index=index)
-    #shap_df.to_csv(shap_file)
     
-    topFeatures,featureMean,shap_valuesZscores = get_top_shap_features(shap_df,data_type)
+    topFeatures, featureMean, shap_valuesZscores = get_top_shap_features(shap_df, data_type)
     
-    create_summary_plots(figPath,shap_values,X_test,i,data_type)
+    create_summary_plots(figPath, shap_values, X_test, i, data_type)
     
-    plot_and_save_top_features(topFeatures,i,figPath,data_type)
+    plot_and_save_top_features(topFeatures, i, figPath, data_type)
     
-    return(topFeatures,shap_valuesZscores)
+    return(topFeatures, shap_valuesZscores)
+
+
+
 
 
     

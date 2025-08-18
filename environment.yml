@@ -11,6 +11,7 @@ dependencies:
     - plink
     - numpy=1.26
     - scikit-learn
+    - statsmodels
     - shap
     - pip
     # R and R packages
@@ -26,5 +27,6 @@ dependencies:
     - pip:
         - fasttreeshap
         - ipython
+        - xgboost
     
 

@@ -212,7 +212,8 @@ def calculate_precision_recall_improvement(scoresPath,model_type='prs'):
     outputPath = f'{scoresPath}/model_recall_precision_improvement.csv'
 
     if model_type == "prs":
-        for h in ['validation','holdout',]:
+#       for h in ['validation','holdout']:
+        for h in ['validation']:
             if h == 'validation':
                 filePath = f'{scoresPath}/combinedPRSGroups.csv'
             else:
@@ -279,7 +280,9 @@ if __name__ == '__main__':
     if not pheno_path:
         raise ValueError("You must provide a data pheno path via --pheno_path or set the PHENO_PATH environment variable.")
     
+#   scores_path = '/Users/kerimulterer/ukbiobank/type2Diabetes/tanigawaSet/prs/reducedSHAP'
+    
 
-    scorePath = f'{pheno_path}/scores'
-    for t in ['model','prs']:
-        calculate_precision_recall_improvement(scorePath,model_type=t)
+    scores_path = f'{pheno_path}/scores'
+    for t in ['prs']:
+        calculate_precision_recall_improvement(scores_path,model_type=t)

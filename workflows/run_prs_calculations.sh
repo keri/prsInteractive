@@ -84,6 +84,7 @@ required_files=(
     "$TEST_PATH"
     "${SCRIPTS_DIR}/calculate_prs_for_filtered_main_epi.py"
     "$SCRIPTS_DIR/run_plink_LD.sh"
+    "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py"
 )
 
 for file in "${required_files[@]}"; do
@@ -127,7 +128,6 @@ if [ ! -f "$PHENO_PATH/scores/featureScoresReducedFinalModel.filtered.csv" ]; th
             # Update config file
             CONFIG_FILE="${PHENO_PATH}/pheno.config"
             echo "Updating config file: $CONFIG_FILE"
-            echo "New EPI_FILE value: $NEW_EPI_FILE"
             
             # Create backup
             cp "$CONFIG_FILE" "${CONFIG_FILE}.backup"
@@ -178,6 +178,7 @@ if [ $exit_code -ne 0 ]; then
     echo "ERROR: Python combine_prs.py script failed with exit code $exit_code"
     exit $exit_code
 fi
+
 
 echo "[DEBUG] Script completed successfully"
 

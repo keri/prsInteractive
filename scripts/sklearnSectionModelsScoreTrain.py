@@ -4,8 +4,9 @@
 import pandas as pd
 import numpy as np
 import time
-from sklearn.linear_model import LogisticRegressionCV
-from sklearn.ensemble import HistGradientBoostingClassifier
+#from sklearn.linear_model import LogisticRegressionCV
+#from sklearn.ensemble import HistGradientBoostingClassifier
+import xgboost as xgb
 from sklearn.model_selection import GridSearchCV
 from sklearn.naive_bayes import ComplementNB
 from sklearn.metrics import balanced_accuracy_score, f1_score, roc_auc_score, matthews_corrcoef, log_loss, jaccard_score, hamming_loss
@@ -81,13 +82,21 @@ def train_models(X,y,modelPath,pheno,data_type,i):
     # Gradient boosted Hist classifier
     ##########################
     st = time.time()
-    parameters_hgb = [{'max_iter':[1000,1500,2000],'learning_rate':[.001,.01,.1,1],'l2_regularization': [0,.1,.5]}]
+    parameters_hgb = [{'learning_rate':[.001,.01,.1,1]}]
+#   parameters_hgb = [{'max_iter':[1000,1500,2000],'learning_rate':[.001,.01,.1,1],'l2_regularization': [0,.1,.5]}]
     # clfHGB = HistGradientBoostingClassifier(early_stopping='auto',cv=10,l2_regularization=0, learning_rate=0.001,
     #                            max_depth=25, max_iter=1000, scoring='f1_micro').fit(X, y)
-    clfHGB = HistGradientBoostingClassifier(early_stopping='auto')
-    grid_search_hgb = GridSearchCV(estimator=clfHGB,param_grid=parameters_hgb,scoring='roc_auc',cv=3,n_jobs=60)
+    clfHGB = xgb.XGBClassifier(
+        tree_method='hist',           # Memory-efficient histogram method
+        max_bin=256,                  # Reduce memory for binning
+        colsample_bytree=0.8,         # Sample features
+        n_jobs=80,                    # Use your available cores
+        random_state=42
+    )
+    #clfHGB = HistGradientBoostingClassifier(early_stopping='auto')
+    grid_search_hgb = GridSearchCV(estimator=clfHGB,param_grid=parameters_hgb,scoring='roc_auc',cv=3,n_jobs=80)
     grid_search_hgb.fit(X,y)
-    pickle.dump(grid_search_hgb, open(f'{modelPath}/sklearnGradBoostHistClassifier_{data_type}_{i}.pkl', 'wb'))
+    pickle.dump(grid_search_hgb, open(f'{modelPath}/xgBoostClassifier_{data_type}_{i}.pkl', 'wb'))
     en = time.time()
     timeHGB = (en-st)/60
     print('time if took to train HGB = ',timeHGB,' minutes')
@@ -116,7 +125,7 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
     jscore = jaccard_score(y,yHat)
     hloss = hamming_loss(y,yHat)
     f1score = f1_score(y,yHat)
-    fields=['gradient boosted classifier',score,balanced_score,auc,mcc,logloss,jscore,hloss,f1score,data_type,i]
+    fields=['xgboost',score,balanced_score,auc,mcc,logloss,jscore,hloss,f1score,data_type,i]
 
     with open(modelFile,mode='a') as f:
         writer = csv.writer(f)
@@ -275,11 +284,11 @@ def main(pheno,withdrawalPath,pheno_path,training_path,test_path,epi_path,data_t
 
         mainArray = get_dataset(training_path,withdrawalPath,sectionSnps, use_chunking=True) #main effect snps so both pathways are the same
     #     the first columns will be IID, PHENOTYPE
-        y = mainArray['PHENOTYPE']
+        y = mainArray['PHENOTYPE'] - 1
         Xmain = mainArray.drop(columns=["PHENOTYPE"])
 
         if data_type != 'main':
-            Xmain = create_epi_df(Xmain,sectionPairs)
+            Xmain = create_epi_df(Xmain,sectionPairs,combo="product")
 
 
         print('Xmain array = ',Xmain.shape)
@@ -295,11 +304,11 @@ def main(pheno,withdrawalPath,pheno_path,training_path,test_path,epi_path,data_t
 
             testArray = get_dataset(test_path,withdrawalPath,sectionSnps, use_chunking=True)
 
-            yTest = testArray["PHENOTYPE"]
+            yTest = testArray["PHENOTYPE"] - 1
             Xtest = testArray.drop(columns=['PHENOTYPE'])
 
             if data_type != 'main':
-                Xtest = create_epi_df(Xtest,sectionPairs)
+                Xtest = create_epi_df(Xtest,sectionPairs,combo="product")
 
 
             print('Test array shape = ',Xtest.shape)
@@ -353,6 +362,7 @@ if __name__ == '__main__':
 #   training_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
 #   test_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
 #   epi_file = f'/Users/kerimulterer/prsInteractive/results/{pheno}/epiFiles/trainingCombinedEpi.epi.cc.summary.filtered'
+#   withdrawal_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/withdrawals.csv'
 #   start = 1
 #   end = 1
     

@@ -4,9 +4,9 @@
 #SBATCH --job-name=glmFinalModel
 #SBATCH -o  /nfs/scratch/projects/ukbiobank/err_out/%A_glmFinalModel.out
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_glmFinalModel.err
-#SBATCH --partition=longrun
+#SBATCH --partition=bigmem
 #SBATCH --cpus-per-task=80
-#SBATCH --mem=200G
+#SBATCH --mem=300G
 #SBATCH --time=10:00:00
 #
 
@@ -61,7 +61,8 @@ else
     FEATURES_FOR_MODEL_FILE="$PHENO_PATH/scores/importantFeaturesForAssociationAnalysis.csv"
 fi
 
-bash "$SCRIPTS_DIR/run_plink_LD.sh" $pheno
+#bash "$SCRIPTS_DIR/run_plink_LD.sh" $pheno
+
 
 # Pass to R script
 Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
@@ -85,8 +86,5 @@ Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
 } >> "${RESULTS_PATH}/$pheno/pheno.config"
 
 
-bash "run_prs_calculations_submit.sh" $pheno
+sbatch "run_prs_calculations_submit.sh" $pheno
 
-#need exported PHENO_PATH
-#calculate performance metrics for models using yProba and prs calculations for validation and holdout data
-python "${SCRIPTS_DIR}/calculate_prs_stats.py"

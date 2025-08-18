@@ -7,14 +7,16 @@ import statsmodels.stats.contingency_tables as ct
 import statsmodels.api as sm
 from scipy.stats import fisher_exact
 
-def create_epi_df(epiDf,pairList):
+def create_epi_df(epiDf,pairList,combo="sum"):
     '''input : epiDf with snps as columns + PHENOTYPE
             pairList : [snp1pair1,snp2pair1,snp1pair2,snp2pair2...snp1pairN,snp2pairN]'''
     epiArrayFinal = pd.DataFrame()
     
     for pair in pairList:
-        snps = epiDf[pair.split(',')].sum(axis=1)
-        #snps = epiDf[pair.split(',')].prod(axis=1)
+        if combo == "sum":  
+            snps = epiDf[pair.split(',')].sum(axis=1)
+        else:
+            snps = epiDf[pair.split(',')].prod(axis=1)
         snps.columns = pair
         epiArrayFinal = pd.concat([epiArrayFinal,snps],axis=1)
     epiArrayFinal.columns = pairList 
@@ -353,9 +355,44 @@ def calculate_odds_ratio_for_prs(df,binned_prs,prscr=False):
             percentileORTemp['model'] = bin_col.replace(f'bin_','')
             
             percentileOR = pd.concat([percentileORTemp,percentileOR],ignore_index=True)
-            
-            
+        
+        
     return(percentileOR)
+
+def rank_gene_env_features(geneEnvShapleyFile,threshold=2):
+    '''
+    input : df with columns [envGeneticFeature,shap_zscore,env_type,geneticFeature,envFeature,main_E,epistatic]
+    
+    oupt : df with gene_environment_features ranked with Shapley Z scores > 2
+        
+    '''
+    #download data
+    df = pd.read_csv(geneEnvShapleyFile)
+    
+    #get the largest shap_zscore for duplicated values
+    df.sort_values(['envGeneticFeature','shap_zscore'],ascending=False,inplace=True)
+    
+    #drop duplicates in df
+    df.drop_duplicates(subset=['envGeneticFeature'],keep='first',inplace=True)
+    
+    #get the epistatic interactions
+    epiDf = df[df['epistatic'] == 1]
+    
+    #get the main effects
+    mainDf = df[df['main_E'] == 1]
+    mainDf.loc[mainDf['envFeature'].isna(),'envFeature'] = mainDf['envGeneticFeature']
+    
+    importantFeatures = epiDf[epiDf['shap_zscore'] > threshold]
+    
+    finalFeatures = pd.concat([importantFeatures,mainDf],ignore_index=True)
+    
+    newFile = geneEnvShapleyFile.split('.')[0]
+    newFile = f'{newFile}Full.csv'
+    df.to_csv(newFile,index=False)
+    
+    finalFeatures.to_csv(geneEnvShapleyFile,index=False)
+    
+    return finalFeatures
 
 
 #   

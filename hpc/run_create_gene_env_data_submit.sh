@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 #
 # run_env_gene_creation_association_modelling_submit.sh
@@ -66,7 +66,7 @@ python "$SCRIPTS_DIR/clean_create_environment_data.py"
 
 
 echo "python script for model training started!"
-deactivate ukb_env
 
-#create R env
+
+
 

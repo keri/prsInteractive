@@ -18,20 +18,34 @@ export PRS_INTERACTIVE_HOME="$PROJECT_ROOT"
 echo "[SETUP] Setting up environment for phenotype: $pheno"
 echo "[SETUP] Platform: $platform"
 
-# Initialize conda for bash (if not already done)
-if ! command -v conda &> /dev/null; then
-    echo "ERROR: conda not found. Please install conda/miniconda first."
-    exit 1
-fi
 
-# Initialize conda in this shell
-eval "$(conda shell.bash hook)"
+
+
+
 
 # Check if environment exists, create if it doesn't
 ENV_NAME="ukb_env"
+
+#create conda shell to activate
+if [ "$platform" != "hpc" ]; then
+    # Initialize conda for bash (if not already done)
+    if ! command -v conda &> /dev/null; then
+        echo "ERROR: conda not found. Please install conda/miniconda first."
+        exit 1
+    fi
+
+else
+    module load Miniconda3/4.9.2
+    source $(conda info --base)/etc/profile.d/conda.sh
+
+fi
+
+eval "$(conda shell.bash hook)"
+    
 if ! conda env list | grep -q "^${ENV_NAME}\s"; then
     echo "[CONDA] Creating conda environment from environment.yml..."
     conda env create -f "$PROJECT_ROOT/environment.yml"
+
 else
     echo "[CONDA] Environment $ENV_NAME already exists"
     # Optionally update environment
@@ -151,3 +165,4 @@ else
 fi
 
 #bash "$PROJECT_ROOT/update_pipeline_inputs.sh" "$pheno" "$icd10" "$phenoStr" $n "$platform"
+    

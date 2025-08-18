@@ -1,6 +1,4 @@
-#!/bin/bash
-
-#!/bin/bash
+#!/bin/bash -x
 
 #
 #SBATCH --job-name=train_score_section_models
@@ -12,9 +10,9 @@
 #SBATCH --time=01:00:00
 #
 
-module load Miniconda3/4.9.2
-source $(conda info --base)/etc/profile.d/conda.sh 
-conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
+#module load Miniconda3/4.9.2
+#source $(conda info --base)/etc/profile.d/conda.sh 
+#conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
 #export PATH="/nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env/bin:$PATH"
 
 # Source config
@@ -41,10 +39,6 @@ export TRAINING_PATH=$TRAINING_PATH
 export TEST_PATH=$TEST_PATH
 export EPI_FILE=$EPI_FILE
 
-
-
-
-###########  CREATE A PHENOTYPE FOLDER TO COLLECT RESULTS IF NOT PRESENT ############
 
 
 python "${SCRIPTS_DIR}/sklearnSectionModelsScoreTrain.py"

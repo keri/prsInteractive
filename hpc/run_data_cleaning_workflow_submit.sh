@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 #
 #SBATCH --job-name=clean_create_variant_data
@@ -25,12 +25,6 @@ N_CORES=$4
 
 
 
-
-module load Miniconda3/4.9.2
-source $(conda info --base)/etc/profile.d/conda.sh 
-conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
-#export PATH="/nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env/bin:$PATH"
-
 module load plink/1.90
 
 
@@ -43,10 +37,15 @@ if [[ ! -f "../envSetUp.sh" ]]; then
     exit 1
 fi
 
-
-# Run parent script with all arguments
-echo "Executing: ../envSetUp.sh"
-bash ../envSetUp.sh $pheno $icd10 "${phenoStr}" $N_CORES
+# Check if envSetUp has already been run
+if [[ ! -d "../results/$pheno" ]]; then
+    echo "Error: envSetUp.sh script not run"
+    # Run parent script with all arguments
+    echo "Executing: ../envSetUp.sh"
+    cd ../
+    bash envSetUp.sh $pheno $icd10 "${phenoStr}" $N_CORES
+    cd hpc/
+fi
 
 # Capture exit status
 exit_status=$?
@@ -56,6 +55,10 @@ if [[ $exit_status -ne 0 ]]; then
 fi
 
 echo "envSetUp.sh completed successfully"
+
+module load Miniconda3/4.9.2
+source $(conda info --base)/etc/profile.d/conda.sh 
+conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
 
 
 # Source config

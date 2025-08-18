@@ -79,9 +79,15 @@ def main(phenoPath,withdrawalPath, trainingPath,testPath,holdoutPath,envDf,hlaDf
     
     ############## DOWNLOAD ENVIRONMENTAL DATA #######################
     
-
-    #the G and GxG SNPs post GxGxE feature discovery
-    features = pd.read_csv(importantFeaturesFile)
+    #check to see if features have been reduced
+    fullFeaturesFile = importantFeaturesFile.split('.')[0]+'Full.csv'
+    if os.path.exists(fullFeaturesFile):
+        print(f'{fullFeaturesFile} exists meaning important GxGxE features have previously been reduced')
+    
+    else:
+        #get ranked GxGxE features
+        features = rank_gene_env_features(importantFeaturesFile,threshold=2)
+    
     #filter the main E features
     features2 = features[features['main_E'] == 0]
     
@@ -105,19 +111,19 @@ def main(phenoPath,withdrawalPath, trainingPath,testPath,holdoutPath,envDf,hlaDf
     expandedSnps = get_epi_snps(set(epiGenoFeatures))
     
     trainingDf = get_dataset(trainingPath,withdrawalPath,expandedSnps,use_chunking=True)
-    trainingDf = create_epi_df(trainingDf, epiGenoFeatures)
+    trainingDf = create_epi_df(trainingDf, epiGenoFeatures,combo="product")
     geneEnvTraining = trainingDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvTraining = geneEnvTraining.merge(hlaDf,left_index=True,right_index=True,how='left')
     
     
     testDf = get_dataset(testPath, withdrawalPath, expandedSnps, use_chunking=True)
-    testDf = create_epi_df(testDf, epiGenoFeatures)
+    testDf = create_epi_df(testDf, epiGenoFeatures,combo="product")
     geneEnvTest = testDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvTest = geneEnvTest.merge(hlaDf,left_index=True,right_index=True,how='left')
     
     
     holdoutDf = get_dataset(holdoutPath, withdrawalPath, expandedSnps,use_chunking=True)
-    holdoutDf = create_epi_df(holdoutDf, epiGenoFeatures)
+    holdoutDf = create_epi_df(holdoutDf, epiGenoFeatures,combo="product")
     geneEnvHoldout = holdoutDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvHoldout = geneEnvHoldout.merge(hlaDf,left_index=True,right_index=True,how='left')
     

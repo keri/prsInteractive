@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -x
 
 #
 # run_model_batches_submit.sh
@@ -22,16 +22,17 @@
 #
 
 
-module load Miniconda3/4.9.2
-source $(conda info --base)/etc/profile.d/conda.sh 
-conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
+#module load Miniconda3/4.9.2
+#source $(conda info --base)/etc/profile.d/conda.sh 
+#conda activate /nfs/scratch/projects/ukbiobank/prsInteractive/ukb_env
 
-PHENO=$1
+pheno=$1
 DATA_TYPE=$2
+
 #PHENO='type2Diabetes'
 #DATA_TYPE='epi'
 
-echo "PHENO is set to : $PHENO"
+echo "PHENO is set to : $pheno"
 echo "DATA_TYPE is set to : $DATA_TYPE"
 
 
@@ -55,14 +56,14 @@ if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
 else
     echo "sourcing $pheno env variables."
     #source pheno specific environment variables
-    source "${RESULTS_PATH}/$PHENO/pheno.config"
+    source "${RESULTS_PATH}/$pheno/pheno.config"
 fi
 
 
 
 echo "Running batch models for $DATA_TYPE data... "	
 
-PHENO_PATH="$RESULTS_PATH/$PHENO"
+PHENO_PATH="$RESULTS_PATH/$pheno"
 
 # Validate model folders exist in pheno folder
 if [ ! -d "$PHENO_PATH/scores" ]; then
@@ -89,12 +90,14 @@ if [ "$DATA_TYPE" == "epi" ]; then
         echo "✓ epi pairs have been filtered for redundancy and file updated"
     else
         #filter redundant epi pairs
-        export EPI_FILE=$EPI_FILE
+        #export EPI_FILE=$EPI_FILE
         echo "reading EPI_FILE : ${EPI_FILE}"
-        echo "[PYTHON] running python script ${SCRIPTS_DIR}/filter_redundant_epi_pairs.py"
-        python "$SCRIPTS_DIR/filter_redundant_epi_pairs.py"
+        echo "[PYTHON] running python script filter_redundant_epi_pairs_submit.sh"
+#       python "$SCRIPTS_DIR/filter_redundant_epi_pairs.py"
+        batch "filter_redundant_epi_pairs_submit.sh" $EPI_FILE $SCRIPTS_DIR
         #wait 10 mins for script to finish
-        echo "Python script filtering redundant epi features finished with exit code: $?"
+        sleep 10m
+#       echo "Python script filtering redundant epi features finished with exit code: $?"
         NEW_EPI_FILE="$EPI_FILE.filtered"
         # Verify filtered file exists
         if [ ! -f "$NEW_EPI_FILE" ]; then
@@ -159,25 +162,26 @@ BATCHES_PER_JOB=5
 TOTAL_JOBS=$(( (TOTAL_BATCHES + BATCHES_PER_JOB - 1) / BATCHES_PER_JOB ))
 echo "Grouping into $TOTAL_JOBS jobs (5 batches per job)"
 
-#or JOB_ID in $(seq 1 $TOTAL_JOBS); do
-for JOB_ID in $(seq 1 2); do
+# Loop from 0 to TOTAL_JOBS-1 (since we want TOTAL_JOBS iterations)
+for JOB_ID in $(seq 0 $((TOTAL_JOBS - 1))); do
     echo "job id : $JOB_ID"
-    # Calculate batch range for this job
-    JOB_START_BATCH=$(( (JOB_ID - 1) * BATCHES_PER_JOB + 1 ))
-    JOB_END_BATCH=$(( JOB_ID * BATCHES_PER_JOB ))
     
-    echo "job ending in batch : $JOB_END_BATCH"
+    # Calculate batch range for this job (1-indexed batches)
+    JOB_START_BATCH=$(( JOB_ID * BATCHES_PER_JOB + 1 ))
+    JOB_END_BATCH=$(( JOB_START_BATCH + BATCHES_PER_JOB - 1 ))
+    
     # Ensure end batch doesn't exceed total batches
     if [ $JOB_END_BATCH -gt $TOTAL_BATCHES ]; then
         JOB_END_BATCH=$TOTAL_BATCHES
     fi
     
-    echo "Submitting job $JOB_ID to process batches $JOB_START_BATCH to $JOB_END_BATCH"
+    echo "Processing batches $JOB_START_BATCH to $JOB_END_BATCH"
+
     
     export START=$JOB_START_BATCH
     export END=$JOB_END_BATCH
     export DATA_TYPE
-    export PHENO
+    export PHENO=$pheno
     export PHENO_PATH
     export TRAINING_PATH
     export TEST_PATH

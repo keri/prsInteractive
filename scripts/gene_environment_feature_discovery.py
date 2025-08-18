@@ -147,7 +147,7 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
     print(f'number of chunks to process : {n_chunks}')
 
         
-    for chunk in range(n_chunks+1):
+    for chunk in range(n_chunks):
         print(f'chunk to process : {chunk}')
         start = chunk*chunk_size
         stop = start+chunk_size
@@ -160,12 +160,12 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
         trainingData = get_dataset(trainingPath, withdrawalPath,modelFeatures2, use_chunking=True)
         y = trainingData['PHENOTYPE']
         #drops the PHENOTYPE column
-        trainingData = create_epi_df(trainingData,modelFeatures['feature'].tolist()[start:stop])
+        trainingData = create_epi_df(trainingData,modelFeatures['feature'].tolist()[start:stop],combo="product")
         #
         #testData = get_dataset(testPath,modelFeatures2)
         testData = get_dataset(testPath, withdrawalPath,modelFeatures2, use_chunking=True)
         yTest = testData['PHENOTYPE']        
-        testData = create_epi_df(testData,modelFeatures['feature'].tolist()[start:stop])
+        testData = create_epi_df(testData,modelFeatures['feature'].tolist()[start:stop],combo="product")
         
         ##################### merge HLA data ###########################
         

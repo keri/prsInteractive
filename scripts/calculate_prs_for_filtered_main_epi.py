@@ -181,25 +181,30 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,envFileTest,holdoutPathway,e
     
     ############################  GET FEATURES FROM FINAL MODEL THAT HAVE BEEN PRUNED FOR LD  #################
     
-    #unfiltered features before LD used in cardio epi interactions and in download
     #for the dataset
-    filteredFeatures = pd.read_csv(featureFile)
+    filteredFeatures = pd.read_csv(featureFile)    
+    
     filteredFeatures = filteredFeatures[~filteredFeatures['feature'].str.contains('Intercept')]
     
-    
+
     #filter covariate features out of dataset
     covarCoefs = filteredFeatures[filteredFeatures['model'] == 'covariate']
     covarFeatures = covarCoefs['feature'].tolist()
     
     #get all other models that are not covariate
     filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'covariate']
-    #remove main clinical features from data
-    filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'cardio_main']
-    filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'all+main_cardio']
+
     
     #filters the covar features out of each model type
     filteredFeatures = filteredFeatures[~filteredFeatures['feature'].isin(covarFeatures)]
-#   filteredFeatures = filteredFeatures[~filteredFeatures['feature'].str.contains('Intercept')]
+
+    #get the main e features
+    cardioMainData = filteredFeatures[filteredFeatures['model'] == 'cardio_main']
+    cardioMainPlusAll = filteredFeatures[filteredFeatures['model'] == 'all+cardio_main']
+    
+    #remove main clinical features from data
+    filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'cardio_main']
+    filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'all+cardio_main']
 
     #get full columns to use for index of section columns
     full_columns = get_columns(testPathway)

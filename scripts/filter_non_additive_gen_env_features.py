@@ -9,12 +9,13 @@ def compare_gene_env_to_genetic(scoresPath):
     df = pd.read_csv(inputFile)
     
     #columns = coefs,model,feature
-    #iterate over all non-zero GxGxE features and get the first element in list to compare with G or GxG models
+    #iterate over all non-zero GxGxE features and get the first element in list for interactive features to compare with epi or main models
     gene_env = df[(df['model'] == 'cardio') & (df['coefs'] != 0) & (df['feature'].str.contains(','))]
     filterList = []
     for feature in gene_env['feature']:
         g = ','.join(feature.split(',')[1:])
         eDf = gene_env[gene_env['feature'] == feature]
+        #get coef value for single g features
         gDf = df[(df['feature'] == g) & (df['model'].isin(['epi','main']))]
         if gDf.empty:
             pass
