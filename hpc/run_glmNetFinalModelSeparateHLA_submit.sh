@@ -4,10 +4,10 @@
 #SBATCH --job-name=glmFinalModel
 #SBATCH -o  /nfs/scratch/projects/ukbiobank/err_out/%A_glmFinalModel.out
 #SBATCH -e /nfs/scratch/projects/ukbiobank/err_out/%A_glmFinalModel.err
-#SBATCH --partition=quicktest
-#SBATCH --cpus-per-task=80
-#SBATCH --mem=120G
-#SBATCH --time=01:00:00
+#SBATCH --partition=bigmem
+#SBATCH --cpus-per-task=70
+#SBATCH --mem=800G
+#SBATCH --time=90:00:00
 #
 
 
@@ -69,7 +69,7 @@ fi
 echo "Starting R script..."
 
 # Pass to R script
-Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
+Rscript "$SCRIPTS_DIR/glmPenalizedFinalModellingSeparateHLA.R" \
 --results_path "$RESULTS_PATH" \
 --data_path "$DATA_PATH" \
 --hla_file "$HLA_FILE" \
@@ -93,25 +93,25 @@ echo "R script completed successfully. Checking outputs..."
 # Check if R script outputs exist before updating config
 missing_files=()
 
-if [ ! -f "$PHENO_PATH/scores/featureScoresReducedFinalModel.csv" ]; then
-    missing_files+=("featureScoresReducedFinalModel.csv")
+if [ ! -f "$PHENO_PATH/scores/featureScoresReducedFinalModelSeparateHLA.csv" ]; then
+    missing_files+=("featureScoresReducedFinalModelSeparateHLA.csv")
 fi
 
-if [ ! -f "$PHENO_PATH/scores/modelScoresReducedFinalModel.csv" ]; then
-    missing_files+=("modelScoresReducedFinalModel.csv")
+if [ ! -f "$PHENO_PATH/scores/modelScoresReducedFinalModelSeparateHLA.csv" ]; then
+    missing_files+=("modelScoresReducedFinalModelSeparateHLA.csv")
 fi
 
-if [ ! -f "$PHENO_PATH/scores/predictProbsReducedFinalModel.csv" ]; then
-    missing_files+=("predictProbsReducedFinalModel.csv")
+if [ ! -f "$PHENO_PATH/scores/predictProbsReducedFinalModelSeparateHLA.csv" ]; then
+    missing_files+=("predictProbsReducedFinalModelSeparateHLA.csv")
 fi
 
 # Only update config if all files exist
 if [ ${#missing_files[@]} -eq 0 ]; then
     echo "All R script outputs found. Updating pheno.config..."
     {
-        echo "FEATURE_SCORES_FILE=$PHENO_PATH/scores/featureScoresReducedFinalModel.csv"
-        echo "FINAL_MODEL_SCORES=$PHENO_PATH/scores/modelScoresReducedFinalModel.csv"
-        echo "FINAL_MODEL_PROBABILITIES=$PHENO_PATH/scores/predictProbsReducedFinalModel.csv"
+        echo "FEATURE_SCORES_FILE=$PHENO_PATH/scores/featureScoresReducedFinalModelSeparateHLA.csv"
+        echo "FINAL_MODEL_SCORES=$PHENO_PATH/scores/modelScoresReducedFinalModelSeparateHLA.csv"
+        echo "FINAL_MODEL_PROBABILITIES=$PHENO_PATH/scores/predictProbsReducedFinalModelSeparateHLA.csv"
     } >> "${RESULTS_PATH}/$pheno/pheno.config"
 else
     echo "ERROR: R script failed to generate the following files:"
@@ -120,5 +120,5 @@ else
     exit 1
 fi
 
-sbatch "run_prs_calculations_submit.sh" $pheno
+#sbatch "run_prs_calculations_submit.sh" $pheno
 

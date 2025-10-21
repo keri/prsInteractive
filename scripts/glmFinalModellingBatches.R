@@ -33,7 +33,54 @@ library(argparse)
 
 registerDoMC(cores = 60)
 
-get_main_cardio_features <- function(feature_file_path, participant_env_file) {
+# Simple timeout function using setTimeLimit
+run_glmnet_with_timeout <- function(X, y, timeout_hours = 1, nfolds = 3, 
+                                   penalty.factor = NULL, parallel = TRUE) {
+                                      
+  timeout_seconds <- timeout_hours * 3600
+                                      
+  tryCatch({
+    cat("Starting cv.glmnet with", timeout_hours, "hour timeout...\n")
+    
+    # Set the timeout
+    setTimeLimit(cpu = timeout_seconds, elapsed = timeout_seconds, transient = TRUE)
+    
+    # Record start time
+    start_time <- Sys.time()
+    
+    # Run cv.glmnet
+    result <- cv.glmnet(X, y, 
+                       nfolds = nfolds, 
+                       family = "binomial", 
+                       penalty.factor = penalty.factor, 
+                       parallel = parallel,
+                       thresh = 1e-4,  # Less strict convergence
+                       maxit = 100000) # More iterations allowed
+    
+    # Reset timeout
+    setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
+    
+    end_time <- Sys.time()
+    duration <- round(difftime(end_time, start_time, units = "mins"), 2)
+    cat("cv.glmnet completed in", duration, "minutes\n")
+    
+    return(list(model = result, success = TRUE, timed_out = FALSE))
+    
+  }, error = function(e) {
+    # Reset timeout in case of error
+    setTimeLimit(cpu = Inf, elapsed = Inf, transient = FALSE)
+    
+    if (grepl("reached elapsed time limit|reached CPU time limit", e$message)) {
+      cat("TIMEOUT: cv.glmnet exceeded", timeout_hours, "hours\n")
+      return(list(model = NULL, success = FALSE, timed_out = TRUE))
+    } else {
+      cat("ERROR in cv.glmnet:", e$message, "\n")
+      return(list(model = NULL, success = FALSE, timed_out = FALSE, error = e$message))
+    }
+  })
+}
+
+get_main_cardio_features <- function(feature_file_path, results_path) {
 
   
   cat("=== PROCESSING MAIN CARDIO FEATURES ===\n")
@@ -70,7 +117,7 @@ get_main_cardio_features <- function(feature_file_path, participant_env_file) {
   }
   
   # Step 4: Read participant environment data
-  # participant_env_file <- file.path(results_path, "participant_environment.csv")
+  participant_env_file <- file.path(results_path, "participant_environment.csv")
   
   if (!file.exists(participant_env_file)) {
     stop(paste("Participant environment file not found:", participant_env_file))
@@ -800,14 +847,12 @@ get_epi_snps <- function(epiFeatures) {
 # return(list(epi_main_features=epi_main_features,main_features=main_features,epi_features=epi_features))
 #}
 
-get_important_features <- function(feature_file,threshold=1.99){
+get_important_features <- function(feature_file){
   
   print("=== LOADING AND CLEANING FEATURE LIST ===")
   
   # Load feature file
-  features_df = read.csv(feature_file)
-  # Filter features with |shap_zscore| > threshold
-  important_features <- features_df[abs(features_df$shap_zscore) > threshold, ]
+  important_features = read.csv(feature_file)
   
   print(paste("Original features loaded:", nrow(important_features)))
   
@@ -885,44 +930,44 @@ check_merge_compatibility <- function(df1, df2, merge_col = "IID") {
 
 ################################ GLOBAL VARIABLES  ########################
 # 
-# parser <- ArgumentParser()
-# parser$add_argument("--results_path", required = TRUE)
-# parser$add_argument("--data_path", required = TRUE)
-# parser$add_argument("--hla_file", required = TRUE)
-# parser$add_argument("--covar_file", required = TRUE)
-# parser$add_argument("--pheno_path", required = TRUE)
-# parser$add_argument("--training_file", required = TRUE)
-# parser$add_argument("--test_file", required = TRUE)
-# parser$add_argument("--training_env_gen_file", required = TRUE)
-# parser$add_argument("--test_env_gen_file", required = TRUE)
-# parser$add_argument("--feature_model_file" ,required = TRUE)
-# #
-# args <- parser$parse_args()
+parser <- ArgumentParser()
+parser$add_argument("--results_path", required = TRUE)
+parser$add_argument("--data_path", required = TRUE)
+parser$add_argument("--hla_file", required = TRUE) 
+parser$add_argument("--covar_file", required = TRUE)
+parser$add_argument("--pheno_path", required = TRUE)
+parser$add_argument("--training_file", required = TRUE)
+parser$add_argument("--test_file", required = TRUE)
+parser$add_argument("--training_env_gen_file", required = TRUE)
+parser$add_argument("--test_env_gen_file", required = TRUE)
+parser$add_argument("--feature_model_file" ,required = TRUE)
 # 
-# results_path <- args$results_path
-# data_path <- args$data_path
-# pheno_path <- args$pheno_path
-# hla_file <- args$hla_file
-# training_file <- args$training_file
-# test_file <- args$test_file
-# training_env_gen_file <- args$training_env_gen_file
-# test_env_gen_file <- args$test_env_gen_file
-# covar_file <- args$covar_file
-# feature_model_file <- args$feature_model_file
-# participant_env_file <- file.path(results_path, "participant_environment.csv")
+args <- parser$parse_args()
 
-results_path <- '/Users/kerimulterer/prsInteractive/results'
-pheno_path <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
-data_path <- '/Users/kerimulterer/prsInteractive/data'
-hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw'
-test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined.raw'
-# test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined_final.raw'
-# training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTraining.csv'
-# test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTest.csv'
-covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
-feature_model_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes/scores/importantFeaturesPostShap.csv'
-participant_env_file='/Users/kerimulterer/prsInteractive/results/participant_environment.csv'
+results_path <- args$results_path
+data_path <- args$data_path
+pheno_path <- args$pheno_path
+hla_file <- args$hla_file
+training_file <- args$training_file
+test_file <- args$test_file
+training_env_gen_file <- args$training_env_gen_file
+test_env_gen_file <- args$test_env_gen_file
+covar_file <- args$covar_file
+feature_model_file <- args$feature_model_file
+
+
+#results_path <- '/Users/kerimulterer/prsInteractive/results'
+#pheno_path <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
+#data_path <- '/Users/kerimulterer/prsInteractive/data'
+#hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
+## training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw'
+#training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw'
+#test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined.raw'
+## test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined_final.raw'
+#training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTraining.csv'
+#test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTest.csv'
+#covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
+#feature_model_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes/scores/importantFeaturesPostShap.csv'
 
 scores_path = paste0(pheno_path,'/scores')
 #covar_pathway = paste0(results_path,'/covar.txt')
@@ -944,8 +989,8 @@ columns_to_get = get_epi_snps(epi_main_features)
 ####################################################################################
 
 ###### MODEL SCORE FILE ##########
-model_scores_file = paste0(scores_path,'/modelScoresReducedFinalModel.csv')
-model_score_colnames = c("auc","ci_lower","ci_upper","nagelkerke_rquared","model")
+model_scores_file = paste0(scores_path,'/modelScoresReducedFinalModelBatches.csv')
+model_score_colnames = c("auc","ci_lower","ci_upper","nagelkerke_rquared","model","batch")
 # Check if the file exists
 if (!file.exists(model_scores_file)) {
   
@@ -966,8 +1011,8 @@ if (!file.exists(model_scores_file)) {
 
 ###### PREDICTION FILE ##########
 
-predictions_file = paste0(scores_path,'/predictProbsReducedFinalModel.csv')
-predictions_colnames = c("yProba","model")
+predictions_file = paste0(scores_path,'/predictProbsReducedFinalModelBatches.csv')
+predictions_colnames = c("yProba","model","batch")
 
 # Check if the file exists
 if (!file.exists(predictions_file)) {
@@ -988,8 +1033,8 @@ if (!file.exists(predictions_file)) {
 
 # ###### FEATURE SCORE FILE ##########
 #feature_scores_file = paste0(scores_path,'/importantFeaturesForAssociationAnalysis.csv')
-feature_scores_file = paste0(scores_path,'/featureScoresReducedFinalModel.csv')
-feature_scores_colnames = c("coefs","model","feature")
+feature_scores_file = paste0(scores_path,'/featureScoresReducedFinalModelBatches.csv')
+feature_scores_colnames = c("coefs","model","feature","batch")
 
 # Check if the file exists
 if (!file.exists(feature_scores_file)) {
@@ -1037,21 +1082,21 @@ hla_columns = setdiff(names(hlaData), "IID")
 ################## CARDIO METABOLIC DATA ##########
 
 # epi_cardio_participant_feature_list = download_important_cardiometabolic_features(feature_pathway,env_type,machine_path)
-# envTraining <- fread(training_env_gen_file)
-# envTest <- fread(test_env_gen_file)
+envTraining <- fread(training_env_gen_file)
+envTest <- fread(test_env_gen_file)
 
 # CRITICAL: Ensure IID is integer type in both
-# envTraining[, IID := as.integer(IID)]
-# envTest[, IID := as.integer(IID)]
-# cat("Environment data IID columns set to integer type\n")
-# 
-# epi_cardio_features = setdiff(names(envTraining), "IID")
+envTraining[, IID := as.integer(IID)]
+envTest[, IID := as.integer(IID)]
+cat("Environment data IID columns set to integer type\n")
+
+epi_cardio_features = setdiff(names(envTraining), "IID")
 
 ############## MAIN CARDIO FEATURES TO MODEL ##########
 
-# main_cardio_file=paste0(pheno_path,'/scores/','cardioMetabolicimportantFeaturesPostShap.csv')
-# main_cardio_df = get_main_cardio_features(main_cardio_file,participant_env_file)
-# main_cardio_features = setdiff(names(main_cardio_df),'IID')
+main_cardio_file=paste0(pheno_path,'/scores/','cardioMetabolicimportantFeaturesPostShap.csv')
+main_cardio_df = get_main_cardio_features(main_cardio_file,results_path)
+main_cardio_features = setdiff(names(main_cardio_df),'IID')
 
 
 ################### ARRAY TYPE DATA #####################
@@ -1066,13 +1111,13 @@ hla_columns = setdiff(names(hlaData), "IID")
 
 ################# TRAINING data #####################
 # trainingDf = get_geno_dataset(paste0(training_path,'/data/',training_file),machine_path,columns_to_get)
-trainingDf = get_geno_read_table_fixed(training_file,data_path,columns_to_get)
+trainingDf = get_geno_production_fixed(training_file,data_path,columns_to_get)
 
 #phenotype
 yTraining = trainingDf$PHENOTYPE
 
 #combined main SNPs and epi pairs in which haplotypes are added for snp1 and snp2 of pair
-trainingDf = create_epi_df(trainingDf,epi_main_features,combo="product")
+trainingDf = create_epi_df(trainingDf,epi_main_features)
 
 #merge covariate data to geno data
 # Before merging with covariate data:
@@ -1087,19 +1132,19 @@ trainingDf = merge(trainingDf,hlaData, by = "IID", all.x = TRUE)
 #combine cardio and geno features and scale data after combined
 #shape will be length(epi geno features to combine list X # people in test)
 
-# trainingDf = merge(trainingDf,envTraining, by = "IID", all.x = TRUE)
+trainingDf = merge(trainingDf,envTraining, by = "IID", all.x = TRUE)
 
 #merge with cardio main features
-# trainingDf = merge(trainingDf,main_cardio_df, by= "IID", all.x = TRUE)
+trainingDf = merge(trainingDf,main_cardio_df, by= "IID", all.x = TRUE)
 
 ################# TEST data #####################
-testDf = get_geno_read_table_fixed(test_file,data_path,columns_to_get)
+testDf = get_geno_production_fixed(test_file,data_path,columns_to_get)
 
 #phenotype
 yTest = testDf$PHENOTYPE
 
 #combined main SNPs and epi pairs in which haplotypes are added for snp1 and snp2 of pair
-testDf = create_epi_df(testDf,epi_main_features,combo="product")
+testDf = create_epi_df(testDf,epi_main_features)
 
 
 #merge covariate data to geno data
@@ -1108,10 +1153,10 @@ testDf = merge(testDf,covariate_data, by = "IID", all.x = TRUE)
 #merge HLA data to geno data
 testDf = merge(testDf,hlaData, by = "IID", all.x = TRUE)
 
-# testDf = merge(testDf,envTest, by = "IID", all.x = TRUE)
+testDf = merge(testDf,envTest, by = "IID", all.x = TRUE)
 
 #merge with cardio main features
-# testDf = merge(testDf,main_cardio_df, by= "IID", all.x = TRUE)
+testDf = merge(testDf,main_cardio_df, by= "IID", all.x = TRUE)
 
 
 #####################################################################################
@@ -1211,14 +1256,15 @@ all_features = setdiff(names(trainingDf),'IID')
 # epi_cardio_features = setdiff(names(envTestDf), "IID")
 
 dataset_list = list(
-  list('main',c(main_features,covariate_columns,hla_columns)),
-  list('epi',c(epi_features,covariate_columns,hla_columns)),
-  list('epi+main',c(epi_main_features,covariate_columns,hla_columns)),
-  # list('cardio',c(epi_cardio_features,covariate_columns,hla_columns)),
-  # list('all',c(epi_cardio_features,epi_main_features,hla_columns,covariate_columns)),
-  # list('cardio_main',c(main_cardio_features,covariate_columns)),
-  # list('all+cardio_main',c(epi_cardio_features,epi_main_features,hla_columns,main_cardio_features,covariate_columns)),
-  list('covariate',c(covariate_columns))
+  list('main',c(main_features,covariate_columns)),
+  list('epi',c(epi_features,covariate_columns)),
+  list('epi+main',c(epi_main_features,covariate_columns)),
+  list('cardio',c(epi_cardio_features,covariate_columns)),
+  list('hla',c(covariate_columns,hla_columns)),
+  list('cardio_main',c(main_cardio_features,covariate_columns)),
+  list('covariate',c(covariate_columns)),
+  list('all',c(epi_cardio_features,epi_main_features,hla_columns,covariate_columns)),
+  list('all+cardio_main',c(epi_cardio_features,epi_main_features,hla_columns,main_cardio_features,covariate_columns))
   
 )
 
@@ -1226,163 +1272,271 @@ dataset_list = list(
 #                               ASSIGN PENALTIES                                    #
 #####################################################################################
 
-
-
 ########################. START LOOP THROUGH EACH DATASET. #########################
 
 for (dataset in dataset_list) {
-
+  
   data_type = dataset[[1]]
   cat(paste0('data type being modelled .... ',data_type,'\n'))
   
+  all_columns = dataset[[2]]
   
-  columns_in_model = dataset[[2]]
+  # Ensure the columns exist in your data and exclude IID
+  all_columns = intersect(all_columns, names(testDf))
+  all_columns = setdiff(all_columns, 'IID')
   
-  # Instead, ensure the columns exist in your data and exclude IID
-  columns_in_model = intersect(columns_in_model, names(testDf))
-  columns_in_model = setdiff(columns_in_model, 'IID')
+  # Separate non-covariate features from covariates
+  non_covariate_features = setdiff(all_columns, covariate_columns)
+  available_covariates = intersect(all_columns, covariate_columns)
   
-  cat(paste0('Using ', length(columns_in_model), ' columns for ', data_type, ' model\n'))
+  cat(paste0('Total features for ', data_type, ': ', length(non_covariate_features), 
+             ' + ', length(available_covariates), ' covariates\n'))
   
-  ########## set the penalties ############
-  
-  #Set penalty factor for all columns to 1
-  p.fac <- rep(1, length(columns_in_model))
-  
-  # Update values to 0 for columns in the covariate data
-  p.fac[columns_in_model %in% covariate_columns] <- 0
-  
-  
-  
-  
-  #####################################################################################
-  #                        RUN THE GLM LASSO MODEL                                    #
-  #####################################################################################
-  
-  # Prepare the design matrix (excluding the 'IID' column)
-  Xtraining <- as.matrix(trainingDf[, ..columns_in_model])
-  Xtest <- as.matrix(testDf[,..columns_in_model])
-  
-  if (data_type != "covariate") {
+  # If only covariates, process as before
+  if (length(non_covariate_features) == 0 || data_type == "covariate") {
     
-    cvModel <- cv.glmnet(Xtraining, yTraining, nfolds=5,family = "binomial", penalty.factor = p.fac, parallel = TRUE)
-    coefs <- as.data.frame(as.matrix(coef(cvModel, s = "lambda.min")))
+    columns_in_model = available_covariates
     
-  } else {
+    cat(paste0('Using ', length(columns_in_model), ' covariate columns for ', data_type, ' model\n'))
     
+    ########## set the penalties ############
+    p.fac <- rep(0, length(columns_in_model))  # All covariates get penalty factor 0
+    
+    #####################################################################################
+    #                        RUN THE GLM LASSO MODEL                                    #
+    #####################################################################################
+    
+    # Prepare the design matrix
+    Xtraining <- as.matrix(trainingDf[, ..columns_in_model])
+    Xtest <- as.matrix(testDf[, ..columns_in_model])
+    
+    # Use GLM for covariate-only model
     cvModel <- glm(yTraining ~ ., data = as.data.frame(Xtraining), family = binomial())
     coefs <- as.data.frame(as.matrix(coef(cvModel)))
-  }
-  
-  
-  ############## GET THE COEFS ###############
-  #capture the data into a table to add onto
-  
-  
-  colnames(coefs) <- c("coefs")
-  coefs$model = rep(data_type,length(coefs))
-  coefs$feature = rownames(coefs)
-  rownames(coefs) = NULL
-  
-  # Check if the file exists
-  if (!file.exists(feature_scores_file)) {
     
-    cat('creating feature scores file ....\n')
+    ############## GET THE COEFS ###############
+    colnames(coefs) <- c("coefs")
+    coefs$model = data_type
+    coefs$feature = rownames(coefs)
+    coefs$batch = "_batch_1"
+    rownames(coefs) = NULL
     
-    # If the file doesn't exist, create it with column names
-    write.table(coefs, file = feature_scores_file, row.names = FALSE, sep = ",")
-  } else {
-    # If the file exists, append the new data without column names
-    write.table(coefs, file = feature_scores_file, row.names = FALSE, col.names = FALSE, sep = ",", append = TRUE)
+    # Save coefficients
+    if (!file.exists(feature_scores_file)) {
+      cat('creating feature scores file ....\n')
+      write.table(coefs, file = feature_scores_file, row.names = FALSE, sep = ",")
+    } else {
+      write.table(coefs, file = feature_scores_file, row.names = FALSE, col.names = FALSE, sep = ",", append = TRUE)
+      cat('appending to feature scores file ....\n')
+    }
     
-    cat('appending to feature scores file ....\n')
-  }
-  
-  #############################################################################
-  #                        MAKE PREDICTIONS                                   #
-  #############################################################################
-  
-  if (data_type != "covariate") {
-    
-    yHat = predict(cvModel,Xtest,type='class',s="lambda.min")
-    
-    # Predict probabilities for the training data
-    yProba <- predict(cvModel, newx = Xtest, type = "response",s="lambda.min")
-    
-    
-  } else {
+    #############################################################################
+    #                        MAKE PREDICTIONS                                   #
+    #############################################################################
     
     yProba <- predict(cvModel, newdata = as.data.frame(Xtest), type = "response")
     yHat <- ifelse(yProba > 0.5, 1, 0)
     
-  }
-  
-  yProba_vector = as.numeric(yProba)
-  yProba <- data.frame(yProba_vector)
-  colnames(yProba) = 'yProba'
-  yProba$model = rep(data_type,length(yProba))
-  yProba$IID = testDf$IID
-  
-  #Check if the file exists
-  if (!file.exists(predictions_file)) {
+    yProba_vector = as.numeric(yProba)
+    yProba_df <- data.frame(yProba = yProba_vector)
+    yProba_df$model = data_type
+    yProba_df$batch = "_batch_1"
+    yProba_df$IID = testDf$IID
     
-    cat('creating predictions file .... \n')
+    # Save predictions
+    if (!file.exists(predictions_file)) {
+      cat('creating predictions file .... \n')
+      write.table(yProba_df, file = predictions_file, row.names = FALSE, sep = ",")
+    } else {
+      write.table(yProba_df, file = predictions_file, row.names = FALSE, col.names = FALSE, sep = ",", append = TRUE)
+      cat('appending data to predictions file ... \n')
+    }
     
-    # If the file doesn't exist, create it with column names
-    write.table(yProba, file = predictions_file, row.names = FALSE, sep = ",")
-  } else {
-    # If the file exists, append the new data without column names
-    write.table(yProba, file = predictions_file, row.names = FALSE, col.names = FALSE, sep = ",", append = TRUE)
+    ############################################################################
+    #                               CALCULATE MODEL PERFORMANCE                #
+    ############################################################################
     
-    cat('appending data to predictions file ... \n')
+    # Calculate the AUC
+    roc_curve <- roc(yTest, yProba_vector)
+    auc_value <- auc(roc_curve)
+    test_result <- roc_curve$auc.p.value
+    ci_intervals = ci.auc(roc_curve)
     
-  }
-  
-  
-  ############################################################################
-  #                               CALCULATE MODEL PERFORMANCE                #
-  ############################################################################
-  
-  model_scores = data.table()
-  # Calculate the AUC
-  roc_curve <- roc(yTest, yProba_vector)
-  auc_value <- auc(roc_curve)
-  
-# Perform test directly on ROC curve
-  test_result <- roc_curve$auc.p.value
-  ci_intervals = ci.auc(roc_curve)
-  
-  #calculate nagelkerke r squared
-  n_rsquared = calculate_nagelkerke_rsquared(yTest,yProba_vector)
-  
-  # Convert CI results to a data frame
-  model_scores <- data.frame(
-    auc = c(auc_value[1]),
-    ci_lower = c(ci_intervals[1]),
-    ci_upper = c(ci_intervals[3]),
-    nagelkerke_rsquared = c(n_rsquared),
-    model = c(data_type)
-  )
-  
-  # Check if the file exists
-  #columns : c("auc","ci_lower","ci_upper","nagelkerke_rquared","model")
-  if (!file.exists(model_scores_file)) {
+    # Calculate nagelkerke r squared
+    n_rsquared = calculate_nagelkerke_rsquared(yTest, yProba_vector)
     
-    print('creating model scores file ....')
+    # Convert CI results to a data frame
+    model_scores <- data.frame(
+      auc = c(auc_value[1]),
+      ci_lower = c(ci_intervals[1]),
+      ci_upper = c(ci_intervals[3]),
+      nagelkerke_rsquared = c(n_rsquared),
+      model =  data_type,
+      batch = "_batch_1"
+    )
     
-    # If the file doesn't exist, create it with column names
-    write.table(model_scores, file = model_scores_file, row.names = FALSE, sep = ",")
-    cat('creating model scores file with scored features....\n')
+    # Save model scores
+    if (!file.exists(model_scores_file)) {
+      print('creating model scores file ....')
+      write.table(model_scores, file = model_scores_file, row.names = FALSE, sep = ",")
+      cat('creating model scores file with scored features....\n')
+    } else {
+      write.table(model_scores, file = model_scores_file, row.names = FALSE, col.names = FALSE, sep = ",", append = TRUE)
+      cat('writing to model scores file ......\n')
+    }
     
   } else {
-    # If the file exists, append the new data without column names
-    write.table(model_scores, file = model_scores_file, row.names = FALSE, col.names = FALSE, sep = ",", append = TRUE)
     
-    cat('writing to model scores file ......\n')
-  }
+    # Process features in batches of 1000
+    batch_size = 100
+    n_batches = ceiling(length(non_covariate_features) / batch_size)
+    
+    cat(paste0('Processing ', length(non_covariate_features), ' non-covariate features in ', 
+               n_batches, ' batches of up to ', batch_size, ' features each\n'))
+    
+    for (batch_num in 1:n_batches) {
+      
+      cat("\n", paste(rep("=", 60), collapse = ""), "\n")
+      cat("Starting batch", batch_num, "of", n_batches, "for", data_type, "\n")
+      
+      # Calculate batch indices
+      start_idx = (batch_num - 1) * batch_size + 1
+      end_idx = min(batch_num * batch_size, length(non_covariate_features))
+      batch_features = non_covariate_features[start_idx:end_idx]
+      columns_in_model = c(batch_features, available_covariates)
+      
+      cat("Batch features:", length(batch_features), "+ covariates:", length(available_covariates), 
+          "= total:", length(columns_in_model), "\n")
+      
+      # Set penalty factors
+      p.fac <- rep(1, length(columns_in_model))
+      p.fac[columns_in_model %in% covariate_columns] <- 0
+      
+      # Prepare matrices
+      Xtraining <- as.matrix(trainingDf[, ..columns_in_model])
+      Xtest <- as.matrix(testDf[, ..columns_in_model])
+      
+      # Run with timeout
+      batch_start_time <- Sys.time()
+      
+      glm_result <- run_glmnet_with_timeout(
+        X = Xtraining, 
+        y = yTraining, 
+        timeout_hours = 1,  # Adjust as needed
+        nfolds = 3,
+        penalty.factor = p.fac,
+        parallel = TRUE
+      )
+      
+      # Handle timeout
+      if (glm_result$timed_out) {
+        cat("TIMEOUT: Skipping batch", batch_num, "after 1 hours\n")
+        
+        # Log the timeout
+        timeout_entry <- data.frame(
+          model = paste0(data_type, "_batch_", batch_num),
+          status = "TIMEOUT_1_HOUR",
+          n_features = length(batch_features),
+          timestamp = as.character(Sys.time()),
+          stringsAsFactors = FALSE
+        )
+        
+        timeout_log_file <- paste0(scores_path, '/batch_timeouts.csv')
+        if (!file.exists(timeout_log_file)) {
+          write.csv(timeout_entry, timeout_log_file, row.names = FALSE)
+        } else {
+          write.table(timeout_entry, timeout_log_file, row.names = FALSE, 
+                      col.names = FALSE, sep = ",", append = TRUE)
+        }
+        
+        # Clean up and move to next batch
+        rm(Xtraining, Xtest)
+        gc()
+        next
+      }
+      
+      # Handle other failures
+      if (!glm_result$success) {
+        cat("FAILED: Batch", batch_num, "failed with error:", 
+            ifelse(is.null(glm_result$error), "Unknown error", glm_result$error), "\n")
+        rm(Xtraining, Xtest)
+        gc()
+        next
+      }
+      
+      # Success - continue with normal processing
+      cvModel <- glm_result$model
+      cat("SUCCESS: Batch", batch_num, "completed\n")
+      
+      # Get coefficients
+      coefs <- as.data.frame(as.matrix(coef(cvModel, s = "lambda.min")))
+      colnames(coefs) <- c("coefs")
+      coefs$model = data_type
+      coefs$batch = batch_num
+      coefs$feature = rownames(coefs)
+      rownames(coefs) = NULL
+      
+      # Save coefficients
+      if (!file.exists(feature_scores_file)) {
+        write.table(coefs, file = feature_scores_file, row.names = FALSE, sep = ",")
+      } else {
+        write.table(coefs, file = feature_scores_file, row.names = FALSE, 
+                    col.names = FALSE, sep = ",", append = TRUE)
+      }
+      
+      # Make predictions
+      yProba <- predict(cvModel, newx = Xtest, type = "response", s="lambda.min")
+      yProba_vector = as.numeric(yProba)
+      yProba_df <- data.frame(yProba = yProba_vector)
+      yProba_df$model = data_type
+      yProba_df$batch = batch_num
+      yProba_df$IID = testDf$IID
+      
+      # Save predictions
+      if (!file.exists(predictions_file)) {
+        write.table(yProba_df, file = predictions_file, row.names = FALSE, sep = ",")
+      } else {
+        write.table(yProba_df, file = predictions_file, row.names = FALSE, 
+                    col.names = FALSE, sep = ",", append = TRUE)
+      }
+      
+      # Calculate performance metrics
+      roc_curve <- roc(yTest, yProba_vector)
+      auc_value <- auc(roc_curve)
+      ci_intervals = ci.auc(roc_curve)
+      n_rsquared = calculate_nagelkerke_rsquared(yTest, yProba_vector)
+      
+      model_scores <- data.frame(
+        auc = c(auc_value[1]),
+        ci_lower = c(ci_intervals[1]),
+        ci_upper = c(ci_intervals[3]),
+        nagelkerke_rsquared = c(n_rsquared),
+        model = data_type,
+        batch = batch_num
+      )
+      
+      # Save model scores
+      if (!file.exists(model_scores_file)) {
+        write.table(model_scores, file = model_scores_file, row.names = FALSE, sep = ",")
+      } else {
+        write.table(model_scores, file = model_scores_file, row.names = FALSE, 
+                    col.names = FALSE, sep = ",", append = TRUE)
+      }
+      
+      # Report batch completion
+      batch_end_time <- Sys.time()
+      batch_duration <- round(difftime(batch_end_time, batch_start_time, units = "mins"), 2)
+      cat("Batch", batch_num, "total time:", batch_duration, "minutes\n")
+      
+      # Clean up memory
+      rm(cvModel, coefs, yProba, yProba_df, model_scores, roc_curve, Xtraining, Xtest)
+      gc()
+      
+    } # End batch loop
+    
+    
+  } # End else (non-covariate processing)
   
-}
-
-
+} # End dataset loop
 
   

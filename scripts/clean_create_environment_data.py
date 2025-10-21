@@ -9,6 +9,44 @@ import sys
 from helper.download import get_dataset, get_epi_columns, get_columns
 from helper.data_wrangling import *
 
+def rank_gene_env_features(geneEnvShapleyFile,threshold=2):
+    '''
+    input : df with columns [envGeneticFeature,shap_zscore,env_type,geneticFeature,envFeature,main_E,epistatic]
+    
+    oupt : df with gene_environment_features ranked with Shapley Z scores > 2
+        
+    '''
+    #download data
+    df = pd.read_csv(geneEnvShapleyFile)
+    
+#   if 'Full' in geneEnvShapleyFile:
+#       outputFile = geneEnvShapleyFile.replace('Full','')
+#
+#   else:
+    newFile = geneEnvShapleyFile.split('.')[0]
+    outputFile = f'{newFile}Filtered.csv'
+        
+    #get the largest shap_zscore for duplicated values
+    df.sort_values(['envGeneticFeature','shap_zscore'],ascending=False,inplace=True)
+    
+    #drop duplicates in df
+    df.drop_duplicates(subset=['envGeneticFeature'],keep='first',inplace=True)
+    
+    #get the epistatic interactions
+    epiDf = df[df['epistatic'] == 1]
+    
+    #get the main effects
+    mainDf = df[df['main_E'] == 1]
+    mainDf.loc[mainDf['envFeature'].isna(),'envFeature'] = mainDf['envGeneticFeature']
+    
+    importantFeatures = epiDf[epiDf['shap_zscore'] > threshold]
+    
+    finalFeatures = pd.concat([importantFeatures,mainDf],ignore_index=True)
+    
+    finalFeatures.to_csv(outputFile,index=False)
+    
+    return finalFeatures
+
 def scale_cardio_training_data(df):
     # Initialize the StandardScaler
     scaler = StandardScaler()
@@ -64,7 +102,7 @@ def combine_gene_environment(envGeneticDf,geneticEnvFeatureList):
     return combinedDf
     
 
-def main(phenoPath,withdrawalPath, trainingPath,testPath,holdoutPath,envDf,hlaDf,importantFeaturesFile):
+def main(phenoPath,withdrawalPath, trainingPath,testPath,holdoutPath,envDf,hlaDf,importantFeaturesFile,threshold=2):
     '''
     input:
         string trainingPath = absolute path to gentoyped training set
@@ -80,13 +118,13 @@ def main(phenoPath,withdrawalPath, trainingPath,testPath,holdoutPath,envDf,hlaDf
     ############## DOWNLOAD ENVIRONMENTAL DATA #######################
     
     #check to see if features have been reduced
-    fullFeaturesFile = importantFeaturesFile.split('.')[0]+'Full.csv'
-    if os.path.exists(fullFeaturesFile):
-        print(f'{fullFeaturesFile} exists meaning important GxGxE features have previously been reduced')
-    
-    else:
-        #get ranked GxGxE features
-        features = rank_gene_env_features(importantFeaturesFile,threshold=2)
+#   fullFeaturesFile = importantFeaturesFile.split('.')[0]+'Full.csv'
+#   if os.path.exists(fullFeaturesFile):
+#       print(f'{fullFeaturesFile} exists meaning important GxGxE features have previously been reduced')
+#       features = rank_gene_env_features(fullFeaturesFile,threshold=threshold)
+#   else:
+#       #get ranked GxGxE features
+    features = rank_gene_env_features(importantFeaturesFile,threshold=threshold)
     
     #filter the main E features
     features2 = features[features['main_E'] == 0]
@@ -111,19 +149,19 @@ def main(phenoPath,withdrawalPath, trainingPath,testPath,holdoutPath,envDf,hlaDf
     expandedSnps = get_epi_snps(set(epiGenoFeatures))
     
     trainingDf = get_dataset(trainingPath,withdrawalPath,expandedSnps,use_chunking=True)
-    trainingDf = create_epi_df(trainingDf, epiGenoFeatures,combo="product")
+    trainingDf = create_epi_df(trainingDf, epiGenoFeatures,combo="sum")
     geneEnvTraining = trainingDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvTraining = geneEnvTraining.merge(hlaDf,left_index=True,right_index=True,how='left')
     
     
     testDf = get_dataset(testPath, withdrawalPath, expandedSnps, use_chunking=True)
-    testDf = create_epi_df(testDf, epiGenoFeatures,combo="product")
+    testDf = create_epi_df(testDf, epiGenoFeatures,combo="sum")
     geneEnvTest = testDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvTest = geneEnvTest.merge(hlaDf,left_index=True,right_index=True,how='left')
     
     
     holdoutDf = get_dataset(holdoutPath, withdrawalPath, expandedSnps,use_chunking=True)
-    holdoutDf = create_epi_df(holdoutDf, epiGenoFeatures,combo="product")
+    holdoutDf = create_epi_df(holdoutDf, epiGenoFeatures,combo="sum")
     geneEnvHoldout = holdoutDf.merge(envDf,left_index=True,right_index=True,how='left')
     geneEnvHoldout = geneEnvHoldout.merge(hlaDf,left_index=True,right_index=True,how='left')
     
@@ -167,35 +205,50 @@ if __name__ == '__main__':
     parser.add_argument("--hla_file",help="HLA data for participants")
     parser.add_argument("--gene_env_file",help="Genetic environmental epistatic features")
     parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
+    parser.add_argument("--threshold", type=float, default=2.0, help="shapley z score threshold to use for filter (default: %(default)s)")
     
-    
-    
+
     args = parser.parse_args()
     
-    # Prefer command-line input if provided; fallback to env var
-    training_file = args.training_file or os.environ.get("TRAINING_PATH")
-    print(f"training file : {training_file}")
-    
-    test_file = args.test_file or os.environ.get("TEST_PATH")
-    print(f"test file : {test_file}")
-    
-    holdout_file = args.holdout_file or os.environ.get("HOLDOUT_PATH")
-    print(f"holdout file : {holdout_file}")
-    
-    pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
-    print(f"[PYTHON] Reading from: {pheno_path}")
-    
-    env_file = args.env_file or os.environ.get("ENV_FILE")
-    print(f"reading from participant environment file : {env_file}")
-    
-    hla_file = args.hla_file or os.environ.get("HLA_FILE")
-    print(f"reading from participant hla file : {hla_file}")
-    
-    gene_env_file = args.gene_env_file or os.environ.get("GENE_ENV_FILE")
-    print(f"reading from gene environment epi features file : {gene_env_file}")
-    
-    withdrawal_path = args.withdrawal_path or os.environ.get("WITHDRAWAL_PATH")
-    print(f"reading withdrawals from file : {withdrawal_path}")
+#   # Prefer command-line input if provided; fallback to env var
+#   training_file = args.training_file or os.environ.get("TRAINING_PATH")
+#   print(f"training file : {training_file}")
+#   
+#   test_file = args.test_file or os.environ.get("TEST_PATH")
+#   print(f"test file : {test_file}")
+#   
+#   holdout_file = args.holdout_file or os.environ.get("HOLDOUT_PATH")
+#   print(f"holdout file : {holdout_file}")
+#   
+#   pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
+#   print(f"[PYTHON] Reading from: {pheno_path}")
+#   
+#   env_file = args.env_file or os.environ.get("ENV_FILE")
+#   print(f"reading from participant environment file : {env_file}")
+#   
+#   hla_file = args.hla_file or os.environ.get("HLA_FILE")
+#   print(f"reading from participant hla file : {hla_file}")
+#   
+#   gene_env_file = args.gene_env_file or os.environ.get("GENE_ENV_FILE")
+#   print(f"reading from gene environment epi features file : {gene_env_file}")
+#   
+#   withdrawal_path = args.withdrawal_path or os.environ.get("WITHDRAWAL_PATH")
+#   print(f"reading withdrawals from file : {withdrawal_path}")
+#   
+#   threshold = args.threshold or os.environ.get("THRESHOLD")
+#   print(f"threshold to use for filter : {threshold}")
+#   
+    ###########  TEST VARIABLES ##########
+    pheno = 'myocardialInfarction'
+    pheno_path = f"/Users/kerimulterer/prsInteractive/results/{pheno}"
+    env_file = "/Users/kerimulterer/prsInteractive/results/participant_environment.csv"
+    hla_file = "/Users/kerimulterer/prsInteractive/results/participant_hla.csv"
+    training_file = f"/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw"
+    test_file = f"/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw"
+    holdout_file = f"/Users/kerimulterer/prsInteractive/results/{pheno}/holdoutCombined.raw"
+    gene_env_file=f"/Users/kerimulterer/prsInteractive/results/{pheno}/scores/cardioMetabolicimportantFeaturesPostShap.csv"
+    withdrawal_path = '/Users/kerimulterer/prsInteractive/data/withdrawals.csv'
+    threshold=4
     
     print(f"[PYTHON] Reading training data from: {training_file}")
     print(f"[PYTHON] Reading test data from: {test_file}")
@@ -204,7 +257,8 @@ if __name__ == '__main__':
     print(f"[PYTHON] Reading environmental data from: {env_file}")
     print(f"[PYTHON] Reading HLA data from: {hla_file}")
     print(f"[PYTHON] Reading gene environmental feature data from: {gene_env_file}")
-
+    print(f"Reading threshold for filtering: {threshold}")
+    
     
     #Check if participant_environment.csv exists
     if not os.path.exists(env_file):
@@ -218,15 +272,7 @@ if __name__ == '__main__':
             sys.exit(1)
 
         
-    ###########  TEST VARIABLES ##########
-#   pheno_path = "/Users/kerimulterer/prsInteractive/results/celiacDisease"
-#   env_file = "/Users/kerimulterer/prsInteractive/results/participant_environment.csv"
-#   hla_file = "/Users/kerimulterer/prsInteractive/results/participant_hla.csv"
-#   training_file = "/Users/kerimulterer/prsInteractive/results/celiacDisease/trainingCombined.raw"
-#   test_file = "/Users/kerimulterer/prsInteractive/results/celiacDisease/testCombined.raw"
-#   holdout_file = "/Users/kerimulterer/prsInteractive/results/celiacDisease/holdoutCombined.raw"
-#   gene_env_file="/Users/kerimulterer/prsInteractive/results/celiacDisease/scores/cardioMetabolicimportantFeaturesPostShap.csv"
-#   withdrawal_path = '/Users/kerimulterer/prsInteractive/data/withdrawals.csv'
+
     
     envDf = pd.read_csv(env_file)
     envDf.rename(columns={'Participant ID':'IID'},inplace=True)
@@ -238,7 +284,7 @@ if __name__ == '__main__':
     hlaDf.set_index(['IID'],inplace=True)
     
     
-    main(pheno_path,withdrawal_path, training_file,test_file,holdout_file,envDf,hlaDf,gene_env_file)
+    main(pheno_path,withdrawal_path, training_file,test_file,holdout_file,envDf,hlaDf,gene_env_file,threshold=threshold)
 #   main(args.pheno_path,args.training_file,args.test_file,args.holdout_file,args.env_type,envDf,hlaDf)
         
 

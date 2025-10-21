@@ -41,7 +41,7 @@ def draw_forest_plots(filePath,features,df,figPath):
     mainFeatures = features[features['model'] == 'main']['feature'].tolist()
     epiFeatures = features[features['model'] == 'epi']['feature'].tolist()
     epiMainFeatures = features[features['model'] == 'epi+main']['feature'].tolist()
-    cardioFeatures = features[features['model'] == 'cardio']['feature'].tolist()
+#   cardioFeatures = features[features['model'] == 'cardio']['feature'].tolist()
     
     dfPlot = df[df['model'] == 'shapley_values'][['cohort','feature','feature_importance','support']]
     
@@ -262,23 +262,47 @@ def main(pheno_path):
 #   mainEpiDf = pd.read_csv(f'{prsPath}/epi+main.1539.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
 #   mainEpiDf.rename(columns={'Unnamed: 0':'IID'},inplace=True)
 #   mainEpiDf.set_index('IID',inplace=True)
+    pattern = os.path.join(f'{scores_path}/', "*mixed*")
+    tempFiles = glob.glob(pattern)
+    prsFiles = [f for f in tempFiles if 'holdout' not in tempFiles]
     
-    if pheno == 'type2Diabetes':
-        mainDf = pd.read_csv(f'{prsPath}/main.1078.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
-        epiDf = pd.read_csv(f'{prsPath}/epi.642.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
-        epiMainDf = pd.read_csv(f'{prsPath}/epi+main.1539.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
-        cardioDf = pd.read_csv(f'{prsPath}/cardio.221.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
-        groups = ['main','epi','epi+main','cardio']
-        dfList = [mainDf,epiDf,epiMainDf,cardioDf]
-        use_cols = ['IID','PHENOTYPE','bin_epi','bin_main','bin_cardio','bin_epi+main']
+    use_cols = ['IID','PHENOTYPE']
+    dfList = []
+    groups = []
+    for file in prsFiles:
+        data_type = file.split('.')[0]
+        groups.append(data_type)
+        use_cols.append(f'bin_{data_type}')
+        if data_type == 'main':
+            mainDf = pd.read_csv(file).drop(columns=['PHENOTYPE','prs','scaled_prs'])
+            dfList.append(mainDf)
+        elif data_type == 'epi':
+            epiDf = pd.read_csv(file).drop(columns=['PHENOTYPE','prs','scaled_prs'])
+            dfList.append(epiDf)
+        else:
+            mainEpiDf = pd.read_csv(file).drop(columns=['PHENOTYPE','prs','scaled_prs'])
+            dfList.append(mainEpiDf)
         
-    else:
-        mainDf = pd.read_csv(f'{prsPath}/main.372.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
-        epiDf = pd.read_csv(f'{prsPath}/epi.936.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
-        cardioDf = pd.read_csv(f'{prsPath}/cardio.207.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
-        groups = ['main','epi','cardio']
-        dfList = [mainDf,epiDf,cardioDf]
-        use_cols = ['IID','PHENOTYPE','bin_epi','bin_main','bin_cardio']
+            
+        
+        
+    
+#   if pheno == 'type2Diabetes':
+#       mainDf = pd.read_csv(f'{prsPath}/main.1078.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
+#       epiDf = pd.read_csv(f'{prsPath}/epi.642.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
+#       epiMainDf = pd.read_csv(f'{prsPath}/epi+main.1539.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
+#       cardioDf = pd.read_csv(f'{prsPath}/cardio.221.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
+#       groups = ['main','epi','epi+main','cardio']
+#       dfList = [mainDf,epiDf,epiMainDf,cardioDf]
+#       use_cols = ['IID','PHENOTYPE','bin_epi','bin_main','bin_cardio','bin_epi+main']
+#       
+#   else:
+#       mainDf = pd.read_csv(f'{prsPath}/main.372.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
+#       epiDf = pd.read_csv(f'{prsPath}/epi.936.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
+#       cardioDf = pd.read_csv(f'{prsPath}/cardio.207.mixed.prs.csv').drop(columns=['PHENOTYPE','prs','scaled_prs'])
+#       groups = ['main','epi','cardio']
+#       dfList = [mainDf,epiDf,cardioDf]
+#       use_cols = ['IID','PHENOTYPE','bin_epi','bin_main','bin_cardio']
         
     
     
@@ -295,7 +319,7 @@ def main(pheno_path):
     ################## cohort features  ###################
     
     # features within each cohort
-    featuresDf = pd.read_csv(f'{filePath}/{pheno}/tanigawaSet/featureScores/featureWeights/featureScoresReducedFinalModelFilteredLD.csv')
+    featuresDf = pd.read_csv(f'{scores_path}/featureScoresReducedFinalModel.csv')
     featuresDf = clean_feature_column_before_fixing_rscript(featuresDf)
     featuresDf = featuresDf[(featuresDf['lasso_coefs'] != 0) & (~featuresDf['feature'].isin(['(Intercept)','SEX','age','PC1','PC2','PC3','PC4','PC5','PC6','PC7','PC8','PC9','PC10']))]
     
@@ -304,7 +328,7 @@ def main(pheno_path):
     ################## GROUPED iPRS / PRS DATAFRAME WITH EPI CONTRIBUTION ANNOTATED ################
     
 #   groupedDf = pd.read_csv(f'{prsPath}/combinedPRSGroups.csv',usecols=['IID','use_epi','use_main','use_epiMain','PHENOTYPE'])
-    groupedDf = pd.read_csv(f'{prsPath}/combinedPRSGroupsWithcardio_main.csv',usecols=use_cols)
+    groupedDf = pd.read_csv(f'{prsPath}/combinedPRSGroups.csv',usecols=use_cols)
     groupedDf.set_index('IID',inplace=True)
 
 

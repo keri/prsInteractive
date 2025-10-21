@@ -390,9 +390,10 @@ def create_qq_plot_groups(combinedPRS,figurePath):
 #	correlationCardioMain, p_valueCardioMain = pearsonr(combinedPRS['main'], combinedPRS['epi'])
 
     
-    for use_all in [False,True]:
-
-        cases.loc[cases['bin_cardio'] > 8,'color'] = '#f2de19'
+#   for use_all in [False,True]:
+    for use_all in [False]:
+            
+#       cases.loc[cases['bin_cardio'] > 8,'color'] = '#f2de19'
         cases.loc[cases['bin_epi+main'] > 8 ,'color'] = '#39c700'
         cases.loc[cases['bin_epi'] > 8,'color'] = '#19f0f2'
         cases.loc[cases['bin_main'] > 8,'color'] = '#C90016'

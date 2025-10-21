@@ -155,9 +155,8 @@ def create_saturation_plots(df,featureScores,data_type,figurePath,prsPath):
     featureScoreDict.clear()
     
 
-
-#(pheno,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,scores_path,covar_file,hla_file,feature_file,topN=10000)
-def main(pheno,withdrawalPath,phenoPath,testPathway,holdoutPathway,covarFile,hlaFile,featureFile,topN=10000):
+def main(withdrawal_path,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,topN=10000):
+    #def main(pheno,withdrawalPath,phenoPath,testPathway,holdoutPathway,covarFile,hlaFile,featureFile,topN=10000):
 #   pheno = 'type2Diabetes'
 #   topN=1000
         ##########################################
@@ -165,15 +164,15 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,holdoutPathway,covarFile,hla
         ##########################################
 
     
-    prsPath = f'{phenoPath}/scores'
-    figurePath = f'{phenoPath}/figures'
+    prsPath = f'{pheno_path}/scores'
+    figurePath = f'{pheno_path}/figures'
 
     ##############################################################################
     #                       DOWNLOAD COVARIATE DATA                              #
     ##############################################################################
     
     #download covariate data
-    covDf = download_covar_data(covarFile)
+    covDf = download_covar_data(covar_file)
     covDf.set_index('IID',inplace=True)
     
     #NOT TO INCLUDE IN THE PRS/iPRS CALCULATION
@@ -182,32 +181,34 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,holdoutPathway,covarFile,hla
     ############################  GET FEATURES FROM FINAL MODEL THAT HAVE BEEN PRUNED FOR LD  #################
     
     #for the dataset
-    filteredFeatures = pd.read_csv(featureFile)    
-    
-    filteredFeatures = filteredFeatures[~filteredFeatures['feature'].str.contains('Intercept')]
+    filteredFeatures = pd.read_csv(feature_file)  
+    filteredFeatures.rename(columns={'shap_zscore':'coefs','data_type':'model'},inplace=True)
+        
+#    filteredFeatures = filteredFeatures[~filteredFeatures['feature'].str.contains('Intercept')]
     
 
-    #filter covariate features out of dataset
-    covarCoefs = filteredFeatures[filteredFeatures['model'] == 'covariate']
-    covarFeatures = covarCoefs['feature'].tolist()
-    
-    #get all other models that are not covariate
-    filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'covariate']
-
-    
-    #filters the covar features out of each model type
-    filteredFeatures = filteredFeatures[~filteredFeatures['feature'].isin(covarFeatures)]
+#   #filter covariate features out of dataset
+#   covarCoefs = filteredFeatures[filteredFeatures['model'] == 'covariate']
+#   covarFeatures = covarCoefs['feature'].tolist()
+#   
+#   #get all other models that are not covariate
+#   filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'covariate']
+#
+#   
+#   #filters the covar features out of each model type
+#   filteredFeatures = filteredFeatures[~filteredFeatures['feature'].isin(covarFeatures)]
 
     #get the main e features
-    cardioMainData = filteredFeatures[filteredFeatures['model'] == 'cardio_main']
-    cardioMainPlusAll = filteredFeatures[filteredFeatures['model'] == 'all+cardio_main']
+#   cardioMainData = filteredFeatures[filteredFeatures['model'] == 'cardio_main']
+#    cardioMainPlusAll = filteredFeatures[filteredFeatures['model'] == 'all+cardio_main']
     
     #remove main clinical features from data
-    filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'cardio_main']
-    filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'all+cardio_main']
+#   filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'cardio_main']
+#    filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'all+cardio_main']
+#   filteredFeatures = filteredFeatures[(filteredFeatures['model'] != 'epi') | ((filteredFeatures['model'] == 'epi') & (filteredFeatures['coefs'] > 5))]
 
     #get full columns to use for index of section columns
-    full_columns = get_columns(testPathway)
+    full_columns = get_columns(test_path)
     
 
     ################################################################################
@@ -232,33 +233,33 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,holdoutPathway,covarFile,hla
     #######################################################
     
     #hla data with entire dataset
-    hlaData = download_hla_data(hlaFile)
+    hlaData = download_hla_data(hla_file)
     print('shape of hla data set',hlaData.shape)
     hlaData.set_index('IID',inplace=True)
     #get features for later use
     hlaFeatures = hlaData.columns.tolist()
     
     #cardioEnv data
-#   cardioEnvTest = pd.read_csv(envFileTest)
-#   cardioEnvTest.set_index('IID',inplace=True)
-#   
-#   cardioEnvHoldout = pd.read_csv(envFileHoldout)
-#   cardioEnvHoldout.set_index('IID',inplace=True)
+    cardioEnvTest = pd.read_csv(test_env_file)
+    cardioEnvTest.set_index('IID',inplace=True)
+    
+    cardioEnvHoldout = pd.read_csv(holdout_env_file)
+    cardioEnvHoldout.set_index('IID',inplace=True)
     
     
 
-    for holdout_str in ['','.holdout']:
-#   for holdout_str in ['']:
+#   for holdout_str in ['','.holdout']:
+    for holdout_str in ['']:
             
         if holdout_str == '':
-            data_pathway = testPathway
-#           cardioEnvData = cardioEnvTest
+            data_pathway = test_path
+            cardioEnvData = cardioEnvTest
         else:
-            data_pathway = holdoutPathway
-#           cardioEnvData = cardioEnvHoldout
+            data_pathway = holdout_path
+            cardioEnvData = cardioEnvHoldout
             
         ####################  DOWNLOAD THE DATASET WITH ALL GENO FEATURES ###################
-        mainEpiDf = get_dataset(data_pathway,withdrawalPath,featuresToDownload,use_chunking=True)
+        mainEpiDf = get_dataset(data_pathway,withdrawal_path,featuresToDownload,use_chunking=True)
         
         #get the IIDs for dataset to be used in cardio data and covar PRS
         #get the participants in the mainEpiDf dataset
@@ -272,14 +273,14 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,holdoutPathway,covarFile,hla
         print('final shape of training dataframe for all features after hla merge = ',mainEpiDf.shape)
         
         #create combined feature dataframe  
-        mainEpiDf = create_epi_df(mainEpiDf,geneticFeatures,combo='product')
+        mainEpiDf = create_epi_df(mainEpiDf,geneticFeatures,combo='sum')
         
         #merge back to the PHENOTYPE column
         mainEpiDf = mainEpiDf.merge(phenotype,left_index=True,right_index=True)
         print('shape of main dataset = ',mainEpiDf.shape)
         
-#       mainEpiDf = mainEpiDf.merge(cardioEnvData,left_index=True,right_index=True)
-#       print('shape of main dataset after environment data concatenated = ',mainEpiDf.shape)
+        mainEpiDf = mainEpiDf.merge(cardioEnvData,left_index=True,right_index=True)
+        print('shape of main dataset after environment data concatenated = ',mainEpiDf.shape)
         
         #use this to calculate PRS for covar features
         covarDf = phenotype.merge(covDf,left_index=True,right_index=True,how='left')
@@ -291,8 +292,8 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,holdoutPathway,covarFile,hla
         #           GET COMBINED MAIN AND EPI DATASET      #
         #####################################################
         
-        for model in filteredFeatures['model'].unique():
-#       for model in ['main','epi','epi+main','cardio']:
+#        for model in filteredFeatures['model'].unique():
+        for model in ['main','epi']:
 #       for model in prs_models:
             #get the feature coefs for each model in turn. The covariate features have been filtered out
             prsFeatures = filteredFeatures[filteredFeatures['model'] == model]
@@ -315,13 +316,13 @@ def main(pheno,withdrawalPath,phenoPath,testPathway,holdoutPathway,covarFile,hla
                 
                 
             #if model == 'all' then separate epi,main,epi+main,and cardio
-            if model == 'all':
-                for sub_model in ['epi','main','epi+main','cardio']:
-                    subFeatures = filteredFeatures[filteredFeatures['model'] == sub_model]['feature'].tolist()
-                    sub_data = prsFeatures[prsFeatures['feature'].isin(subFeatures)]
-                    modelN = sub_data.shape[0]
-                    image_str = f'{model}.{modelN}{holdout_str}' 
-                    create_prs_direction(mainEpiDf,sub_data,f'{image_str}.{sub_model}.FromAll',figurePath,prsPath)
+#           if model == 'all':
+#               for sub_model in ['epi','main','cardio','cardio_main']:
+#                   subFeatures = filteredFeatures[filteredFeatures['model'] == sub_model]['feature'].tolist()
+#                   sub_data = prsFeatures[prsFeatures['feature'].isin(subFeatures)]
+#                   modelN = sub_data.shape[0]
+#                   image_str = f'{model}.{modelN}{holdout_str}' 
+#                   create_prs_direction(mainEpiDf,sub_data,f'{image_str}.{sub_model}.FromAll',figurePath,prsPath)
                 
         
         #create PRS for covariate only model
@@ -343,16 +344,15 @@ if __name__ == '__main__':
     parser.add_argument("--holdout_file", help="data file of test data")
     parser.add_argument("--covar_file", help="data file of covar data")
     parser.add_argument("--hla_file", help="data file of hla data")
-#   parser.add_argument("--test_env_gen_file", help="test environmental data to use")
-#   parser.add_argument("--holdout_env_gen_file", help="holdout environmental data to use")
-    parser.add_argument("--pheno", help="Phenotype to analyze")
+    parser.add_argument("--test_env_gen_file", help="test environmental data to use")
+    parser.add_argument("--holdout_env_gen_file", help="holdout environmental data to use")
     parser.add_argument("--feature_scores_file", help="data path to feature scores from association modelling")
     parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
     
     
     args = parser.parse_args()
     
-    # Prefer command-line input if provided; fallback to env var
+#    Prefer command-line input if provided; fallback to env var
     pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
     print(f"[PYTHON] Reading from: {pheno_path}")
     
@@ -374,9 +374,6 @@ if __name__ == '__main__':
     holdout_env_file = args.holdout_env_gen_file or os.environ.get("GENE_ENV_HOLDOUT")
     print(f"environmental holdout data : {holdout_env_file}")
     
-    pheno = args.pheno or os.environ.get("PHENO")
-    print(f"[PYTHON] Phenotype : {pheno}")
-    
     feature_file = args.feature_scores_file or os.environ.get("FEATURE_SCORES_FILE")
     print(f"feature scores file : {feature_file}")
     
@@ -385,7 +382,7 @@ if __name__ == '__main__':
     
 
     
-#   pheno='type2Diabetes'
+#   pheno='myocardialInfarction'
 #   pheno_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}'
 #   test_env_file=f'/Users/kerimulterer/prsInteractive/results/{pheno}/geneEnvironmentTest.csv'
 #   holdout_env_file=f'/Users/kerimulterer/prsInteractive/results/{pheno}/geneEnvironmentHoldout.csv'
@@ -394,7 +391,7 @@ if __name__ == '__main__':
 #   results_path='/Users/kerimulterer/prsInteractive/results'
 #   covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
 #   hla_file='/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-#   feature_file=f'/Users/kerimulterer/prsInteractive/results/{pheno}/scores/importantFeaturesForAssociationAnalysis.csv'
+#   feature_file=f'/Users/kerimulterer/prsInteractive/results/{pheno}/scores/featureScoresFinalShap.csv'
 #   withdrawal_path = f'/Users/kerimulterer/prsInteractive/data/withdrawals.csv'
     
     
@@ -418,9 +415,6 @@ if __name__ == '__main__':
         
     if not holdout_env_file:
         raise ValueError("You must provide a holdout env data file via --holdout_env_file or set the GENE_ENV_HOLDOUT environment variable.")
-
-    if not pheno:
-        raise ValueError("You must provide a phenotype via --pheno or set the PHENO environment variable.")
         
     if not feature_file:
         raise ValueError("You must provide a feature scores file from association modelling --feature_scores_file or set the FEATURE_SCORES_FILE environment variable.")
@@ -428,8 +422,8 @@ if __name__ == '__main__':
     if not withdrawal_path:
         raise ValueError("You must provide a path to withdrawals --withdrawal_path or set the WITHDRAWAL_PATH environment variable.")
             
-        #main(pheno,withdrawal_path,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,topN=10000)
-    main(pheno,withdrawal_path,pheno_path,test_path,holdout_path,covar_file,hla_file,feature_file,topN=10000)
+    main(withdrawal_path,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,topN=10000)
+#   main(pheno,withdrawal_path,pheno_path,test_path,holdout_path,covar_file,hla_file,feature_file,topN=10000)
     
 
     

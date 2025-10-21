@@ -73,9 +73,9 @@ TOTAL_LINES=$(wc -l < "$INPUT_FILE")
 echo "Total features: $TOTAL_LINES"
 
 # Calculate total number of batches (batch size is 3000)
-BATCH_SIZE=1000
+BATCH_SIZE=400
 TOTAL_BATCHES=$(( (TOTAL_LINES + BATCH_SIZE - 1) / BATCH_SIZE ))
-echo "Total number of 3K batches: $TOTAL_BATCHES"
+echo "Total number of $BATCH_SIZE feature batches: $TOTAL_BATCHES"
 
 
 echo "[DEBUG] All required files found. Starting Python script..."

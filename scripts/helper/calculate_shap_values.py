@@ -5,7 +5,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from scipy import stats
 import shap
-#import fasttreeshap
+import fasttreeshap
 shap.initjs()
 
 
@@ -30,7 +30,7 @@ def get_top_shap_features(shap_values,data_type):
     elif data_type == 'topFeatures.HighCases':
         topFeatures = shap_values4[(shap_values4 > 2) | (shap_values4 < -2) ]
     else:#this can be changed for some of the epi features which are much higher than main for some phenotypes
-        topFeatures = shap_values4[shap_values4 > 2 | (shap_values4 < -2)].sort_values(ascending=True)
+        topFeatures = shap_values4[(shap_values4 > 2) | (shap_values4 < -2)].sort_values(ascending=True)
     
     topFeaturesMean = shap_values3.loc[topFeatures.index]
     return(topFeatures,shap_values3,shap_values4)
@@ -83,11 +83,45 @@ def calculate_plot_shap_values(model, X_test, y_test, i, figPath, data_type):
     
     # Get the best XGBoost estimator
     clfXGB = model.best_estimator_
-    features = clfXGB.feature_names_in_
     
+    # Check if the attribute exists before accessing it
+    if hasattr(model, 'feature_names_in_'):
+        feature_names = model.feature_names_in_
+    else:
+        # Fallback: use column names from your DataFrame or create generic names
+        feature_names = X_test.columns.tolist()  # if X_train is a DataFrame
+        # OR create generic names:
+        # feature_names = [f'feature_{i}' for i in range(X_train.shape[1])]
+        
+#   print(f"Feature names: {feature_names[:10]}")
+
     # Use shap with XGBoost model
-    explainer = shap.TreeExplainer(clfXGB)
-    shap_values = explainer.shap_values(X_test)
+
+        #explainer = shap.TreeExplainer(clfXGB)
+    try:
+        explainer = shap.TreeExplainer(
+            clfXGB, 
+            feature_perturbation='interventional',
+            model_output='raw'
+        )
+        shap_values = explainer.shap_values(X_test)
+        print("✓ Standard SHAP with interventional worked")
+    except Exception as e:
+        print(f"✗ Standard SHAP failed: {e}")
+
+    
+        # Option 2: Use Permutation explainer as fallback
+        try:
+            explainer = shap.PermutationExplainer(clfXGB.predict, X_test[:100])
+            shap_values = explainer.shap_values(X_test)
+            print("✓ Permutation explainer worked (slower but reliable)")
+    
+        except Exception as e:
+            print(f"✗ Permutation explainer failed: {e}")
+            return None, None
+
+#   explainer = fasttreeshap.TreeExplainer(clfXGB)
+#   shap_values = explainer.shap_values(X_test)
     
     # Handle multi-class output (shap_values might be a list)
     if isinstance(shap_values, list):
@@ -96,7 +130,7 @@ def calculate_plot_shap_values(model, X_test, y_test, i, figPath, data_type):
     index = X_test.index
     
     # Get the shap values in dataframe form
-    shap_df = pd.DataFrame(data=shap_values, columns=features, index=index)
+    shap_df = pd.DataFrame(data=shap_values, columns=feature_names, index=index)
     
     topFeatures, featureMean, shap_valuesZscores = get_top_shap_features(shap_df, data_type)
     

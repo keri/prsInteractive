@@ -359,40 +359,43 @@ def calculate_odds_ratio_for_prs(df,binned_prs,prscr=False):
         
     return(percentileOR)
 
-def rank_gene_env_features(geneEnvShapleyFile,threshold=2):
-    '''
-    input : df with columns [envGeneticFeature,shap_zscore,env_type,geneticFeature,envFeature,main_E,epistatic]
-    
-    oupt : df with gene_environment_features ranked with Shapley Z scores > 2
-        
-    '''
-    #download data
-    df = pd.read_csv(geneEnvShapleyFile)
-    
-    #get the largest shap_zscore for duplicated values
-    df.sort_values(['envGeneticFeature','shap_zscore'],ascending=False,inplace=True)
-    
-    #drop duplicates in df
-    df.drop_duplicates(subset=['envGeneticFeature'],keep='first',inplace=True)
-    
-    #get the epistatic interactions
-    epiDf = df[df['epistatic'] == 1]
-    
-    #get the main effects
-    mainDf = df[df['main_E'] == 1]
-    mainDf.loc[mainDf['envFeature'].isna(),'envFeature'] = mainDf['envGeneticFeature']
-    
-    importantFeatures = epiDf[epiDf['shap_zscore'] > threshold]
-    
-    finalFeatures = pd.concat([importantFeatures,mainDf],ignore_index=True)
-    
-    newFile = geneEnvShapleyFile.split('.')[0]
-    newFile = f'{newFile}Full.csv'
-    df.to_csv(newFile,index=False)
-    
-    finalFeatures.to_csv(geneEnvShapleyFile,index=False)
-    
-    return finalFeatures
+#def rank_gene_env_features(geneEnvShapleyFile,threshold=2):
+#   '''
+#   input : df with columns [envGeneticFeature,shap_zscore,env_type,geneticFeature,envFeature,main_E,epistatic]
+#   
+#   oupt : df with gene_environment_features ranked with Shapley Z scores > 2
+#       
+#   '''
+#   #download data
+#   df = pd.read_csv(geneEnvShapleyFile)
+#   
+#   if 'Full' in geneEnvShapleyFile:
+#       pass
+#   else:
+#       newFile = geneEnvShapleyFile.split('.')[0]
+#       newFile = f'{newFile}Full.csv'
+#       df.to_csv(newFile,index=False)
+#   
+#   #get the largest shap_zscore for duplicated values
+#   df.sort_values(['envGeneticFeature','shap_zscore'],ascending=False,inplace=True)
+#   
+#   #drop duplicates in df
+#   df.drop_duplicates(subset=['envGeneticFeature'],keep='first',inplace=True)
+#   
+#   #get the epistatic interactions
+#   epiDf = df[df['epistatic'] == 1]
+#   
+#   #get the main effects
+#   mainDf = df[df['main_E'] == 1]
+#   mainDf.loc[mainDf['envFeature'].isna(),'envFeature'] = mainDf['envGeneticFeature']
+#   
+#   importantFeatures = epiDf[epiDf['shap_zscore'] > threshold]
+#   
+#   finalFeatures = pd.concat([importantFeatures,mainDf],ignore_index=True)
+#   
+#   finalFeatures.to_csv(geneEnvShapleyFile,index=False)
+#   
+#   return finalFeatures
 
 
 #   

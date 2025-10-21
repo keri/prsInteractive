@@ -188,7 +188,8 @@ if __name__ == '__main__':
 	args = parser.parse_args()
 	
 	# Prefer command-line input if provided; fallback to env var
-#   pheno_path = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test'
+#	pheno_path = '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
+#	pre_post_association='pre'
 	pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
 	print(f"[PYTHON] Reading from: {pheno_path}")
 	

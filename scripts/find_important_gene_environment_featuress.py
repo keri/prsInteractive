@@ -28,7 +28,7 @@ def rank_gene_env_features(geneEnvShapleyFile,threshold=2):
     mainDf = df[df['main_E'] == 1]
     mainDf.loc[mainDf['envFeature'].isna(),'envFeature'] = mainDf['envGeneticFeature']
     
-    importantFeatures = epiDf[epiDf['shap_zscore'] > 2]
+    importantFeatures = epiDf[epiDf['shap_zscore'] > 3]
     
     finalFeatures = pd.concat([importantFeatures,mainDf],ignore_index=True)
     
@@ -55,7 +55,7 @@ def main(featureFile):
 if __name__ == '__main__':
     
 
-    filePath = '/Users/kerimulterer/prsInteractive/results/myocardialInfarction/scores/cardioMetabolicimportantFeaturesPostShap.temp.csv'
+    filePath = '/Users/kerimulterer/prsInteractive/results/myocardialInfarction/scores/cardioMetabolicimportantFeaturesPostShap.csv'
 
     importantFeatures = rank_gene_env_features(filePath)
         

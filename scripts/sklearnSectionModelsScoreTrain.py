@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import time
 #from sklearn.linear_model import LogisticRegressionCV
-#from sklearn.ensemble import HistGradientBoostingClassifier
+from sklearn.ensemble import HistGradientBoostingClassifier
 import xgboost as xgb
 from sklearn.model_selection import GridSearchCV
 from sklearn.naive_bayes import ComplementNB

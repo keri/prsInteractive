@@ -13,6 +13,7 @@ dependencies:
     - scikit-learn
     - statsmodels
     - shap
+    - openpyxl
     - pip
     # R and R packages
     - r-base=4.3.*

@@ -1,9 +1,11 @@
 #!/bin/bash
 
-pheno=$1
+#pheno=$1
 
-#pheno='type2Diabetes'
+pheno='type2Diabetes'
 
+
+PRE_POST_ASSOCIATION=${PRE_POST_ASSOCIATION:-"pre"}
 
 # Source config with error handling
 if [ ! -f "../env.config" ]; then
@@ -17,6 +19,7 @@ else
 fi
 
 PHENO_PATH="${RESULTS_PATH}/$pheno"
+FEATURE_SCORES_FILE=${FEATURE_SCORES_FILE:-"${PHENO_PATH}/scores/importantFeaturesPostShap.csv"}
 
 #check that a results folder for phenotype exists
 if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
