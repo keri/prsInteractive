@@ -180,8 +180,8 @@ def scale_holdout_data_manually(holdout_df, training_stats):
 def main(phenoPath):
 	
 	#import the prs dataset and process based on which plots creating
-	scoresPath = f'{phenoPath}/scores'
-	figPath = f'{phenoPath}/figures'
+	scoresPath = f'{phenoPath}/scores/summedEpi'
+	figPath = f'{phenoPath}/figures/summedEpi'
 	
 	#'PRScr_geno_with_cardio','PRScr_geno','PRScr_all'
 #	color_dict = {'main':'red','epi':'blue','epi+main':'purple','cardio':'#f5a142','PRScr_geno':'#f73bd7','PRScr_all':'#9c2287','all':'#c4771f'}

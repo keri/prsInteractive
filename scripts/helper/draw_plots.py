@@ -483,8 +483,9 @@ def create_density_plot(df,model_type,figurePath):
         pass
 
 def create_box_plot(prsCopy,model_type,figurePath):
+    print('creating box plots ...')
     try:
-        meanDiff = prsCopy.groupby(['PHENOTYPE']).mean()['scaled_prs'].diff().loc[2]
+        meanDiff = prsCopy.groupby(['PHENOTYPE'])['scaled_prs'].mean().diff().loc[2]
         print(meanDiff)
         ax = prsCopy.boxplot(column='scaled_prs',by='PHENOTYPE',figsize=(10,10))
         ax.plot()
