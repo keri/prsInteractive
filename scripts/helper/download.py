@@ -110,8 +110,8 @@ def get_dataset_optimized(df_pathway, withdrawal_path,columns_to_get, chunk_proc
     actual_columns = [full_columns[i] for i in idxColumns]
     
     # Load withdrawal data
-    machinePath = '/'.join(df_pathway.split('/')[:-3])
-    print('machine path to find withdrawals under: ',machinePath)
+#   machinePath = '/'.join(df_pathway.split('/')[:-3])
+#   print('machine path to find withdrawals under: ',machinePath)
     withdrawal_path = f'{withdrawal_path}'
     
     print(f'Loading withdrawals from: {withdrawal_path}')
@@ -334,7 +334,7 @@ def get_epi_columns(epi_filepath):
 if __name__ == "__main__":
     
     phenoPath = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test'
-    trainingPath = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/trainingCombined.raw'
+    trainingPath = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/summedEpi/trainingCombined.raw'
     withdrawalPath = '/Users/kerimulterer/prsInteractive/testData/withdrawals.csv'
     snpList = get_columns(phenoPath)
 #   columns_to_get = snpList

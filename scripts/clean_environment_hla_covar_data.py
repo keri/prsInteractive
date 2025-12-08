@@ -113,22 +113,22 @@ def main(data_path,results_path):
 
 if __name__ == "__main__":
   parser = argparse.ArgumentParser(description="creating hla and covar data file...")
-  parser.add_argument("--data_folder", help="Path to the input data folder")
+  parser.add_argument("--data_path", help="Path to the input data folder")
   
-  parser.add_argument("--results_folder", help="Path to the results data folder")
+  parser.add_argument("--results_path", help="Path to the results data folder")
 
   
   args = parser.parse_args()
   
   # Prefer command-line input if provided; fallback to env var
-  data_path = args.data_folder or os.environ.get("DATA_PATH")
-  results_path = args.data_folder or os.environ.get("RESULTS_PATH")
+  data_path = args.data_path or os.environ.get("DATA_PATH")
+  results_path = args.results_path or os.environ.get("RESULTS_PATH")
   
 #   data_path = "/Users/kerimulterer/prsInteractive/testData"
 #   results_path = "/Users/kerimulterer/prsInteractive/results"
 
   if not data_path:
-      raise ValueError("You must provide a data path via --data_folder or set the DATA_PATH environment variable.")
+      raise ValueError("You must provide a data path via --data_path or set the DATA_PATH environment variable.")
         
   print(f"[PYTHON] Reading from: {data_path}")
     

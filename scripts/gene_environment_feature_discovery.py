@@ -78,13 +78,12 @@ def score_models(X,y,pheno,env_type,modelFile,i,clfHGB,chunk,chunk_start):
     return(auc)
 
 
-
-def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPath,input_file,chunk_start=0,chunk_stop=1000):
+def main(pheno,withdrawalPath,env_type,phenoData,trainingPath,testPath,resultsPath,input_file,threshold,epi_combo,chunk_start=0,chunk_stop=1000):
     ############################   ENVIRONMENT VARIABLES     ######################
 
-    figPath = f'{phenoPath}/figures'
-    scoresPath = f'{phenoPath}/scores'
-    modelsPath = f'{phenoPath}/models'
+    figPath = f'{phenoData}/figures'
+    scoresPath = f'{phenoData}/scores'
+    modelsPath = f'{phenoData}/models'
     envPath = f'{resultsPath}/participant_environment.csv'
     hlaPath = f'{resultsPath}/participant_hla.csv'
     modelFile = f'{scoresPath}/{env_type}ModelScores.csv'
@@ -142,10 +141,16 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
 
     modelFeatures = modelFeaturesFull.iloc[chunk_start:chunk_stop]
 
-    #for a large number of features, split the job into chunks of 2K
-    n_chunks = modelFeatures.shape[0] // chunk_size
-    print(f'number of chunks to process : {n_chunks}')
+    if modelFeatures.shape[0] <= chunk_size:
+        n_chunks = 1
+    else:
+        #for a large number of features, split the job into chunks of 2K
+        n_chunks = modelFeatures.shape[0] // chunk_size
+        
+        
 
+    print(f'number of chunks to process : {n_chunks}')
+    
         
     for chunk in range(n_chunks):
         print(f'chunk to process : {chunk}')
@@ -160,12 +165,12 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
         trainingData = get_dataset(trainingPath, withdrawalPath,modelFeatures2, use_chunking=True)
         y = trainingData['PHENOTYPE']
         #drops the PHENOTYPE column
-        trainingData = create_epi_df(trainingData,modelFeatures['feature'].tolist()[start:stop],combo="product")
+        trainingData = create_epi_df(trainingData,modelFeatures['feature'].tolist()[start:stop],combo=epi_combo)
         #
         #testData = get_dataset(testPath,modelFeatures2)
         testData = get_dataset(testPath, withdrawalPath,modelFeatures2, use_chunking=True)
         yTest = testData['PHENOTYPE']        
-        testData = create_epi_df(testData,modelFeatures['feature'].tolist()[start:stop],combo="product")
+        testData = create_epi_df(testData,modelFeatures['feature'].tolist()[start:stop],combo=epi_combo)
         
         ##################### merge HLA data ###########################
         
@@ -230,7 +235,7 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
             auc = score_models(testData2, yTest, pheno, env_type, modelFile, feature1, clfHGB,chunk,chunk_start)
             #if auc > .51:
                 #columns = index of features and shap_valueZscores
-            topFeatures,featureZscores = calculate_plot_shap_values(clfHGB,trainingData2,testData2,i,figPath,env_type)
+            topFeatures,featureZscores = calculate_plot_shap_values(clfHGB,trainingData2,testData2,i,figPath,env_type,threshold)
             
             if featureZscores.empty:
                 'There was an issue with calculating feature z scores in calculate_shap_values.py script...'
@@ -301,6 +306,13 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
                 # set epistatic == True for all indices with GxGxE
                 featureZscores.loc[importantCombinedIndices,'epistatic'] = 1
                 
+                # Label if feature1 AND (z-score > threshold OR z-score < -threshold)
+                featureZscores.loc[
+                    (featureZscores['envGeneticFeature'] == feature1) & 
+                    ((featureZscores['shap_zscore'] > threshold) | (featureZscores['shap_zscore'] < -threshold)),
+                    'main_E'
+                ] = 2
+                
             with open(importantFeaturesFile,mode='a',newline='') as f:
                 featureZscores.to_csv(f,index=False,header=False)
                 f.close()
@@ -311,23 +323,25 @@ def main(pheno,withdrawalPath,env_type,phenoPath,trainingPath,testPath,resultsPa
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description="running models for GxGxE features...")
-    parser.add_argument("--pheno_folder", help="Path to the input pheno folder")
+    parser.add_argument("--pheno_data", help="Path to the input pheno data")
     parser.add_argument("--training_file", help="data file of training data")
     parser.add_argument("--test_file", help="data file of test data")
-    parser.add_argument("--env_type", help="data type to analyze")
+    parser.add_argument("--env_type", default='cardioMetabolic', help="data type to analyze")
     parser.add_argument("--pheno", help="Phenotype to analyze")
     parser.add_argument("--results_path", help="data path to results")
-    parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
+    parser.add_argument("--withdrawal_path",help="Genetic data path for withdrawals.csv")
     parser.add_argument("--batch_start", help="index to start processing data")
     parser.add_argument("--batch_stop", help="index to stop processing data")
     parser.add_argument("--input_file", help="feature file to use for GxGxE analysis")
+    parser.add_argument("--threshold",type=float, default=1.99,help="threshold to use for defining main env features and top GxE features")
+    parser.add_argument("--epi_combo",default='sum',help='method to use for combining epi interactions (default: sum)')
     
     
     args = parser.parse_args()
     
     # Prefer command-line input if provided; fallback to env var
-    pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
-    print(f"[PYTHON] Reading from: {pheno_path}")
+    pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
+    print(f"[PYTHON] Reading from: {pheno_data}")
     
     pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
@@ -355,6 +369,13 @@ if __name__ == '__main__':
     
     input_file = args.input_file or os.environ.get("INPUT_FILE")
     print(f"analyzing features from input file : {input_file}")
+        
+    threshold = os.environ.get("THRESHOLD")
+    threshold = float(threshold) if threshold else args.threshold
+    print(f"analyzing top features based on shap z score : {threshold}")
+    
+    epi_combo = args.epi_combo or os.environ.get("EPI_COMBO")
+    print(f"method to use for combining epi interactions : {epi_combo}")
     
 
 #   pheno='type2Diabetes_test'
@@ -366,8 +387,8 @@ if __name__ == '__main__':
     
     
     
-    if not pheno_path:
-        raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
+    if not pheno_data:
+        raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")
         
     if not pheno:
         raise ValueError("You must provide a phenotype via --pheno or set the PHENO environment variable.")
@@ -389,7 +410,15 @@ if __name__ == '__main__':
         
     if not input_file:
         raise ValueError("You must provide a path to features file --input_file or set the INPUT_FILE environment variable")
+        
+    if not epi_combo:
+        raise ValueError("You must provide a epi_combo via --epi_combo or set the EPI_COMBO environment variable.")
     
-    main(pheno,withdrawal_path,env_type,pheno_path,training_path,test_path,results_path,input_file,int(chunk_start),int(chunk_stop))
+    #run in batches if provided
+    if chunk_start:
+        main(pheno,withdrawal_path,env_type,pheno_data,training_path,test_path,results_path,input_file,threshold,epi_combo,int(chunk_start),int(chunk_stop))
+        
+    else: #use default
+        main(pheno,withdrawal_path,env_type,pheno_data,training_path,test_path,results_path,input_file,threshold,epi_combo)
     
     

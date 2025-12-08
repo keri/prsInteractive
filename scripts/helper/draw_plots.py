@@ -5,6 +5,8 @@
 import pandas as pd
 import numpy as np
 import time
+import plotly.graph_objects as go
+import plotly.io as pio
 import matplotlib.pyplot as plt
 from matplotlib_venn import venn3, venn2
 import seaborn as sns
@@ -12,6 +14,224 @@ from sklearn import metrics
 import scipy as sp
 from scipy.stats import pearsonr
 import sys
+
+COHORT_COLORS = {
+    'main': '#E69F00',      # Orange
+    'epi': '#56B4E9',    # Sky blue
+    'epi+main': '#CC79A7',    # Pinkish purple
+    'cardio': '#009E73',   # Bluish green
+    'all': '#F0E442'   # Bluish green
+    
+}
+
+COHORT_MARKERS = {
+    'main': 'o',      # Circle
+    'epi': 's',    # Square
+    'epi+main' : 'p', # Plus
+    'cardio': '^' ,  # Triangle
+    'all': 'x' # X
+}
+
+def create_case_control_histogram(df,pheno_col,continous_col,figPath,figsize=(12,6)):
+    """
+    Plot the distribution of a cases and controls
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame containing prs/bin calculations
+    pheno_col : str
+        Column name of the binarized version of the phenotype
+    continous_col : str
+        column name of the measure to be plotted
+    figsize : tuple
+        Figure size
+        
+    Returns:
+    --------
+    matplotlib.figure.Figure
+        Distribution plot
+    """
+    plt.figure(figsize=figsize)
+    
+    if not set(df[pheno_col].unique()).issubset({0, 1}):
+        df['phenotype'] = df['PHENOTYPE'] - 1
+        pheno_col = 'phenotype'
+    
+    
+    # Split data
+    cases = df[df[pheno_col] == 1]
+    controls = df[df[pheno_col] == 0]
+    
+    # Plot histograms
+    plt.hist(controls, bins=30, alpha=0.6, label='Controls', color='skyblue', edgecolor='black')
+    plt.hist(cases, bins=30, alpha=0.6, label='Cases', color='salmon', edgecolor='black')
+    
+    case_mean = cases[continous_col].mean()
+    # Plot threshold line
+    plt.axvline(x=case_mean, color='black', linestyle='--', linewidth=2)
+    
+    
+    plt.title(f'Distribution of cases/controls across: {continous_col}')
+    plt.xlabel(continous_col)
+    plt.ylabel('Frequency')
+    plt.grid(alpha=0.3)
+    
+    plt.savefig(f'{figPath}/histogramCaseControl.{continous_col}.png')
+    plt.close()
+    
+
+def create_sankey_plot_clinical_data(df,figPath,use_epi_main=False):
+    
+    if use_epi_main:
+        prs_mathods = ['cardio','epi','main','epi+main']
+    else:
+        prs_methods = ['cardio', 'epi', 'main'] 
+    
+    print(f"Total holdout samples: {len(df)}")
+    print(f"Cases in holdout: {df['status'].sum()}")
+    
+    # check which binary columns exist:
+    binary_cols = [col for col in df.columns if col.endswith('_binary')]
+    print(f"\nAvailable binary columns: {binary_cols}")
+    
+    for binar_col in binary_cols:
+        # Filter for cases with low clinical risk (binary = 1)
+        df_filtered = df[(df['PHENOTYPE'] == 1) & (df[clinical_binary_col] == 1)].copy()
+        
+        # Count flows from each PRS method to combined
+        flows = []
+        for method in prs_methods:
+            high_risk_col = f'{method}_high_risk'
+            
+            if high_risk_col not in df_filtered.columns:
+                print(f"Warning: {high_risk_col} not found in data")
+                continue
+            
+            # Count individuals high-risk in this method -> combined high-risk
+            high_to_high = len(df_filtered[(df_filtered[high_risk_col] == 1) & 
+                                            (df_filtered['combined_high_risk'] == 1)])
+                                        
+            # Count individuals high-risk in this method -> combined low-risk
+            high_to_low = len(df_filtered[(df_filtered[high_risk_col] == 1) & 
+                                            (df_filtered['combined_high_risk'] == 0)])
+                                        
+            flows.append({
+                'source': f'{method.upper()} High Risk',
+                'target': 'Combined High Risk',
+                'value': high_to_high,
+                'color': COHORT_COLORS[method]
+            })
+    
+            if high_to_low > 0:
+                flows.append({
+                    'source': f'{method.upper()} High Risk',
+                    'target': 'Combined Low Risk',
+                    'value': high_to_low,
+                    'color': COHORT_COLORS[method]
+                })
+                
+            print(f"{method.upper()}: {df_filtered[high_risk_col].sum()} high-risk individuals")
+            print(f"  -> Combined High: {high_to_high}")
+            print(f"  -> Combined Low: {high_to_low}")
+                
+            print(f"\nCombined high-risk: {df_filtered['combined_high_risk'].sum()}")
+            
+            # Create Sankey diagram
+            # Build unique labels
+            all_labels = []
+            label_dict = {}
+            
+            for flow in flows:
+                if flow['source'] not in label_dict:
+                    label_dict[flow['source']] = len(all_labels)
+                    all_labels.append(flow['source'])
+                if flow['target'] not in label_dict:
+                    label_dict[flow['target']] = len(all_labels)
+                    all_labels.append(flow['target'])
+                    
+            # Build source, target, value, and color lists
+            sources = [label_dict[flow['source']] for flow in flows]
+            targets = [label_dict[flow['target']] for flow in flows]
+            values = [flow['value'] for flow in flows]
+            link_colors = [flow['color'] for flow in flows]
+            
+            # Create node colors
+            node_colors = []
+            for label in all_labels:
+                if 'CARDIO' in label:
+                    node_colors.append(COHORT_COLORS['cardio'])
+                elif 'EPI' in label and 'main' not in label.lower():
+                    node_colors.append(COHORT_COLORS['epi'])
+                elif 'MAIN' in label:
+                    node_colors.append(COHORT_COLORS['main'])
+                elif 'Combined High' in label:
+                    node_colors.append('#D55E00')  # Red-orange for combined high risk
+                elif 'Combined Low' in label:
+                    node_colors.append('#999999')  # Gray for combined low risk
+                else:
+                    node_colors.append('#CCCCCC')
+                    
+            # Create Sankey diagram
+            fig = go.Figure(data=[go.Sankey(
+                node=dict(
+                    pad=15,
+                    thickness=20,
+                    line=dict(color='black', width=0.5),
+                    label=all_labels,
+                    color=node_colors
+                ),
+                link=dict(
+                    source=sources,
+                    target=targets,
+                    value=values,
+                    color=link_colors
+                )
+            )])
+            
+            fig.update_layout(
+                title=dict(
+                    text=f"PRS High-Risk Classification Flow to Combined PRS<br>" + 
+                        f"<sub>Cases with Low Clinical Risk (n={len(df_filtered)})</sub>",
+                    x=0.5,
+                    xanchor='center'
+                ),
+                font=dict(size=12, family='Arial'),
+                width=1000,
+                height=600,
+                margin=dict(l=20, r=20, t=80, b=20)
+            )
+            
+            # Save figure
+            fig.write_html(f'{figPath}/Sankey{binary_col}.PRStoCombinedHighRisk.html')
+            print("\nSankey plot saved as 'sankey_combined_prs_flow.html'")
+            
+            pio.write_image(fig,f'{figPath}/Sankey{binary_col}.PRStoCombinedHighRisk.png')
+            
+            # Also display if in interactive environment
+            fig.show()
+            
+            # Print summary statistics
+            print("\n" + "="*60)
+            print("SUMMARY STATISTICS")
+            print("="*60)
+            
+            for method in prs_methods:
+                high_risk_col = f'{method}_high_risk'
+                if high_risk_col in df_filtered.columns:
+                    n_high = df_filtered[high_risk_col].sum()
+                    overlap_combined = len(df_filtered[(df_filtered[high_risk_col] == 1) & 
+                                                        (df_filtered['combined_high_risk'] == 1)])
+                    if n_high > 0:
+                        overlap_pct = (overlap_combined / n_high) * 100
+                        print(f"{method.upper()}: {overlap_pct:.1f}% of high-risk -> Combined high-risk")
+                        
+            combined_high = df_filtered['combined_high_risk'].sum()
+            print(f"\nTotal combined high-risk: {combined_high} ({combined_high/len(df_filtered)*100:.1f}%)")
+            
+            
+    
+    
 
 def create_venn_diagram(df,figPath,image_str):
     
@@ -393,16 +613,16 @@ def create_qq_plot_groups(combinedPRS,figurePath):
 #   for use_all in [False,True]:
     for use_all in [False]:
             
-#       cases.loc[cases['bin_cardio'] > 8,'color'] = '#f2de19'
-        cases.loc[cases['bin_epi+main'] > 8 ,'color'] = '#39c700'
-        cases.loc[cases['bin_epi'] > 8,'color'] = '#19f0f2'
-        cases.loc[cases['bin_main'] > 8,'color'] = '#C90016'
+        cases.loc[cases['bin_cardio'] > 8,'color'] = COHORT_COLORS['cardio']
+        cases.loc[cases['bin_epi+main'] > 8 ,'color'] = COHORT_COLORS['epi+main']
+        cases.loc[cases['bin_epi'] > 8,'color'] = COHORT_COLORS['epi']
+        cases.loc[cases['bin_main'] > 8,'color'] = COHORT_COLORS['main']
 
         
         
         if use_all:
             str_text = 'combinedPRS.withAll'
-            cases.loc[cases['bin_all'] > 8,'color'] = '#c4771f'
+            cases.loc[cases['bin_all'] > 8,'color'] = COHORT_COLORS['all']
 
         else:
             str_text = 'combinedPRS'
@@ -452,13 +672,13 @@ def create_auc_graph(df,model_type,figurePath):
     plt.close()
 #   return(best_threshold)
 
-def create_density_plot(df,model_type,figurePath):
+def create_density_plot(df,model_type,figurePath,prs_col='scaled_prs'):
 # def create_density_plot(df,model_type,figurePath,threshold):
     try:
-        meanDiff = round(df.groupby(['PHENOTYPE']).mean()['scaled_prs'].diff().loc[2],2)
+        meanDiff = round(df.groupby(['PHENOTYPE']).mean()[prs_col].diff().loc[2],2)
         print('mean diff between cases and controls is : ',meanDiff)
-        meanControl =  df.groupby(['PHENOTYPE']).mean()['scaled_prs'].loc[1]
-        meanCase =  df.groupby(['PHENOTYPE']).mean()['scaled_prs'].loc[2]
+        meanControl =  df.groupby(['PHENOTYPE']).mean()[prs_col].loc[1]
+        meanCase =  df.groupby(['PHENOTYPE']).mean()[prs_col].loc[2]
 
         title = f'Combined PRS for {model_type} - mean diff = {meanDiff}'
         ###split the data into groups based on types
@@ -471,8 +691,8 @@ def create_density_plot(df,model_type,figurePath):
         fig, ax = plt.subplots(figsize=(10,10))
     
         #
-        ax = sns.kdeplot(data=yes['scaled_prs'], label='cases', ax=ax,color='red',shade=True)
-        ax = sns.kdeplot(data=no['scaled_prs'], label='controls', ax=ax,color='blue',shade=True)
+        ax = sns.kdeplot(data=yes[prs_col], label='cases', ax=ax,color='red',shade=True)
+        ax = sns.kdeplot(data=no[prs_col], label='controls', ax=ax,color='blue',shade=True)
     
         ax.legend(['cases','controls'])
     
@@ -481,6 +701,8 @@ def create_density_plot(df,model_type,figurePath):
         plt.close()
     except KeyError:
         pass
+        
+
 
 def create_box_plot(prsCopy,model_type,figurePath):
     print('creating box plots ...')
@@ -756,53 +978,8 @@ def create_optimized_prevalence_plot(df,figurePath,image_str):
     ax.set_yticks(yticks,labels=ylabels)
     
     plt.savefig(f'{figurePath}/prevalenceAcrossModels{image_str}.scatter.png')
-    
-
 
     
-    
-
-    
-def plot_important_features_modelling(pheno):
-    filePath = f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/reducedSHAP'
-
-    # get the prevalence plot for quintiles and cardio metabolic features
-    df = pd.read_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/reducedSHAP/holdout/CohortAssignedCosine.cardioOnlyQuintiles.prevalenceCombinedPRSGroupsWithcardio_main.holdout.csv')
-    figurePath = f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/figures/validation/sectionModels/paperFigures/filteredMainAllEpi/forestPlots'
-    df = pd.read_csv(f'{filePath}/featureImportance/groupedCohortFeatureImportanceAcrossMethods.csv')
-    
-    #get the features that have at least one cohort with low pvalue and support == True
-    importantFeaturesDf = df[(df['model'] == 'one_way_anova') & (df['fdr_bh_rejected'] == True) & (df['support'] == True)]
-    importantFeatures = importantFeaturesDf['feature'].tolist()
-    importantFeatures = list(set(importantFeatures))
-    
-    dfPlot = df[df['feature'].isin(importantFeatures)]
-    
-    dfPlot = dfPlot[dfPlot['model'] == 'shapley_values'][['cohort','feature','feature_importance']]
-    
-    #cohort with the highest shap value then filter the features that don't work for that cohort
-    #i.e. epi interactions in main cohort
-    importantCohorts = dfPlot.pivot(index='feature', columns='cohort', values='feature_importance').reset_index()
-    
-    importantCohorts['cohort'] = importantCohorts[['main','epi','epiMain']].idxmax(axis=1)
-    
-    filteredFeaturesDf = importantCohorts[(importantCohorts['cohort'] == 'epiMain') | ((importantCohorts['cohort'] == 'main') & (~importantCohorts['feature'].str.contains(','))) | ((importantCohorts['cohort'] == 'epi') & (importantCohorts['feature'].str.contains(',')))]
-
-    
-    filteredFeatures = filteredFeaturesDf['feature'].tolist()
-    
-    dfPlot = dfPlot[dfPlot['feature'].isin(filteredFeatures)]
-    finalFeatures = dfPlot.merge(importantCohorts[['feature','cohort']],on=['feature','cohort'],how='right')
-    finalFeatures.dropna(inplace=True)
-    finalFeatures2 = finalFeatures[['feature','cohort','feature_importance']].merge(df[df['model'] == 'shapley_values'],on=['feature','cohort','feature_importance'],how='inner')
-
-    finalFeatures2.to_csv(f'{filePath}/featureImportance/groupedCohortFeatureImportanceAcrossMethods.Filtered.csv',index=False)
-    create_important_feature_forest_plot(dfPlot,filteredFeaturesDf,figurePath)
-    
-    
-
-    def main(pheno):
-        pass
     
     
 if __name__ == '__main__':

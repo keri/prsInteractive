@@ -10,6 +10,23 @@ import glob
 import os
 import argparse
 
+COHORT_COLORS = {
+	'main': '#E69F00',      # Orange
+	'epi': '#56B4E9',    # Sky blue
+	'epi+main': '#CC79A7',    # Pinkish purple
+	'cardio': '#009E73',   # Bluish green
+	'all': '#F0E442'   # Bluish green
+	
+}
+
+COHORT_MARKERS = {
+	'main': 'o',      # Circle
+	'epi': 's',    # Square
+	'epi+main' : 'p', # Plus
+	'cardio': '^' ,  # Triangle
+	'all': 'x' # X
+}
+
 def combine_prs_files(allFiles):
 	'''
 	combined prs from all datatypes into one dataframe
@@ -151,11 +168,11 @@ def scale_holdout_data_manually(holdout_df, training_stats):
 	for base_col in base_prs_columns:
 		scaled_col = f'scaled_{base_col}'
 		
-		if base_col in holdout_df.columns and scaled_col in training_stats:
+		if base_col in holdout_df.columns and base_col in training_stats:
 			
 			# Get training statistics
-			train_mean = training_stats[scaled_col]['mean']
-			train_std = training_stats[scaled_col]['std']
+			train_mean = training_stats[base_col]['mean']
+			train_std = training_stats[base_col]['std']
 			
 			# Manual scaling: (x - mean) / std
 			holdout_scaled[scaled_col] = (holdout_df[base_col] - train_mean) / train_std
@@ -180,13 +197,13 @@ def scale_holdout_data_manually(holdout_df, training_stats):
 def main(phenoPath):
 	
 	#import the prs dataset and process based on which plots creating
-	scoresPath = f'{phenoPath}/scores/summedEpi'
-	figPath = f'{phenoPath}/figures/summedEpi'
+	scoresPath = f'{phenoPath}/scores'
+	figPath = f'{phenoPath}/figures'
 	
 	#'PRScr_geno_with_cardio','PRScr_geno','PRScr_all'
 #	color_dict = {'main':'red','epi':'blue','epi+main':'purple','cardio':'#f5a142','PRScr_geno':'#f73bd7','PRScr_all':'#9c2287','all':'#c4771f'}
-	color_dict = {'main':'red','epi':'blue','epi+main':'purple','cardio':'#f5a142','all':'#c4771f'}
-	marker_dict = {'main':'D','epi':'o','epi+main':'X','cardio':'v','PRScr_geno':'8','PRScr_all':'8','all':'v'}
+#	color_dict = {'main':'red','epi':'blue','epi+main':'purple','cardio':'#f5a142','all':'#c4771f'}
+#	marker_dict = {'main':'D','epi':'o','epi+main':'X','cardio':'v','PRScr_geno':'8','PRScr_all':'8','all':'v'}
 	
 		
 		#instantiate files to download
@@ -199,9 +216,13 @@ def main(phenoPath):
 	#remove the separate features from all model
 	allFilesTemp = [f for f in allFilesTemp if 'FromAll' not in f]
 	
+	allFilesTemp = [f for f in allFilesTemp if 'prscr_mix' not in f]
+	
+	
 
+#	for holdout in [False,True]:
 	for holdout in [False,True]:
-
+			
 		if holdout:
 			combinedPRSBinned = pd.DataFrame()
 			outputPRSFile = f'{scoresPath}/combinedPRSGroups.holdout.csv'
@@ -229,6 +250,8 @@ def main(phenoPath):
 		else:
 			#get the columns to scale
 			columns_to_scale = [col for col in combinedDf.columns if 'prs' in col]
+			columns_to_scale = [col for col in columns_to_scale if 'scaled_' not in col]
+			
 			scaled_df = scale_data(combinedDf[columns_to_scale])
 			scaled_df.columns = [f'scaled_{col}' for col in columns_to_scale]
 			combinedDf = combinedDf.merge(scaled_df,left_index=True,right_index=True,how='left')
@@ -236,8 +259,8 @@ def main(phenoPath):
 			#bin the validation set
 			for prs in prsList:
 				prevalence, dfBinned = bin_prs(combinedDf,f'scaled_prs_{prs}',prs)
-				prevalence['marker'] = marker_dict[prs]
-				prevalence['color'] = color_dict[prs]
+				prevalence['marker'] = COHORT_MARKERS[prs]
+				prevalence['color'] = COHORT_COLORS[prs]
 				prevalence['model'] = prs
 				combinedDf = combinedDf.merge(dfBinned,left_index=True,right_index=True,how='left')
 				prevalenceDf = pd.concat([prevalence,prevalenceDf],ignore_index=True)
@@ -264,19 +287,20 @@ def main(phenoPath):
 if __name__ == '__main__':
 	
 	parser = argparse.ArgumentParser(description="Combining PRS calculations ....")
-	parser.add_argument("--pheno_path",help="path to pheno directory")
+	parser.add_argument("--pheno_data",help="path to pheno results directory")
 	
 	
 	args = parser.parse_args()
 	
-	# Prefer command-line input if provided; fallback to env var
-	pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
-	print(f"[PYTHON] Reading from: {pheno_path}")
+	pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
+	print(f"[PYTHON] Reading from: {pheno_data}")
 
-#	pheno = 'celiacDisease'
-#	pheno_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}'
-	if not pheno_path:
-		raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
-	main(pheno_path)
+	pheno = 'type2Diabetes'
+	pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi'
+		
+	if not pheno_data:
+		raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")
+		
+	main(pheno_data)
 
 	

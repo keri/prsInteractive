@@ -33,6 +33,7 @@ export TEST_PATH=$TEST_PATH
 export TRAINING_ENV_GEN_FILE=$GENE_ENV_TRAINING
 export TEST_ENV_GEN_FILE=$GENE_ENV_TEST
 
+
 ### CHECK TO SEE IF LD HAS BEEN DONE
 
 if [ ! -f "$PHENO_PATH/scores/importantFeaturesForAssociationAnalysis.csv" ]; then
@@ -133,7 +134,8 @@ Rscript "$SCRIPTS_DIR/glmFinalModellingBatches.R" \
 --test_file "$TEST_PATH" \
 --training_env_gen_file "$GENE_ENV_TRAINING" \
 --test_env_gen_file "$GENE_ENV_TEST" \
---feature_model_file "$FEATURES_FOR_MODEL_FILE"
+--feature_model_file "$FEATURES_FOR_MODEL_FILE" \
+--epi_combo "$EPI_COMBO"
 
 R_EXIT_CODE=$?
 

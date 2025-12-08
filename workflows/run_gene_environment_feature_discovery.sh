@@ -4,6 +4,8 @@
 
 pheno=$1
 env_type=$2
+threshold=${3:-2}
+EPI_COMBO=${4:-"sum"}
 
 # Source config with error handling
 if [ ! -f "../env.config" ]; then
@@ -16,25 +18,28 @@ else
     source ../env.config
 fi
 
+
+if [ "${EPI_COMBO}" == "sum" ]; then
+    COMBO_FOLDER='summedEpi'
+else
+    COMBO_FOLDER='productEpi'
+fi
+
+PHENO_DATA="${RESULTS_PATH}/$pheno/${COMBO_FOLDER}"
+
+
 #check that a results folder for phenotype exists
-if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
-    echo "Folder '${RESULTS_PATH}/$pheno' does not exist..."
+if [ ! -d "${PHENO_DATA}" ]; then
+    echo "Folder '${PHENO_DATA}' does not exist..."
     echo "run envSetUp.sh <pheno> <icd10> <phenoStr> <n cores to use in epistatic interaction analysis>"
     exit 1
     
 else
     echo "sourcing $pheno env variables."
     #source pheno specific environment variables
-    source "${RESULTS_PATH}/$PHENO/pheno.config"
+    source "${PHENO_DATA}/pheno.config"
 fi
 
-
-
-# Check if RESULTS_PATH was set from env.config
-if [ -z "$RESULTS_PATH" ]; then
-    echo "ERROR: RESULTS_PATH not set from env.config"
-    exit 1
-fi
 
 echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 
@@ -44,6 +49,7 @@ echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 
 echo "[WORKFLOW] ENV_TYPE is set to: $env_type"
 export PHENO_PATH="$RESULTS_PATH/$pheno"
+export PHENO_DATA=$PHENO_DATA
 export TRAINING_PATH=$TRAINING_PATH
 export TEST_PATH=$TEST_PATH
 export ENV_TYPE=$env_type
@@ -53,7 +59,7 @@ export RESULTS_PATH=$RESULTS_PATH
 
 echo "[DEBUG] ===== ENVIRONMENT VARIABLES ====="
 echo "PHENOTYPE BEING ANALYZED: $PHENO"
-echo "PHENO_PATH: $PHENO_PATH"
+echo "PHENO_DATA: $PHENO_DATA"
 echo "SCRIPTS_DIR: $SCRIPTS_DIR"
 echo "TRAINING_PATH: $TRAINING_PATH"
 echo "TEST_PATH: $TEST_PATH"
@@ -68,7 +74,7 @@ echo "[DEBUG] Checking required files..."
 required_files=(
     "$TRAINING_PATH"
     "$TEST_PATH"
-    "$PHENO_PATH/scores/importantFeaturesPostShap.csv"
+    "$PHENO_DATA/scores/importantFeaturesPostShap.csv"
     "${SCRIPTS_DIR}/gene_environment_feature_discovery.py"
 )
 
@@ -83,6 +89,9 @@ done
 
 echo "[DEBUG] All required files found. Starting Python script..."
 
+export INPUT_FILE="$PHENO_DATA/scores/importantFeaturesPostShap.csv"
+export THRESHOLD=$threshold
+eport EPI_COMBO
 # Run the Python script
 python "${SCRIPTS_DIR}/gene_environment_feature_discovery.py"
 
@@ -95,8 +104,6 @@ if [ $exit_code -ne 0 ]; then
 fi
 
 echo "[DEBUG] Script completed successfully"
-
-
 
 
 

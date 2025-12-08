@@ -8,10 +8,11 @@ phenoStr=$3
 n=$4 
 EPI_COMBO=${5:-"sum"}
 
+
 set -e
 
 # Generate a fixed configuration
-PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 # Export environment variable for Docker mounting
 export PRS_INTERACTIVE_HOME="$PROJECT_ROOT"
@@ -68,6 +69,8 @@ else
     echo "[SETUP] Or use system/module-provided tools as needed"
 fi
 
+
+
 # Create a .env file for future reference
 cat > "$PROJECT_ROOT/env.config" << EOF
 # prsInteractive Pipeline Environment
@@ -88,8 +91,8 @@ chmod 644 "$PROJECT_ROOT/env.config"
 source "$PROJECT_ROOT/env.config"
 
 
-# Create folders to store results based on how epi is combined
-# Set PHENO_PATH based on EPI_COMBO value
+#### CREATE PHENO VARIABLES  ################
+
 # Create folders to store results based on how epi is combined
 # Set PHENO_PATH based on EPI_COMBO value
 if [ "${EPI_COMBO}" == "sum" ]; then
@@ -97,8 +100,8 @@ if [ "${EPI_COMBO}" == "sum" ]; then
 else
     COMBO_FOLDER='productEpi'
 fi
-
 PHENO_DATA="${RESULTS_PATH}/$pheno/${COMBO_FOLDER}"
+echo "[SETUP] Creating directory structure..."
 
 mkdir -p "$PROJECT_ROOT/results/$pheno"
 mkdir -p "$PHENO_DATA"
@@ -110,18 +113,28 @@ mkdir -p "$PHENO_DATA/figures"
 mkdir -p "$PROJECT_ROOT/results/$pheno/epiFiles"
 mkdir -p "$PROJECT_ROOT/results/$pheno/epiFiles/preSummaryFiles"
 
+# Create necessary pheno specific directories
+echo "[SETUP] Creating directory structure..."
+
+mkdir -p "$PROJECT_ROOT/testData"
+mkdir -p "$PROJECT_ROOT/testData/variant_calls"
+mkdir -p "$PROJECT_ROOT/results/ParticipantTestData"
+
+#provide permissions for folder
+chmod +x "$PROJECT_ROOT/testData/"
+chmod +x "$PROJECT_ROOT/testData/variant_calls/"
 chmod +x "$PHENO_DATA/scores/"
 chmod +x "$PHENO_DATA/models/"
 chmod +x "$PHENO_DATA/figures/"
 chmod +x "$PROJECT_ROOT/results/$pheno/epiFiles/"
 chmod +x "$PROJECT_ROOT/results/$pheno/epiFiles/preSummaryFiles/"
-chmod +x "$PROJECT_ROOT/results/"
-
+chmod +x "$PROJECT_ROOT/results/ParticipantTestData/"
 
 # Create a .env file for future reference
 cat > "$PHENO_DATA/pheno.config" << EOF
 # prsInteractive Pipeline Environment for $pheno
-PHENO_PATH=$PROJECT_ROOT/results/$pheno
+PHENO_PATH="$PROJECT_ROOT/results/$pheno"
+RESULTS_PATH="$PROJECT_ROOT/results/ParticipantTestData"
 PHENO_DATA=$PHENO_DATA
 PHENO=$pheno
 PHENO_STR="${phenoStr}"
@@ -129,48 +142,93 @@ ICD10=$icd10
 N_CORES=$n
 EPI_PATH=$PROJECT_ROOT/results/$pheno/epiFiles
 PLATFORM=$platform
+WITHDRAWAL_PATH="$PROJECT_ROOT/testData/withdrawals.csv"
+DATA_PATH="$PROJECT_ROOT/testData"
 EOF
 
 chmod 644 "$PHENO_DATA/pheno.config"
+
+source "$PHENO_DATA/pheno.config"
 
 echo "[WORKFLOW] DATA_PATH is set to: $DATA_PATH"
 echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 echo "[WORKFLOW] Scripts directory: $SCRIPTS_DIR"
 echo "[WORKFLOW] PLATFORM: $platform"
 echo "[WORKFLOW] CONDA ENV created: $ENV_NAME"
-echo "[WORKFLOW] EPI_COMBINE created: $EPI_COMBO"
-
 if [ "$platform" != "hpc" ]; then
     echo "[WORKFLOW] CONDA ENV activated: $ENV_NAME"
 else
     echo "[WORKFLOW] Running on HPC - conda env created but not activated"
 fi
-echo "[WORKFLOW] HPC_DIR IS SET TO: $PROJECT_ROOT/hpc"
-echo "[WORKFLOW] PHENOTYPE PATH is set to: $PROJECT_ROOT/results/$pheno"
+echo "[WORKFLOW] HPC_DIR IS SET TO: $HPC_DIR"
+echo "[WORKFLOW] PHENOTYPE PATH is set to: $PHENO_PATH"
 echo "[PHENO] PHENO is set to: $pheno"
 echo "[WORKFLOW] OUTPUT SCORES directory: $PHENO_DATA/scores"
 echo "[WORKFLOW] OUTPUT MODELS directory: $PHENO_DATA/models"
-echo "[WORKFLOW] OUTPUT EPI RESULTS directory: $PROJECT_ROOT/results/$pheno/epiFiles"
+echo "[WORKFLOW] OUTPUT EPI RESULTS directory: $PHENO_PATH/epiFiles"
 echo "[WORKFLOW] OUTPUT PHENO FIGURES directory: $PHENO_DATA/figures"
 
-#DATA_PATH="$PROJECT_ROOT/data"
+
 # Make sure data directory exists
 if [ ! -d "$DATA_PATH" ]; then
     echo "WARNING: Data directory $DATA_PATH does not exist!"
-    echo "Please create it and place your data files there: participant.csv participant_environment.csv covar.csv ukb_hla_v2.txt hla_participant.csv withdrawals.csv"
 fi
 
-# Check for required data files
+
+#############################  CREATE TEST DATA ######################################
+
+export DATA_PATH
+export SCRIPTS_DIR
+#create genotype data in .bed format
+bash "$SCRIPTS_DIR/test/create_simulation_genotype_data.sh"
+
+
+# create phenotype data and train test split IDs
+python "$SCRIPTS_DIR/test/create_simulated_participant_covariate_data.py"
+
+
+
+export PHENO=$pheno 
+export PHENO_PATH
+export PHENO_STR
+export icd10
+# create phenotype data and train test split IDs
+python "$SCRIPTS_DIR/create_pheno_train_test_split.py"
+
+export RESULTS_PATH
+# create hla (and environmental data files?)
+python "$SCRIPTS_DIR/clean_environment_hla_covar_data.py"
+
+# Add entries
+{
+    echo "HLA_FILE=$RESULTS_PATH/participant_hla.csv"
+    echo "COVAR_FILE=$RESULTS_PATH/covar.csv" 
+    echo "ENV_FILE=$RESULTS_PATH/participant_environment.csv"
+} >> "$PHENO_DATA/pheno.config"
+
+# Simple verification
+echo "Config file updated. Contents:"
+cat "$PHENO_DATA/pheno.config"
+
+
+# Check for required cleaned data files
 echo "Checking for required data files..."
-for file in "participant.csv" "participant_environment.csv" "ukb_hla_v2.txt" "hla_participant.csv" "withdrawals.csv"; do
-    if [ ! -f "$DATA_PATH/$file" ]; then
-        echo "WARNING: Required file $PROJECT_ROOT/data/$file not found!"
+for file in  "participant_environment.csv" "covar.csv" "participant_hla.csv"; do
+    if [ ! -f "$RESULTS_PATH/$file" ]; then
+        echo "WARNING: Required file $RESULTS_PATH/$file not found!"
     else
         echo "✓ Found: $file"
     fi
 done
 
+
+# Run the variant call cleaning
+# test script to handle special SNPs in chr 6
+bash "$SCRIPTS_DIR/test/plink_clean_variant_calls_test.sh"
+
 echo "[SETUP] Environment setup complete!"
+echo "[SETUP] Test data created!"
+
 echo ""
 if [ "$platform" != "hpc" ]; then
     echo "To run workflow steps, use:"

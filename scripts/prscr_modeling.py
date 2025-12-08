@@ -5,6 +5,7 @@
 
 import pandas as pd
 import numpy as np
+import argparse
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
@@ -17,10 +18,6 @@ from multiprocessing import Pool
 from scipy.stats import norm
 from helper.data_wrangling import *
 from helper.calculate_prs import *
-
-
-
-
 import warnings
 
 def bootstrap_lasso(X, y, model):
@@ -106,7 +103,7 @@ def lasso_p_values_parallel(X, y, fitted_model, n_bootstrap=1000, n_jobs=18):
 def train_model(X_train,y_train,X_test,y_test):
     
     ############  train models #########
-    parameters_lasso = [{'penalty':[None],'max_iter':[2000],'C':[.01,.1,.5,.6,1]}]
+    parameters_lasso = [{'max_iter':[500,1000,2000]}]
     clfLasso = LogisticRegression(fit_intercept=False,random_state=24,solver='lbfgs')
     grid_search_lasso = GridSearchCV(estimator=clfLasso,param_grid=parameters_lasso,scoring='roc_auc',cv=5,n_jobs=18)
     grid_search_lasso.fit(X_train,y_train)
@@ -133,25 +130,36 @@ def train_model(X_train,y_train,X_test,y_test):
     
     return(coefs,p_values,se,lower_bound,upper_bound,fields)
 
-def calculate_prscr_mix(df,holdoutDf,figPath,scoresPath):
+def calculate_prscr_mix(df,holdoutDf,figPath,scoresPath,use_epi_main=False,use_all=False):
     
     '''run mixed prs model using scaled prs from validation set. Use beta coefficients from models to calculate prscr mix in holdout set
-    input: validation dataframe columns : [IID,PHENOTYPE,scaled_prs_main,scaled_prs_epi,scaled_prs_cardio]
+    input: validation dataframe columns : [IID,PHENOTYPE,scaled_prs_main,scaled_prs_epi,scaled_prs_cardio,PC1,..PC10,SEX,age]
            
-            holdout dataframe : columns = [IID,PHENOTYPE] + [scaled_prs calculated using validation set parameters]
+            holdout dataframe : columns = [IID,PHENOTYPE] + [scaled_prs from validation columns, PC1, .. PC10, SEX, age]
 
-    output : dataframe : [IID,PHENOTYPE,PRScr_mix,prs_PRScr_mix,scaled_prs_PRScr_mix, bin_PRScr_mix,decile_bin_PRScr_mix]
+    output : dataframe : [PRScr_mix,prs_PRScr_mix,scaled_prs_PRScr_mix, bin_PRScr_mix,decile_bin_PRScr_mix]
+                         index = IID
     
     '''
     dfCopy = df.copy()
     holdoutDfCopy = holdoutDf.copy()
     
     prs_cols = [col for col in dfCopy.columns if 'scaled_prs' in col]
-
+    
+    if not use_all:
+        #remove the separate features from all model
+        prs_cols = [col for col in prs_cols if 'all' not in col]
         
+    if not use_epi_main:
+        allFilesTemp = [f for f in prs_cols if 'epi+main' not in f]
+    
+  
     validation_prs_to_model = dfCopy[prs_cols]
-            
-        
+    validation_prs_to_model = dfCopy.drop(columns=['PHENOTYPE'])
+    
+    print('prs columns to model : {prs_cols}')
+    
+    
     # Split the data into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(validation_prs_to_model, dfCopy[['PHENOTYPE']], test_size=0.3, random_state=42)
     
@@ -179,48 +187,46 @@ def calculate_prscr_mix(df,holdoutDf,figPath,scoresPath):
     coefs_temp.to_csv(f'{scoresPath}/prscr_mix_scores.csv',index=False)
     ###################  calculate PRScr  ###################
 
-
+#   coefs_temp = pd.read_csv(f'{scoresPath}/prscr_mix_scores.csv')
     
     
-    #convert set index 
-    betas = coefs.set_index('prs_cohort')
+    
+    #get the multipliers for the scaled_prs
     # Ensure the column names match the index in betas for alignment
+    betas = coefs_temp[coefs_temp['prs_cohort'].str.contains('scaled_prs')]
+    betas.set_index('prs_cohort',inplace=True)
     beta_multiplier = betas['beta']
     
     # Multiply each column in df_values by the corresponding multiplier
     prscr_holdout_df = holdoutDfCopy[prs_cols].multiply(beta_multiplier, axis=1)
     
 
-    #prscr_holdout_df.index = holdout_df.index
-#   prscr_holdout_df.columns = prscr_holdout_df.columns
-#   prscr_holdout_df = prscr_holdout_df.astype(float)
-    holdoutDfCopy['prs_PRScr_mix'] = prscr_holdout_df.sum(axis=1)
+    holdoutDfCopy['prs_cr_mix'] = prscr_holdout_df.sum(axis=1)
     
     #scaled PRS calculations
-    scaled_prscr_mix = scale_data(holdoutDfCopy[['prs_PRScr_mix']])
-    scaled_prscr_mix.columns = ['scaled_prs_PRScr_mix']
+    scaled_prscr_mix = scale_data(holdoutDfCopy[['prs_cr_mix']])
+    scaled_prscr_mix.columns = ['scaled_prs_cr_mix']
 
     
     #create calucate bins and use for prevalence and prs plots 
-    scaled_prscr_mix.sort_values(['scaled_prs_PRScr_mix'],inplace=True)
-    scaled_prscr_mix['decile_bin_PRScr_mix'] = pd.qcut(scaled_prscr_mix['scaled_prs_PRScr_mix'], 10, labels=list(range(1,11)),duplicates='drop')
-    scaled_prscr_mix['bin_PRScr_mix'] = pd.qcut(scaled_prscr_mix['scaled_prs_PRScr_mix'], 1000, labels=list(range(1,1001)),duplicates='drop')
+    scaled_prscr_mix.sort_values(['scaled_prs_cr_mix'],inplace=True)
+    scaled_prscr_mix['decile_bin_cr_mix'] = pd.qcut(scaled_prscr_mix['scaled_prs_cr_mix'], 10, labels=list(range(1,11)),duplicates='drop')
+    scaled_prscr_mix['bin_cr_mix'] = pd.qcut(scaled_prscr_mix['scaled_prs_cr_mix'], 1000, labels=list(range(1,1001)),duplicates='drop')
     
     
-    scaled_holdout = holdoutDfCopy[['PHENOTYPE']].merge(scaled_prscr_mix,left_index=True,right_index=True)
-    scaled_holdout.rename(columns={'scaled_prs_PRScr_mix':'scaled_prs'},inplace=True)
+    scaled_holdout = holdoutDfCopy[['PHENOTYPE','prs_cr_mix']].merge(scaled_prscr_mix,left_index=True,right_index=True)
+    scaled_holdout.rename(columns={'scaled_prs_cr_mix':'scaled_prs'},inplace=True)
     
     #calculate plots for prscr_mix
     create_prs_plots(scaled_holdout[['PHENOTYPE','scaled_prs']],'prscr_mix',figPath,scoresPath,'mixed')
     
-    scaled_holdout.rename(columns={'scaled_prs':'scaled_prs_PRScr_mix'},inplace=True)
-    holdoutDfCopy = holdoutDfCopy.merge(scaled_prscr_mix,left_index=True,right_index=True)
-    holdoutDfCopy.reset_index(inplace=True)
+    scaled_holdout.rename(columns={'scaled_prs':'scaled_prs_cr_mix'},inplace=True)
+
     
-    return(holdoutDfCopy)
+    return(scaled_holdout.drop(columns=['PHENOTYPE']))
     
     
-def main(pheno,dataPath):
+def main(dataPath,cov_file):
     '''input : phenotype
     
     downloads the scaled prs for validation set to calculate beta values to be used in prs cr
@@ -231,23 +237,39 @@ def main(pheno,dataPath):
     prs_beta_df : beta for prs cohorts, pvalues, CI upper, CI lower, se
     model scores list : [score,balanced_score,auc,mcc,logloss,jscore,hloss,r_squared]
     '''
-    figPath = f'{dataPath}/{pheno}/figures/summedEpi'
-    scoresPath = f'{dataPath}/{pheno}/scores/summedEpi'
-    
-    if pheno == 'type2Diabetes':
-        training_columns = ['IID','PHENOTYPE','scaled_prs_epi','scaled_prs_main','scaled_prs_cardio','scaled_prs_epi+main']
-    else:
-        training_columns = ['IID','PHENOTYPE','scaled_prs_epi','scaled_prs_main','scaled_prs_cardio']
+    figPath = f'{dataPath}/figures'
+    scoresPath = f'{dataPath}/scores'
         
-    df = pd.read_csv(f'{scoresPath}/combinedPRSGroups.csv',usecols=training_columns)
+    covDf = pd.read_csv(cov_file,usecols=['IID','PC1','PC2','PC3','PC4','PC5','PC6','PC7','PC8','PC9','PC10','age','SEX'])
+    covDf.set_index('IID',inplace=True)
+    
+    df = pd.read_csv(f'{scoresPath}/combinedPRSGroups.csv')
     df.set_index('IID',inplace=True)
+    df = df.merge(covDf,right_index=True,left_index=True,how='left')
+    
     holdout_df = pd.read_csv(f'{scoresPath}/combinedPRSGroups.holdout.csv')
     holdout_df.set_index('IID',inplace=True)
     
+    ############### CHECK EPI + MAIN STATISTICS ##################
+    statsTable = f"{pheno_data}/scores/prs_pairwise_comparisons.csv"
     
+    ############ IS EPI+MAIN INCLUDED IN IMPORTANT FEATURE ANALYSIS  ##############
+    stats = pd.read_csv(statsTable)
     
-    prsHoldout = calculate_prscr_mix(df,holdout_df[training_columns],figPath,scoresPath)
-    prsHoldout.to_csv(f'{scoresPath}/combinedPRSGroups.holdout.csv')
+    epiMainStats = stats[(stats['model2'] == 'scaled_prs_epi+main') & (stats['delong_p_value'] > .05)]
+    
+    if len(epiMainStats) > 0:
+        print('NOT USING EPI+MAIN IN ANALYSIS')
+        print(epiMainStats)
+        use_epi_main = False
+    else:
+        use_epi_main = True
+    
+    prsHoldout = calculate_prscr_mix(df,holdout_df,figPath,scoresPath,use_epi_main=use_epi_main,use_all=False)
+    holdout_df = holdout_df.merge(prsHoldout,left_index=True,right_index=True,how='left')
+    holdout_df.reset_index(inplace=True)
+    
+    holdout_df.to_csv(f'{scoresPath}/combinedPRSGroups.holdout.csv',index=False)
     
 #       prsHoldout.to_csv(f'{trainingPath}/prs/reducedSHAP/holdout/combinedPRSGroupsWithcardio_main.holdout.csv')
     ###############  CREATE PRS COMBINED DATA WITH THIS METHOD ###############
@@ -256,10 +278,31 @@ def main(pheno,dataPath):
     
 if __name__ == '__main__':
     __spec__ = None
-    pheno = 'type2Diabetes'
-    dataPath = '/Users/kerimulterer/prsInteractive/results'
-#   pheno = sys.argv[1]
+    parser = argparse.ArgumentParser(description="Calculating prscr_mix ....")
+    parser.add_argument("--pheno_data",help="path to pheno results directory")
+    parser.add_argument("--covar_file",help="path to cleaned covariate file")
     
-    main(pheno,dataPath)
+    
+    args = parser.parse_args()
+    
+    pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
+    print(f"[PYTHON] Reading from: {pheno_data}")
+    
+    covar_file = args.covar_file or os.environ.get("COVAR_FILE")
+    print(f"[PYTHON] Reading covariate data from: {covar_file}")
+    
+    pheno = 'celiacDisease'
+    pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi'
+    covar_file = '/Users/kerimulterer/prsInteractive/results/covar.csv'
+    
+    if not pheno_data:
+        raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")
+        
+    if not covar_file:
+        raise ValueError("You must provide a covar data file via --covar_file or set the COVAR_FILE environment variable.")
+        
+
+
+    main(pheno_data,covar_file)
 
     

@@ -5,6 +5,8 @@
 
 import numpy as np
 import json
+import os
+import argparse
 import pandas as pd
 from sklearn.metrics import roc_curve, auc, roc_auc_score, brier_score_loss
 import matplotlib.pyplot as plt
@@ -19,6 +21,759 @@ from scipy import stats
 import statsmodels.api as sm
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.isotonic import IsotonicRegression
+from helper.draw_plots import *
+
+
+COLOR_SCHEME = {
+    'case-control': {
+        'cases': '#dfa6a5',      # Purple/Pink
+        'controls': '#b7e1f3',      # Blue
+        'total': '#916F6F',   # Teal/Green
+        'name': 'case-control'
+    }}
+
+def create_sankey_plot_clinical_data(df,figPath,use_epi_main=False):
+    
+    if use_epi_main:
+        prs_mathods = ['main','epi+main','epi','cardio']
+    else:
+        prs_methods = ['main', 'epi', 'cardio'] 
+        
+    print(f"Total holdout samples: {len(df)}")
+    print(f"Cases in holdout: {df['PHENOTYPE'].sum()}")
+    
+    # check which binary columns exist:
+    binary_cols = [col for col in df.columns if col.endswith('_binary')]
+    print(f"\nAvailable binary columns: {binary_cols}")
+    
+    
+    for binar_col in binary_cols:
+        
+        # Filter for cases with low clinical risk (binary = 0)
+        df_filtered = df[(df['PHENOTYPE'] == 1) & (df[binar_col] == 0)].copy()
+        
+        # Track which individuals have already been counted
+        counted_individuals = set()
+        
+        # Count flows from each PRS method to combined
+        flows = []
+        for method in prs_methods:
+            high_risk_col = f'{method}_high_risk'
+            
+            if high_risk_col not in df_filtered.columns:
+                print(f"Warning: {high_risk_col} not found in data")
+                continue
+            
+            # Get individuals high-risk in this method who haven't been counted yet
+            high_risk_mask = (df_filtered[high_risk_col] == 1)
+            uncounted_mask = ~df_filtered.index.isin(counted_individuals)
+            current_method_mask = high_risk_mask & uncounted_mask
+            
+            # Count individuals high-risk in this method (not yet counted) -> combined high-risk
+            high_to_high = len(df_filtered[current_method_mask & 
+                                            (df_filtered['combined_high_risk'] == 1)])
+            
+#           # Count individuals high-risk in this method -> combined low-risk
+#           high_to_low = len(df_filtered[current_method_mask & 
+#                                           (df_filtered['combined_high_risk'] == 0)])
+                                        
+            # Add these individuals to the counted set
+            counted_individuals.update(df_filtered[current_method_mask].index)
+            
+            # Add flows only if there are individuals
+            if high_to_high > 0:
+                flows.append({
+                    'source': f'{method.upper()} High Risk',
+                    'target': 'Combined High Risk',
+                    'value': high_to_high,
+                    'color': COHORT_COLORS[method]
+                })
+            
+#           if high_to_low > 0:
+#               flows.append({
+#                   'source': f'{method.upper()} High Risk',
+#                   'target': 'Combined Low Risk',
+#                   'value': high_to_low,
+#                   'color': COHORT_COLORS[method]
+#               })
+                
+            print(f"{method.upper()}: {df_filtered[high_risk_col].sum()} high-risk individuals")
+            print(f"  -> Combined High: {high_to_high}")
+#           print(f"  -> Combined Low: {high_to_low}")
+            
+            print(f"\nCombined high-risk: {df_filtered['combined_high_risk'].sum()}")
+        
+        print(f"\nTotal individuals counted: {len(counted_individuals)}")
+        print(f"Combined high-risk total: {df_filtered['combined_high_risk'].sum()}")
+            
+        # Create Sankey diagram
+        # Build unique labels
+        all_labels = []
+        label_dict = {}
+        
+        for flow in flows:
+            if flow['source'] not in label_dict:
+                label_dict[flow['source']] = len(all_labels)
+                all_labels.append(flow['source'])
+            if flow['target'] not in label_dict:
+                label_dict[flow['target']] = len(all_labels)
+                all_labels.append(flow['target'])
+                
+        # Build source, target, value, and color lists
+        sources = [label_dict[flow['source']] for flow in flows]
+        targets = [label_dict[flow['target']] for flow in flows]
+        values = [flow['value'] for flow in flows]
+        link_colors = [flow['color'] for flow in flows]
+        
+        # Create node colors
+        node_colors = []
+        node_x = []  # x position (0 = left, 1 = right)
+        node_y = []  # y position (0 = top, 1 = bottom)
+        
+        for i, label in enumerate(all_labels):
+            # Set x position
+            if 'Combined' in label:
+                node_x.append(1.0)  # Right side
+            else:
+                node_x.append(0.0)  # Left side
+                
+            # Set y position and color
+            if 'CARDIO' in label:
+                node_colors.append(COHORT_COLORS['cardio'])
+                node_y.append(0.1)  # Top
+            elif 'EPI' in label and 'main' not in label.lower():
+                node_colors.append(COHORT_COLORS['epi'])
+                node_y.append(0.4)  # Middle
+            elif 'MAIN' in label:
+                node_colors.append(COHORT_COLORS['main'])
+                node_y.append(0.7)  # Bottom
+            elif 'Combined Low' in label:
+                node_colors.append('#999999')  # Gray for combined low risk
+                node_y.append(0.2)  # Top on right side
+            elif 'Combined High' in label:
+                node_colors.append('#D55E00')  # Red-orange for combined high risk
+                node_y.append(0.6)  # Bottom on right side
+            else:
+                node_colors.append('#CCCCCC')
+                node_y.append(0.5)
+                    
+                    
+        # Create Sankey diagram
+        fig = go.Figure(data=[go.Sankey(
+            node=dict(
+                pad=15,
+                thickness=20,
+                line=dict(color='black', width=0.5),
+#               label=all_labels,
+                color=node_colors,
+                x=node_x,
+                y=node_y
+            ),
+            link=dict(
+                source=sources,
+                target=targets,
+                value=values,
+                color=link_colors,
+            )
+        )])
+        
+        fig.update_layout(
+            title=dict(
+                text=f"PRS High-Risk Classification Flow to Combined PRS<br>" + 
+                    f"<sub>Cases with Low Clinical Risk (n={len(df_filtered)})</sub>",
+                x=0.5,
+                xanchor='center'
+            ),
+            font=dict(size=12, family='Arial'),
+            width=1000,
+            height=600,
+            margin=dict(l=20, r=20, t=80, b=20)
+        )
+        
+        # Save figure
+        fig.write_html(f'{figPath}/Sankey{binar_col}.PRStoCombinedHighRisk.html')
+        print(f"\nSankey plot saved as 'Sankey{binar_col}.PRStoCombinedHighRisk.html'")
+        
+        pio.write_image(fig,f'{figPath}/Sankey{binar_col}.PRStoCombinedHighRisk.png')
+        
+        # Also display if in interactive environment
+        fig.show()
+        
+        # Print summary statistics
+        print("\n" + "="*60)
+        print("SUMMARY STATISTICS")
+        print("="*60)
+        
+        for method in prs_methods:
+            high_risk_col = f'{method}_high_risk'
+            if high_risk_col in df_filtered.columns:
+                n_high = df_filtered[high_risk_col].sum()
+                overlap_combined = len(df_filtered[(df_filtered[high_risk_col] == 1) & 
+                                                    (df_filtered['combined_high_risk'] == 1)])
+                if n_high > 0:
+                    overlap_pct = (overlap_combined / n_high) * 100
+                    print(f"{method.upper()}: {overlap_pct:.1f}% of high-risk -> Combined high-risk")
+                    
+        combined_high = df_filtered['combined_high_risk'].sum()
+        print(f"\nTotal combined high-risk: {combined_high} ({combined_high/len(df_filtered)*100:.1f}%)")
+        
+        
+        
+def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_line=False):
+    
+    """
+    Create NRI bar chart showing correct reclassification for cases and controls
+    across multiple clinical variables.
+    
+    Clinical measures: 1=Low Risk, 0=High Risk
+    PRS: 1=High Risk, 0=Low Risk
+    
+    When prs_col contains 'combined', creates stacked bars showing the contribution
+    of each cohort (main, epi, cardio) to NRI for cases and controls separately.
+    
+    For each clinical variable:
+    - Controls: Count those moved from high risk (0) to low risk (0) by PRS
+        (i.e., clinical says high risk [0], PRS correctly says low risk [0])
+    - Cases: Count those moved from low risk (1) to high risk (1) by PRS
+        (i.e., clinical says low risk [1], PRS correctly says high risk [1])
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+            DataFrame with 'PHENOTYPE' column (1=case, 0=control)
+    clinical_vars : list of clinical var str
+            list clinical risk category column names (1=low risk, 0=high risk)
+    prs_col : str
+            Column name for PRS risk categories (1=high risk, 0=low risk)
+    show_total_as_line : bool, default=False
+            Ignored when prs_col contains 'combined'
+            
+    Returns:
+    --------
+    fig : matplotlib.figure.Figure
+            The generated figure
+    nri_summary : pandas.DataFrame
+            Summary table with NRI values and counts
+    """
+    # Check if this is a combined PRS analysis
+    is_combined = 'combined' in prs_col.lower()
+    
+    # Store results for each clinical variable
+    results = []
+    
+    # Split by phenotype
+    cases = df['PHENOTYPE'] == 1
+    controls = df['PHENOTYPE'] == 0
+    
+    for risk_cat1 in clinical_vars:
+        
+        # =====================================================================
+        # CONTROLS: Clinical says HIGH risk (1), want PRS to correctly say LOW risk (0)
+        # =====================================================================
+        reclass_controls = pd.crosstab(
+            df.loc[controls, risk_cat1],  # Clinical risk (rows): 1=low, 0=high
+            df.loc[controls, prs_col],     # PRS risk (columns): 1=high, 0=low
+            rownames=[risk_cat1],
+            colnames=[prs_col]
+        )
+        
+        # Count controls correctly reclassified: 
+        # Clinical HIGH risk (1) → PRS LOW risk (0)
+        if 1 in reclass_controls.index and 0 in reclass_controls.columns:
+            controls_correct = reclass_controls.loc[1, 0]
+        else:
+            controls_correct = 0
+            
+        # Total controls at high risk in clinical measure (clinical = 1)
+        total_controls_high = reclass_controls.loc[0].sum() if 1 in reclass_controls.index else 0
+        
+        # NRI- for controls (proportion correctly kept at/moved to low risk)
+        nri_controls = controls_correct / len(df[controls]) if len(df[controls]) > 0 else 0
+        
+        # =====================================================================
+        # CASES: Clinical says LOW risk (1), want PRS to correctly say HIGH risk (1)
+        # =====================================================================
+        reclass_cases = pd.crosstab(
+            df.loc[cases, risk_cat1],      # Clinical risk (rows): 1=low, 0=high
+            df.loc[cases, prs_col],         # PRS risk (columns): 1=high, 0=low
+            rownames=[risk_cat1],
+            colnames=[prs_col]
+        )
+        
+        # Count cases correctly reclassified:
+        # Clinical LOW risk (0) → PRS HIGH risk (1)
+        if 0 in reclass_cases.index and 1 in reclass_cases.columns:
+            cases_correct = reclass_cases.loc[0, 1]
+        else:
+            cases_correct = 0
+            
+        # Total cases at low risk in clinical measure (clinical = 0)
+        total_cases_low = reclass_cases.loc[1].sum() if 0 in reclass_cases.index else 0
+        
+        # NRI+ for cases (proportion correctly moved to high risk)
+        nri_cases = cases_correct / len(df[cases]) if len(df[cases]) > 0 else 0
+        
+        # =====================================================================
+        # COHORT-SPECIFIC NRI (only for combined PRS)
+        # =====================================================================
+        cohort_nri = {}
+        if is_combined:
+            
+            
+            # Derive individual PRS column names
+            main_col = prs_col.replace('combined', 'main')
+            epi_col = prs_col.replace('combined', 'epi')
+            cardio_col = prs_col.replace('combined', 'cardio')
+            
+            # For CASES: Clinical LOW (0) → PRS HIGH (1)
+            # Identify which cohort flagged each correctly reclassified case
+            cases_reclass_mask = (df[risk_cat1] == 0) & (df[prs_col] == 1) & cases
+            
+            # Priority: main > epi > cardio
+            cases_main = ((df[main_col] == 1) & cases_reclass_mask).sum()
+            cases_epi = ((df[epi_col] == 1) & cases_reclass_mask & (df[main_col] == 0)).sum()
+            cases_cardio = ((df[cardio_col] == 1) & cases_reclass_mask & 
+                           (df[main_col] == 0) & (df[epi_col] == 0)).sum()
+            
+            # For CONTROLS: Clinical HIGH (1) → PRS LOW (0)
+            # These controls are NOT flagged by any PRS (all PRSs agree = low risk)
+            # We'll distribute them proportionally based on overall cohort sizes
+            controls_reclass_mask = (df[risk_cat1] == 1) & (df[prs_col] == 0) & controls
+            controls_reclass_total = controls_reclass_mask.sum()
+            
+            # Get overall cohort sizes for proportional attribution
+            total_main = (df[main_col] == 1).sum()
+            total_epi = (df[epi_col] == 1).sum()
+            total_cardio = (df[cardio_col] == 1).sum()
+            total_all = total_main + total_epi + total_cardio
+            
+            if total_all > 0:
+                controls_main = controls_reclass_total * (total_main / total_all)
+                controls_epi = controls_reclass_total * (total_epi / total_all)
+                controls_cardio = controls_reclass_total * (total_cardio / total_all)
+            else:
+                controls_main = controls_epi = controls_cardio = 0
+                
+            # Calculate NRI components by cohort
+            n_cases = len(df[cases])
+            n_controls = len(df[controls])
+            
+            cohort_nri = {
+                'cases_main': cases_main / n_cases if n_cases > 0 else 0,
+                'cases_epi': cases_epi / n_cases if n_cases > 0 else 0,
+                'cases_cardio': cases_cardio / n_cases if n_cases > 0 else 0,
+                'cases_main_n': cases_main,
+                'cases_epi_n': cases_epi,
+                'cases_cardio_n': cases_cardio,
+                'controls_main': controls_main / n_controls if n_controls > 0 else 0,
+                'controls_epi': controls_epi / n_controls if n_controls > 0 else 0,
+                'controls_cardio': controls_cardio / n_controls if n_controls > 0 else 0,
+                'controls_main_n': int(controls_main),
+                'controls_epi_n': int(controls_epi),
+                'controls_cardio_n': int(controls_cardio)
+            }
+            
+        # =====================================================================
+        # Store results
+        # =====================================================================
+        result_dict = {
+            'variable': risk_cat1.replace('_risk_cat', '').replace('_', ' '),
+            'nri_cases': nri_cases,
+            'nri_controls': nri_controls,
+            'total_nri': nri_cases + nri_controls,
+            'cases_correct_n': cases_correct,
+            'cases_total_low_n': total_cases_low,
+            'controls_correct_n': controls_correct,
+            'controls_total_high_n': total_controls_high,
+            'total_cases': len(df[cases]),
+            'total_controls': len(df[controls])
+        }
+        
+        if is_combined:
+            result_dict.update(cohort_nri)
+            
+        results.append(result_dict)
+        
+    # Convert to DataFrame
+    nri_summary = pd.DataFrame(results)
+    
+    # =========================================================================
+    # CREATE THE BAR CHART
+    # =========================================================================
+    
+    # Get selected color scheme
+    colors = COLOR_SCHEME['case-control']
+    
+    fig, ax = plt.subplots(figsize=(12, 7))
+    
+    # Set positions for bars
+    x = np.arange(len(nri_summary))
+    
+    if is_combined:
+        # =====================================================================
+        # STACKED BARS: Cases and Controls NRI by cohort
+        # =====================================================================
+        width = 0.35
+        
+#       cohort_colors = {
+#           'main': '#E74C3C',      # Red
+#           'epi': '#3498DB',       # Blue
+#           'cardio': '#F39C12'     # Orange
+#       }
+        
+        # CASES STACKED BAR (left)
+        bars_cases_main = ax.bar(
+            x - width/2,
+            nri_summary['cases_main'],
+            width,
+            label=f'Main PRS',
+            color=COHORT_COLORS['main'],
+            alpha=0.85,
+            edgecolor='black',
+            linewidth=0.5
+        )
+        
+        bars_cases_epi = ax.bar(
+            x - width/2,
+            nri_summary['cases_epi'],
+            width,
+            bottom=nri_summary['cases_main'],
+            label=f'Epistatic PRS',
+            color=COHORT_COLORS['epi'],
+            alpha=0.85,
+            edgecolor='black',
+            linewidth=0.5
+        )
+        
+        bars_cases_cardio = ax.bar(
+            x - width/2,
+            nri_summary['cases_cardio'],
+            width,
+            bottom=nri_summary['cases_main'] + nri_summary['cases_epi'],
+            label=f'Cardio PRS',
+            color=COHORT_COLORS['cardio'],
+            alpha=0.85,
+            edgecolor='black',
+            linewidth=0.5
+        )
+        
+        # CONTROLS STACKED BAR (right)
+        bars_controls_main = ax.bar(
+            x + width/2,
+            nri_summary['controls_main'],
+            width,
+            color=COHORT_COLORS['main'],
+            alpha=0.85,
+            edgecolor='black',
+            linewidth=0.5
+        )
+        
+        bars_controls_epi = ax.bar(
+            x + width/2,
+            nri_summary['controls_epi'],
+            width,
+            bottom=nri_summary['controls_main'],
+            color=COHORT_COLORS['epi'],
+            alpha=0.85,
+            edgecolor='black',
+            linewidth=0.5
+        )
+        
+        
+        bars_controls_cardio = ax.bar(
+            x + width/2,
+            nri_summary['controls_cardio'],
+            width,
+            bottom=nri_summary['controls_main'] + nri_summary['controls_epi'],
+            color=COHORT_COLORS['cardio'],
+            alpha=0.85,
+            edgecolor='black',
+            linewidth=0.5
+        )
+        
+        # Add total NRI labels above each bar
+        for i in range(len(x)):
+            # Cases total
+            cases_total = nri_summary.iloc[i]['nri_cases']
+            ax.text(
+                x[i] - width/2, cases_total + 0.01,
+                f'NRI+: {cases_total:.3f}',
+                ha='center', va='bottom',
+                fontsize=9, fontweight='bold',
+                color=colors['cases']
+            )
+            
+            # Controls total
+            controls_total = nri_summary.iloc[i]['nri_controls']
+            ax.text(
+                x[i] + width/2, controls_total + 0.01,
+                f'NRI-: {controls_total:.3f}',
+                ha='center', va='bottom',
+                fontsize=9, fontweight='bold',
+                color=colors['controls']
+            )
+            
+        # Add "Cases" and "Controls" labels
+        y_pos = ax.get_ylim()[1] * 0.95
+#       ax.text(x[len(x)//2] - width/2, y_pos, 'Cases (Clinical Low→PRS High)',
+#              ha='center', va='top', fontsize=11, fontweight='bold',
+#              bbox=dict(boxstyle='round', facecolor=colors['cases'], alpha=0.3))
+#       ax.text(x[len(x)//2] + width/2, y_pos, 'Controls (Clinical High→PRS Low)',
+#              ha='center', va='top', fontsize=11, fontweight='bold',
+#              bbox=dict(boxstyle='round', facecolor=colors['controls'], alpha=0.3))
+        
+    else:
+        # =====================================================================
+        # ORIGINAL NON-STACKED LAYOUT
+        # =====================================================================
+        width = 0.25
+        
+        # Plot NRI+ for cases
+        bars_cases = ax.bar(
+            x - width,
+            nri_summary['nri_cases'],
+            width,
+            label=f'NRI+ (Cases: Clinical Low→PRS High risk)\nn={nri_summary["total_cases"].iloc[0]:,}',
+            color=colors['cases'],
+            alpha=0.8,
+            linewidth=1
+        )
+        
+        # Plot NRI- for controls
+        bars_controls = ax.bar(
+            x,
+            nri_summary['nri_controls'],
+            width,
+            label=f'NRI- (Controls: Clinical High→PRS Low risk)\nn={nri_summary["total_controls"].iloc[0]:,}',
+            color=colors['controls'],
+            alpha=0.8,
+            linewidth=1
+        )
+        
+        # Plot total NRI
+        if show_total_as_line:
+            ax.plot(
+                x + width,
+                nri_summary['total_nri'],
+                marker='o',
+                markersize=8,
+                linewidth=2,
+                color=colors['total'],
+                label='Total NRI',
+                zorder=5
+            )
+            for i, (xi, val) in enumerate(zip(x + width, nri_summary['total_nri'])):
+                ax.text(
+                    xi, val + 0.01,
+                    f'{val:.3f}',
+                    ha='center', va='bottom',
+                    fontsize=10, fontweight='bold',
+                    color='#1f77b4'
+                )
+        else:
+            bars_total = ax.bar(
+                x + width,
+                nri_summary['total_nri'],
+                width,
+                label='Total NRI',
+                color=colors['total'],
+                alpha=0.8,
+                linewidth=1
+            )
+            # Add value labels
+            for bar in bars_total:
+                height = bar.get_height()
+                ax.text(
+                    bar.get_x() + bar.get_width()/2., height + 0.01,
+                    f'{height:.3f}',
+                    ha='center', va='bottom',
+                    fontsize=10, fontweight='bold'
+                )
+                
+        # Add value labels on NRI bars
+        for i, bar in enumerate(bars_cases):
+            height = bar.get_height()
+            n_correct = nri_summary.iloc[i]['cases_correct_n']
+            n_total = nri_summary.iloc[i]['cases_total_low_n']
+            ax.text(
+                bar.get_x() + bar.get_width()/2., height + 0.01,
+                f'{height:.3f}\n({n_correct}/{n_total})',
+                ha='center', va='bottom',
+                fontsize=8
+            )
+            
+        for i, bar in enumerate(bars_controls):
+            height = bar.get_height()
+            n_correct = nri_summary.iloc[i]['controls_correct_n']
+            n_total = nri_summary.iloc[i]['controls_total_high_n']
+            ax.text(
+                bar.get_x() + bar.get_width()/2., height + 0.01,
+                f'{height:.3f}\n({n_correct}/{n_total})',
+                ha='center', va='bottom',
+                fontsize=8
+            )
+            
+    # Customize the plot
+    ax.set_xlabel('Clinical Risk Variables', fontsize=13, fontweight='bold')
+    ax.set_ylabel('Net Reclassification Improvement (NRI)', fontsize=13, fontweight='bold')
+    
+    if is_combined:
+        title_text = (f'Cohort Contribution to NRI: {prs_col.replace("_", " ")}\n'
+                     'Stacked bars show Main→Epi→Cardio (priority) contribution to correct reclassification\n'
+                     'Clinical: 1=Low Risk, 0=High Risk | PRS: 1=High Risk, 0=Low Risk')
+    else:
+        title_text = (f'Net Reclassification Improvement: Clinical Risk vs {prs_col.replace("_", " ")}\n'
+                     'Clinical: 1=Low Risk, 0=High Risk | PRS: 1=High Risk, 0=Low Risk')
+        
+    ax.set_title(title_text, fontsize=13, fontweight='bold', pad=20)
+    ax.set_xticks(x)
+    ax.set_xticklabels(nri_summary['variable'], fontsize=11)
+    
+    # Add grid
+    ax.grid(axis='y', alpha=0.3, linestyle='--', linewidth=0.5)
+    ax.set_axisbelow(True)
+    
+    # Legend
+    if is_combined:
+        ax.legend(loc='upper left', fontsize=10, frameon=True, shadow=True)
+    else:
+        ax.legend(loc='upper left', fontsize=10, frameon=True, shadow=True)
+        
+    # Set y-axis limits with padding
+    y_max = max(nri_summary['nri_cases'].max(), nri_summary['nri_controls'].max())
+    ax.set_ylim(-0.02, y_max * 1.25)
+    
+    plt.tight_layout()
+    
+    return fig, nri_summary
+
+    
+def plot_reclassification_table(df, risk_cat1, risk_cat2,show_total_as_line=False):
+    """
+    Create side-by-side reclassification heatmaps for cases and controls.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with 'PHENOTYPE' column (1=case, 0=control)
+    risk_cat1 : str (will be clinical measure)
+        Column name for method 1 risk categories
+    risk_cat2 : str  
+        Column name for method 2 risk categories
+
+show_total_as_line : bool, default=False
+    If True, show total NRI as a line plot instead of bars
+    """
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # =========================================================================
+    # CASES Panel
+    # =========================================================================
+    cases = df['PHENOTYPE'] == 1
+    
+
+    reclass_cases = pd.crosstab(
+        df.loc[cases, risk_cat1],  
+        df.loc[cases, risk_cat2],   
+        rownames=[risk_cat1],
+        colnames=[risk_cat2],
+        margins=True
+    )
+    
+    sns.heatmap(
+        reclass_cases, 
+        annot=True, fmt='d', cmap='Blues', 
+        ax=axes[0], cbar=False,
+        linewidths=0.5, linecolor='gray'
+    )
+    axes[0].set_title('Reclassification Table: CASES', fontsize=14, fontweight='bold')
+    axes[0].set_xlabel(f'{risk_cat2}\n(0=Low Risk, 1=High Risk)', fontsize=11)  
+#   if 'prs' in risk_cat1:
+    axes[0].set_ylabel(f'{risk_cat1}\n(0=Low Risk, 1=High Risk)', fontsize=11)  
+#   else:
+#       axes[0].set_ylabel(f'{risk_cat1}\n(1=Low Risk, 0=High Risk)', fontsize=11) 
+        
+        
+        
+    # =========================================================================
+    # CONTROLS Panel
+    # =========================================================================
+    controls = df['PHENOTYPE'] == 0
+    
+    reclass_controls = pd.crosstab(
+        df.loc[controls, risk_cat1], 
+        df.loc[controls, risk_cat2],  
+        rownames=[risk_cat1],         
+        colnames=[risk_cat2],         
+        margins=True
+    )
+    
+    
+    sns.heatmap(
+        reclass_controls, 
+        annot=True, fmt='d', cmap='Greens',
+        ax=axes[1], cbar=False,
+        linewidths=0.5, linecolor='gray'
+    )
+    axes[1].set_title('Reclassification Table: CONTROLS', fontsize=14, fontweight='bold')
+    axes[1].set_xlabel(f'{risk_cat2}\n(0=Low Risk, 1=High Risk)', fontsize=11)  
+#   if 'prs' in risk_cat1:
+    axes[0].set_ylabel(f'{risk_cat1}\n(0=Low Risk, 1=High Risk)', fontsize=11)  
+#   else:
+#       axes[0].set_ylabel(f'{risk_cat1}\n(1=Low Risk, 0=High Risk)', fontsize=11)  
+        
+    plt.tight_layout()
+    
+    return fig
+
+def plot_low_clinical_reclassification_table(df, risk_cat1, risk_cat2):
+    """
+    Create reclassification heatmap for cases and controls within low risk clinical.
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame with 'PHENOTYPE' column (1=case, 0=control)
+    risk_cat1 : str
+        Column name for method 1 risk categories
+    risk_cat2 : str  
+        Column name for method 2 risk categories
+    """
+    fig, ax = plt.subplots(figsize=(10, 8))
+    
+    # =========================================================================
+    # CASES Panel
+    # =========================================================================
+    
+    df_low = df[df[risk_cat1] == 0]
+    
+    controls = df_low['PHENOTYPE'] == 0
+    cases = df_low['PHENOTYPE'] == 1
+    
+    
+    # ✅ Fast indexing - no chained indexing
+    reclass_low_risk_clinical = pd.crosstab(
+        df_low['PHENOTYPE'],   
+        df_low[risk_cat2],   
+        rownames=['PHENOTYPE'],
+        colnames=[risk_cat2],
+        margins=True
+    )
+    
+    sns.heatmap(
+        reclass_low_risk_clinical, 
+        annot=True, fmt='d', cmap='Greys', 
+        cbar=False,
+        linewidths=0.5, linecolor='gray'
+    )
+    ax.set_title('Reclassification Table: LOW CLINICAL RISK', fontsize=14, fontweight='bold')
+    ax.set_xlabel(f'{risk_cat2}\n(0=Low Risk, 1=High Risk)', fontsize=11)  # ✅ cat2 on x-axis
+    ax.set_ylabel(f'T2D in low {risk_cat1}\n(0=Controls, 1=Cases)', fontsize=11)  # ✅ cat2 on x-axis
+    
+    
+    
+    plt.tight_layout()
+    return fig
 
 
 
@@ -104,10 +859,10 @@ def convert_to_binary(df, df_validation, clinical_measures, thresholds=None, hig
     used_thresholds = {}
     determined_directions = {}
     
-    # Set quintile threshold (default to 0.8 or 0.2 if True)
+    # Set quintile threshold (default to 0.8 or 0.2 if True), else use thresholds set with known clinical measures used in risk assessment
     if high_risk_quintile is True:
         quintile_threshold = 0.2
-    elif isinstance(high_risk_quintile, (int, float)) and 0 <= high_risk_quintile <= 1:
+    elif isinstance(high_risk_quintile, (int, float)) and 1 <= high_risk_quintile <= 0:
         quintile_threshold = high_risk_quintile
     else:
         quintile_threshold = 0.2  # Default
@@ -166,11 +921,11 @@ def convert_to_binary(df, df_validation, clinical_measures, thresholds=None, hig
         # Apply threshold to create binary variable
         if threshold is not None:
             if higher_is_riskier:
-                df_result[f"{measure}_binary"] = (df_result[measure] <= threshold).astype(int)
-                df_result_validation[f"{measure}_binary"] = (df_result_validation[measure] <= threshold).astype(int)
-            else:
                 df_result[f"{measure}_binary"] = (df_result[measure] >= threshold).astype(int)
                 df_result_validation[f"{measure}_binary"] = (df_result_validation[measure] >= threshold).astype(int)
+            else:
+                df_result[f"{measure}_binary"] = (df_result[measure] <= threshold).astype(int)
+                df_result_validation[f"{measure}_binary"] = (df_result_validation[measure] <= threshold).astype(int)
                 
             used_thresholds[measure] = threshold
         else:
@@ -179,7 +934,7 @@ def convert_to_binary(df, df_validation, clinical_measures, thresholds=None, hig
     return df_result, df_result_validation, used_thresholds, determined_directions
 
 
-def calculate_auc(dfFull, prs_methods, clinical_measures):
+def calculate_auc(dfFull, prs_method, clinical_measures):
     """
     Calculate Area Under the ROC Curve (AUC) for different PRS methods against clinical measures.
     
@@ -197,81 +952,49 @@ def calculate_auc(dfFull, prs_methods, clinical_measures):
     pandas.DataFrame
         DataFrame containing AUC scores for each PRS method against each clinical measure
     """
-    resultsAllPRS = pd.DataFrame(index=prs_methods, columns=clinical_measures)
-    resultsTop20PRS = pd.DataFrame(index=prs_methods, columns=clinical_measures)
+    resultsAllPRS = pd.DataFrame(index=[prs_method], columns=clinical_measures)
+    resultsTop20PRS = pd.DataFrame(index=[prs_method], columns=clinical_measures)
     
 
-    for prs in prs_methods:
-        for measure in clinical_measures:
-            #get the low risk clinical measure
-            df = dfFull[dfFull[measure] == 1]
+#   for prs in prs_methods:
+    for measure in clinical_measures:
+        #get the low risk clinical measure
+        df = dfFull[dfFull[measure] == 0]
+        
+        #get the high prs 
+#       threshold = df[prs].quantile(.80)
+#       df['high_prs'] = (df[prs_method] <= threshold).astype(int)
+        
+        # Ensure the clinical measure is binary (0/1)
+        if not set(df['PHENOTYPE'].unique()).issubset({0, 1}):
+            raise ValueError(f"PHENOTYPE must be binary (0/1)")
             
-            #get the high prs 
-            threshold = df[prs].quantile(.80)
-            df['high_prs'] = (df[prs] <= threshold).astype(int)
+        # Calculate AUC
+        try:
+            auc = roc_auc_score(df['PHENOTYPE'], df[prs_method])
+            resultsAllPRS.loc[prs_method, measure] = auc
+        except Exception as e:
+            resultsAllPRS.loc[prs_method, measure] = np.nan
+            print(f"Error calculating AUC for {prs_method} vs low risk {measure}: {e}")
             
-            # Ensure the clinical measure is binary (0/1)
-            if not set(df['PHENOTYPE'].unique()).issubset({0, 1}):
-                raise ValueError(f"PHENOTYPE must be binary (0/1)")
-                
-            # Calculate AUC
-            try:
-                auc = roc_auc_score(df['PHENOTYPE'], df[prs])
-                resultsAllPRS.loc[prs, measure] = auc
-                
-                dfHigh = df[df['high_prs'] == 1]
-                auc = roc_auc_score(dfHigh['PHENOTYPE'], dfHigh[prs])
-                resultsTop20PRS.loc[prs, measure] = auc
-                
-            except Exception as e:
-                resultsAllPRS.loc[prs, measure] = np.nan
-                print(f"Error calculating AUC for {prs} vs low risk {measure}: {e}")
-                
-                resultsTop20PRS.loc[prs, measure] = np.nan
-                print(f"Error calculating AUC for high risk {prs} vs low risk {measure}: {e}")
+        try:
+            if 'scaled_prs' in prs_method:
+                threshold = df[prs_method].quantile(.80)
+                df['high_prs'] = (df[prs_method] >= threshold).astype(int)
+            else:
+                df['high_prs'] = (df[prs_method] >= 800).astype(int)
+            dfHigh = df[df['high_prs'] == 1]
+            auc = roc_auc_score(dfHigh['PHENOTYPE'], dfHigh[prs_method])
+            resultsTop20PRS.loc[prs_method, measure] = auc
+            
+        except Exception as e:
+            resultsTop20PRS.loc[prs_method, measure] = np.nan
+            print(f"Error calculating AUC for high risk {prs_method} vs low risk {measure}: {e}")
                 
     return resultsAllPRS, resultsTop20PRS
 
-def calculate_single_prs_nri(df,prs_method1,clinical_measure):
-    """
-    -----------
-    df : pandas.DataFrame
-        DataFrame containing PRS scores and clinical outcome measures
-    prs_method1 : str
-        Column name for the first PRS method (reference)
-    clinical_measure : str
-        Column name for the clinical outcome measure (binary, 0/1)
 
-    
-    Returns:
-    --------
-    tuple
-        (NRI, NRI for events, NRI for non-events)
-    """
-    if clinical_measure == 'None':
-        df_clinic = df.copy()
-        
-    else:
-        # Filter to low clinical risk only
-        df_clinic = df[df[clinical_measure] == 1].copy()
-        
-    # Categorize PRS
-    risk_threshold = df_clinic[prs_method1].quantile(0.8)
-    df_clinic['high_prs'] = df_clinic[prs_method1].apply(lambda x: 1 if x >= risk_threshold else 0)
-    
-    # Split into cases and controls
-    events = df_clinic[df_clinic['PHENOTYPE'] == 1]
-    non_events = df_clinic[df_clinic['PHENOTYPE'] == 0]
-    
-    # NRI = (percent of cases reclassified up) - (percent of controls reclassified up)
-    nri_cases = events["high_prs"].mean()
-    nri_controls = non_events["high_prs"].mean()
-    
-    prs_nri = nri_cases - nri_controls
-    
-    return prs_nri, nri_cases, nri_controls
-
-def calculate_nri(df, prs_method1, prs_method2, clinical_measure,clinical):
+def calculate_nri(df, prs_method1, prs_method2,clinical=True):
     """
     Calculate Net Reclassification Improvement (NRI) comparing two PRS methods.
     
@@ -293,71 +1016,39 @@ def calculate_nri(df, prs_method1, prs_method2, clinical_measure,clinical):
     tuple
         (NRI, NRI for events, NRI for non-events)
     """
-    
-    if clinical_measure != "None":
-        # Ensure the clinical measure is binary
-        if not set(df[clinical_measure].unique()).issubset({0, 1}):
-            raise ValueError(f"Clinical measure {clinical_measure} must be binary (0/1)")
-            
-        # Extract events and non-events
-        events = df[clinical_measure] == 1
-        non_events = df[clinical_measure] == 0
-        
-    else:
-        
-        # Extract events and non-events
-        events = df['PHENOTYPE'] == 1
-        non_events = df['PHENOTYPE'] == 0
-        
-    # Create risk categories based on thresholds
-    def categorize(scores, thresholds):
-        categories = np.zeros(len(scores), dtype=int)
-        for i, threshold in enumerate(sorted(thresholds)):
-            categories[scores >= threshold] = i + 1
-        return categories
-    
-    # Calculate NRI for all pairs of PRS methods
-    if clinical:           
-        #find the clinical measure with _binary in label
-        if '_binary' in prs_method1:
-            # Default to quartiles of the first PRS method
-            risk_threshold = df[prs_method2].quantile(0.8)
-            # Categorize: Top 20% as "High Risk", others as "Low Risk"
-            risk_cat2 = df[prs_method2].apply(lambda x: 1 if x >= risk_threshold else 0)
+    # Categorize: Top 20% as "High Risk", others as "Low Risk"
+    # if using centile_bin, high risk column already created
 
-            risk_cat1 = df[prs_method1].apply(lambda x: 1 if x == 0 else 0)
-        
-        else:
-#           risk_thresholds = list(df[prs_method1].quantile([0.20, 0.5, 0.80]))
-#           risk_cat2 = categorize(df[prs_method1], risk_thresholds)
-#           risk_cat1 = df[prs_method2].astype('category')
-            risk_threshold = df[prs_method1].quantile(0.8)
-            # Categorize: Top 20% as "High Risk", others as "Low Risk"
-            risk_cat1 = df[prs_method1].apply(lambda x: 1 if x >= risk_threshold else 0)
-            
-            risk_cat2 = df[prs_method2].apply(lambda x: 1 if x == 0 else 0)
-            
-    else:
-        # Default to quartiles of the first PRS method
-#       risk_thresholds = list(df[prs_method2].quantile([0.20, 0.5, 0.8]))
-#       risk_cat1 = categorize(df[prs_method2], risk_thresholds)
+    # Extract events and non-events
+    events = df['PHENOTYPE'] == 1
+    non_events = df['PHENOTYPE'] == 0
+    
+    if clinical:
+        # Ensure the clinical measure is binary
+        if not set(df[prs_method1].unique()).issubset({0, 1}):
+            raise ValueError(f"Clinical measure {clinical_measure} must be binary (0/1)")
+
+#           
+#       # Extract events and non-events
+#       events = df[prs_method1] == 1
+#       non_events = df[prs_method1] == 0
 #       
-#       risk_thresholds = list(df[prs_method1].quantile([0.20, 0.5, 0.80]))
-#       risk_cat2 = categorize(df[prs_method1], risk_thresholds)
-        risk_threshold = df[prs_method1].quantile(0.8)
-        # Categorize: Top 20% as "High Risk", others as "Low Risk"
-        risk_cat1 = df[prs_method1].apply(lambda x: 1 if x >= risk_threshold else 0)
+#   else:
+#       # Calculate NRI for all pairs of PRS methods
         
-        risk_threshold = df[prs_method2].quantile(0.8)
-        # Categorize: Top 20% as "High Risk", others as "Low Risk"
-        risk_cat2 = df[prs_method2].apply(lambda x: 1 if x >= risk_threshold else 0)
-        
+    risk_cat1 = df[prs_method1]
+    risk_cat2 = df[prs_method2]
+    
 
     
     # Calculate proportions of up-classifications and down-classifications
+    
+    #cases going from low risk clinical to high risk prs (low risk clinical = 0, high risk prs = 1)
     up_events = np.mean(risk_cat2[events] > risk_cat1[events])
+    #cases going from high_risk prs to low-risk clinical measure
     down_events = np.mean(risk_cat2[events] < risk_cat1[events])
     
+    #controls going from high risk clinical to low risk prs (low risk clinical = 0, high risk prs = 1)
     up_non_events = np.mean(risk_cat2[non_events] > risk_cat1[non_events])
     down_non_events = np.mean(risk_cat2[non_events] < risk_cat1[non_events])
     
@@ -387,12 +1078,12 @@ def calculate_calibration_comparing_prs(df,prs_method1,prs_method2,n_bins=10):
         Dictionary containing calibration metrics for each PRS method against each clinical measure
     """
     
+    
     #create a binary value for people that are in high risk for prs1
-    df["high_prs1"] = (df[prs_method1] >= .8).astype(int)
+    df["high_prs1"] = df[prs_method1]
     
     try:
-        
-           # Normalize PRS to 0-1 scale if needed
+        # Normalize PRS to 0-1 scale if needed
         if df[prs_method2].min() < 0 or df[prs_method2].max() > 1:
             # Min-Max scaling
             prs_scaled = (df[prs_method2] - df[prs_method2].min()) / (df[prs_method2].max() - df[prs_method2].min())
@@ -475,11 +1166,10 @@ def calculate_calibration(dfFull, prs_methods, clinical_measures, pos_label, n_b
 
         for measure in clinical_measures+['None']:
             
-            if measure != 'None':
-                
+            if clinical_measure != 'None':
                 #get the people with low clinical measures
-                df = dfFull[dfFull[measure] == 1]
-    
+                df = dfFull[dfFull[measure] == 9]
+
                 # Ensure the clinical measure is binary
                 if not set(df[measure].unique()).issubset({0, 1}):
                     print(f"Skipping {measure} as it's not binary")
@@ -494,14 +1184,7 @@ def calculate_calibration(dfFull, prs_methods, clinical_measures, pos_label, n_b
             y_true = df['PHENOTYPE']   # 0/1 outcome
             prs_preds = df[prs] # change to your PRS column
             
-#           # Step 2: Fit Isotonic Regression
-#           iso = IsotonicRegression(out_of_bounds='clip')
-#           prs_calibrated = iso.fit_transform(prs_preds, y_true)
-#           
-#           # Save calibrated predictions
-#           df['prs_calibrated'] = prs_calibrated
-#           
-            #           # Normalize PRS to 0-1 scale if needed
+
             if df[prs].min() < 0 or df[prs].max() > 1:
                 # Min-Max scaling
                 prs_scaled = (df[prs] - df[prs].min()) / (df[prs].max() - df[prs].min())
@@ -707,25 +1390,6 @@ def plot_risk_distribution(df, measure, binary_col, threshold, higher_is_riskier
     plt.text(text_x, y_max * 0.8, risk_text, ha='center', color='darkred', fontsize=12)
         
     
-#   # Plot threshold line
-#   plt.axvline(x=threshold, color='red', linestyle='--', linewidth=2)
-#   
-#   # Determine shaded area (high risk)
-#   x_range = plt.xlim()
-#   if higher_is_riskier:
-#       plt.fill_between([threshold, x_range[1]], 0, plt.ylim()[1], 
-#                        color='red', alpha=0.1)
-#       risk_text = f"High Risk\n({100-percentile:.1f}%)"
-#       text_pos = (threshold + (x_range[1] - threshold) * 0.5, plt.ylim()[1] * 0.8)
-#   else:
-#       plt.fill_between([x_range[0], threshold], 0, plt.ylim()[1], 
-#                        color='red', alpha=0.1)
-#       risk_text = f"High Risk\n({percentile:.1f}%)"
-#       text_pos = (x_range[0] + (threshold - x_range[0]) * 0.5, plt.ylim()[1] * 0.8)
-        
-#   plt.text(text_pos[0], text_pos[1], risk_text, 
-#            horizontalalignment='center', color='darkred', fontsize=12)
-    
     # Calculate percentage of high risk
     high_risk_percent = (df[binary_col] == 1).mean() * 100
     
@@ -737,154 +1401,8 @@ def plot_risk_distribution(df, measure, binary_col, threshold, higher_is_riskier
     return plt.gcf()
 
 
-#def compare_prs_performance(df, df_validation, prs_methods, clinical_measures, binary_to_use=None, clinical_thresholds=None, risk_thresholds=None, high_risk_quintile=True, risk_directions=None,
-#                           outcome_column=None):
-#   """
-#   Comprehensive comparison of multiple PRS methods against multiple clinical measures
-#   
-#   Parameters:
-#   -----------
-#   df : pandas.DataFrame
-#       DataFrame containing PRS scores and clinical outcome measures for training data
-#   df_validation : pandas.DataFrame 
-#       DataFrame containing PRS scores and clinical outcome measures for validation set
-#   prs_methods : list
-#       List of column names for the different PRS methods
-#   clinical_measures : list
-#       List of column names for the different clinical outcome measures
-#   clinical_thresholds : dict or None
-#       Dictionary mapping clinical measure names to threshold values for binarization
-#   risk_thresholds : list or None
-#       Risk thresholds for NRI calculation. If None, quartiles of the first PRS method will be used.
-#   high_risk_quintile : bool or float
-#       If True, use quintile (80th or 20th percentile) based on risk direction
-#       If float between 0 and 1, use that percentile instead of 0.8/0.2
-#   risk_directions : dict or None
-#       Dictionary mapping measure names to booleans:
-#       True if higher values indicate higher risk, False if lower values indicate higher risk
-#   binary_to_use : str or None
-#       if string use the validation data to run analysis
-#   outcome_column : str or None
-#       Binary outcome column to use for determining risk direction
-#       
-#   Returns:
-#   --------
-#   dict
-#       Dictionary containing performance metrics
-#   pandas.DataFrame
-#       DataFrame with added binary columns
-#   """
-#   results = {}
-#   
-#   # First convert clinical measures to binary if needed
-#   df_binary_test, df_binary_validation, used_thresholds, determined_directions = convert_to_binary(
-#       df, df_validation, clinical_measures, thresholds=clinical_thresholds, 
-#       high_risk_quintile=high_risk_quintile, risk_directions=risk_directions,
-#       outcome_column=outcome_column
-#   )
-#   
-#   # Store the thresholds and directions used
-#   results['thresholds_used'] = used_thresholds
-#   results['risk_directions'] = determined_directions
-#   
-#   # Create list of binary clinical measures
-#   binary_measures = [f"{measure}_binary" for measure in clinical_measures 
-#                      if f"{measure}_binary" in df_binary_test.columns]
-#   
-#   # If no binary measures were created, use original measures (assuming they're already binary)
-#   if not binary_measures:
-#       binary_measures = clinical_measures
-#       
-#   if binary_to_use:
-#       df_binary = df_binary_validation.copy()
-#   else:
-#       df_binary = df_binary_test.copy()
-#       
-#   # Calculate AUC for all methods and binary measures
-#   resultsLowClinical, resultsLowClinicalHighPRS = calculate_auc(df_binary, prs_methods, binary_measures)
-#   results['auc_low_clinical'] = resultsLowClinical
-#   results['auc_low_clinical_high_prs'] = resultsLowClinicalHighPRS
-#   
-#   # Calculate calibration
-#   results_calibration = calculate_calibration(df_binary, prs_methods, binary_measures,'PHENOTYPE')
-#   results['calibration'] = results_calibration
-#   #results['auc_plots'] = auc_plots
-#   
-#   
-#   results['nri'] = {}
-#   for i, prs1 in enumerate(prs_methods):
-#       results['nri'][prs1] = {}
-#       for measure in binary_measures+['None']:
-#           try:
-#               prs_nri, prs_nri_cases, prs_nri_controls = calculate_single_prs_nri(df_binary,prs1,measure)
-#               results['nri'][prs1][f"{measure}_low"] = {
-#                   'nri': prs_nri,
-#                   'nri_events': prs_nri_cases,
-#                   'nri_non_events': prs_nri_controls
-#               }
-#           except Exception as e:
-#               results['nri'][prs1][f'{measure}_low'] = {'error': str(e)}
-#               
-##           try:
-##               prs_nri, prs_nri_cases, prs_nri_controls = calculate_single_prs_nri(df_binary,prs1,measure)
-##               results['nri'][prs1][measure] = {
-##                   'nri': prs_nri,
-##                   'nri_events': prs_nri_cases,
-##                   'nri_non_events': prs_nri_controls
-##               }
-##           except Exception as e:
-##               results['nri'][prs1][measure] = {'error': str(e)}
-#               
-#           #calculate nri for prs compared to clinical measure
-#           if measure != 'None':
-#               try:
-#                   results['nri'][f"{prs1}_vs_{measure}"] = {}
-#                   nri, nri_events, nri_non_events = calculate_nri(
-#                       df_binary, measure, prs1, "None", True
-#                   )
-#                   
-#                   results['nri'][f"{prs1}_vs_{measure}"][measure] = {
-#                       'nri': nri,
-#                       'nri_events': nri_events,
-#                       'nri_non_events': nri_non_events
-#                   }
-#                   
-#               except Exception as e:
-#                   results['nri'][f"{prs1}_vs_{measure}"][measure] = {'error': str(e)}
-#                   
-#               
-#           for j, prs2 in enumerate(prs_methods):
-#               if i >= j:  # Skip self-comparisons and repeated comparisons
-#                   continue
-#           
-#               key = f"{prs2}_vs_{prs1}"
-#               results['nri'][key] = {}
-#   
-#           
-#               #get the calibration key in for comparing prs calculations
-#               results['calibration'][key] = {}
-#               
-#   
-#               try:
-#                   nri, nri_events, nri_non_events = calculate_nri(
-#                       df_binary, prs1, prs2, measure, False
-#                   )
-#                   results['nri'][key][f'{measure}_low'] = {
-#                       'nri': nri,
-#                       'nri_events': nri_events,
-#                       'nri_non_events': nri_non_events
-#                   }
-#               except Exception as e:
-#                   results['nri'][key][f'{measure}_low'] = {'error': str(e)}
-#                   
-#               try:    
-#                   results['calibration'][key][f'{measure}_low'] = calculate_calibration_comparing_prs(df_binary[df_binary[measure] == 1],prs1,prs2)
-#               except Exception as e:
-#                   results['calibration'][key][f'{measure}_low'] = {'error': str(e)}
-#
-#   return results, df_binary_test, df_binary_validation
 
-def compare_prs_performance(df, clinical_measures, figPath, file_ext, risk_thresholds=None,
+def compare_prs_performance(df, clinical_measures, figPath, file_ext, prs_methods, risk_thresholds=None,
                             outcome_column=None):                  
     
     """
@@ -905,6 +1423,8 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, risk_thres
         file path for storage of heatmaps
     outcome_column : str or None
         Binary outcome column to use for determining risk direction
+    prs_methods : list of columns to inlcude using different methods
+        scaled_prs or centile_bin
         
     Returns:
     --------
@@ -914,13 +1434,7 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, risk_thres
         DataFrame with added binary columns
     """
     results = {}
-    
-    # First convert clinical measures to binary if needed
-#   df_binary_test, df_binary_validation, used_thresholds, determined_directions = convert_to_binary(
-#       df, df_validation, clinical_measures, thresholds=clinical_thresholds, 
-#       high_risk_quintile=high_risk_quintile, risk_directions=risk_directions,
-#       outcome_column=outcome_column
-#   )
+
     
     df_copy = df.copy()
     # Create list of binary clinical measures
@@ -931,14 +1445,11 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, risk_thres
     if not binary_measures:
         binary_measures = clinical_measures
         
-        
-    prs_methods = [col for col in df_copy.columns if 'prs' in col]
+
     
-    
-    # Calculate AUC for all methods and binary measures
-    resultsLowClinical, resultsLowClinicalHighPRS = calculate_auc(df_copy, prs_methods, binary_measures,figPath,file_ext)
-    results['auc_low_clinical'] = resultsLowClinical
-    results['auc_low_clinical_high_prs'] = resultsLowClinicalHighPRS
+    resultsLowClinicalHighPRS = pd.DataFrame()
+    resultsLowClinical = pd.DataFrame()
+
     
     
     # Calculate calibration
@@ -949,73 +1460,110 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, risk_thres
     
     results['nri'] = {}
     for i, prs1 in enumerate(prs_methods):
+        if 'scaled_prs' in prs1:
+            df_copy[f'{prs1}_binary'] = df[prs1].quantile(0.8).astype(int)
+            prs_col1 = f'{prs1}_binary'
+        else:
+            base_prs1 = prs1.replace('_centile_bin','')
+            prs_col1 = f'{base_prs1}_high_risk'
+        
         results['nri'][prs1] = {}
-        for measure in binary_measures+['None']:
-            
-            #calculate nri for prs compared to clinical measure
-            if measure != 'None':
-                try:
-                    results['nri'][f"{prs1}_vs_{measure}"] = {}
-                    nri, nri_events, nri_non_events = calculate_nri(
-                        df_copy, measure, prs1, "None", True
-                    )
-                    
-                    results['nri'][f"{prs1}_vs_{measure}"][measure] = {
-                        'nri': nri,
-                        'nri_events': nri_events,
-                        'nri_non_events': nri_non_events
-                    }
-                    df_copy[f'{prs1}_binary'] = (df[prs1] >= df[prs1].quantile(0.8)).astype(int)
-                    fig = plot_reclassification_table(df_copy, measure, f'{prs1}_binary')
-                    fig.savefig(f'{figPath}/reclassificationHeatMap.{measure}v{prs1}.{file_ext}.png',dpi=150, bbox_inches='tight')
-                    plt.close(fig)
-                    
-                    fig = plot_low_clinical_reclassification_table(df_copy, measure, f'{prs1}_binary')
-                    fig.savefig(f'{figPath}/reclassificationHeatMap.LowOnly_{measure}v{prs1}.{file_ext}.png',dpi=150, bbox_inches='tight')
-                    plt.close(fig)
-                    
-                    
-                except Exception as e:
-                    results['nri'][f"{prs1}_vs_{measure}"][measure] = {'error': str(e)}
-                    
-            else: #if clinical measure == None, compare prs calculations to eachother    
-                for j, prs2 in enumerate(prs_methods):
-                    if i >= j:  # Skip self-comparisons and repeated comparisons
-                        continue
-            
-                    key = f"{prs2}_vs_{prs1}"
-                    results['nri'][key] = {}
-            
-            
-                    #get the calibration key in for comparing prs calculations
-#                   results['calibration'][key] = {}
-            
-            
-                    try:
-                        nri, nri_events, nri_non_events = calculate_nri(
-                            df_copy, prs1, prs2, measure, False
-                        )
-                        results['nri'][key][f'{measure}_low'] = {
-                            'nri': nri,
-                            'nri_events': nri_events,
-                            'nri_non_events': nri_non_events
-                        }
-                        df_copy[f'{prs1}_binary'] = (df[prs1] >= df[prs2].quantile(0.8)).astype(int)
-                        df_copy[f'{prs2}_binary'] = (df[prs2] >= df[prs2].quantile(0.8)).astype(int)
-                        fig = plot_reclassification_table(df_copy, f'{prs1}_binary', f'{prs2}_binary')
-                        fig.savefig(f'{figPath}/reclassificationHeatMap.{prs1}v{prs2}.{file_ext}.png',dpi=150, bbox_inches='tight')
-                        plt.close(fig)
-                        
-                    except Exception as e:
-                        results['nri'][key][f'{measure}_low'] = {'error': str(e)}
+        for measure in binary_measures:
+            try:
+                results['nri'][f"{prs1}_vs_{measure}"] = {}
+                nri, nri_events, nri_non_events = calculate_nri(
+                    df_copy, measure, prs_col1, True
+                )
+                
+                
+                results['nri'][f"{prs1}_vs_{measure}"][measure] = {
+                    'nri': nri,
+                    'nri_events': nri_events,
+                    'nri_non_events': nri_non_events
+                }
 
-                        
+                                    
+            except Exception as e:
+                results['nri'][f"{prs1}_vs_{measure}"][measure] = {'error': str(e)}
+                
+            fig = plot_reclassification_table(df_copy, measure, prs_col1)
+            fig.savefig(f'{figPath}/reclassificationHeatMap.{measure}v{prs1}{file_ext}.png',dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            
+            fig = plot_low_clinical_reclassification_table(df_copy, measure, prs_col1)
+            fig.savefig(f'{figPath}/reclassificationHeatMap.LowOnly_{measure}v{prs1}{file_ext}.png',dpi=150, bbox_inches='tight')
+            plt.close(fig)
+            
+        
+#       if prs1 == 'combined_centile_bin':
+        fig,nri_summary = plot_nri_from_reclassification(df_copy,binary_measures,prs_col1)
+        plt.savefig(f'{figPath}/nri_comparison_clinical_vars_bar_chart.{prs1}.png', dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        
+        # Calculate AUC for all methods and binary measures
+        resultsLowClinicalTemp, resultsLowClinicalHighPRSTemp = calculate_auc(df_copy, prs1, binary_measures)
+        
+        resultsLowClinical = pd.concat([resultsLowClinical,resultsLowClinicalTemp],ignore_index=False)
+        resultsLowClinicalHighPRS = pd.concat([resultsLowClinicalHighPRS,resultsLowClinicalHighPRSTemp],ignore_index=False)
+        
+        for j, prs2 in enumerate(prs_methods):
+
+            if i >= j:  # Skip self-comparisons and repeated comparisons
+                continue
+            
+            if 'scaled_prs' in prs2:
+                df_copy[f'{prs2}_binary'] = df[prs2].quantile(0.8).astype(int)
+                prs_col2 = f'{prs2}_binary'
+            else:
+                base_prs2 = prs2.replace('_centile_bin','')
+                prs_col2 = f'{base_prs2}_high_risk'
+    
+            key = f"{prs1}_vs_{prs2}"
+            results['nri'][key] = {}
+    
+    
+            #get the calibration key in for comparing prs calculations
+#                   results['calibration'][key] = {}
+    
+            try:
+                if 'scaled_prs' in prs2:
+                    df_copy[f'{prs1}_binary'] = df[prs1].quantile(0.8).astype(int)
+                    df_copy[f'{prs2}_binary'] = df[prs2].quantile(0.8).astype(int)
+                    prs_col1 = f'{prs1}_binary'
+                    prs_col2 = f'{prs2}_binary'
+                    
+                else:
+                    base_prs1 = prs1.replace('_centile_bin','')
+                    prs_col1 = f'{base_prs1}_high_risk'
+                    base_prs2 = prs2.replace('_centile_bin','')
+                    prs_col2 = f'{base_prs2}_high_risk'
+
+                nri, nri_events, nri_non_events = calculate_nri(
+                    df_copy, prs_col1, prs_col2, False
+                )
+                results['nri'][key][f'{measure}_low'] = {
+                    'nri': nri,
+                    'nri_events': nri_events,
+                    'nri_non_events': nri_non_events
+                }
+                
+                fig = plot_reclassification_table(df_copy, prs_col1, prs_col2)
+                fig.savefig(f'{figPath}/reclassificationHeatMap.{prs1}v{prs2}{file_ext}.png',dpi=150, bbox_inches='tight')
+                plt.close(fig)
+
+            except Exception as e:
+                results['nri'][key][f'{measure}_low'] = {'error': str(e)}
+        
+    results['auc_low_clinical'] = resultsLowClinical
+    results['auc_low_clinical_high_prs'] = resultsLowClinicalHighPRS    
+    
+    
     return results
 
 
 
 def impute_clinical_data(train_df, test_df, clinical_columns, 
-                        prs_columns, outcome_column,
+                        outcome_column,
                         method='mean', visualize=True):
     """
     Impute missing values in clinical measures for PRS analysis
@@ -1023,13 +1571,11 @@ def impute_clinical_data(train_df, test_df, clinical_columns,
     Parameters:
     -----------
     train_df : pandas.DataFrame
-        DataFrame containing clinical measures, PRS, and outcome variables for training data
+        DataFrame containing clinical measures,  and outcome variables for training data
     test_df : pandas.DataFrame
-        DataFrame containing clinical measures, PRS, and outcome variables for training data
+        DataFrame containing clinical measures, and outcome variables for training data
     clinical_columns : list
         List of clinical measure column names that might contain missing values
-    prs_column : str
-        Name of the PRS column
     outcome_column : str
         Name of the outcome column
     method : str
@@ -1057,7 +1603,7 @@ def impute_clinical_data(train_df, test_df, clinical_columns,
         print(f"{col}: {count} values missing ({pct:.2f}%)")
         
     # Columns to use for imputation (can include PRS as predictor)
-    predictor_cols = clinical_columns + prs_columns
+    predictor_cols = clinical_columns.copy()
     if outcome_column in train_df.columns:
         predictor_cols += [outcome_column]  # Including outcome can improve imputation
         
@@ -1203,21 +1749,6 @@ def impute_clinical_data(train_df, test_df, clinical_columns,
                 
     return train_imputed, test_imputed
 
-def scale_data(df):
-
-    # Initialize the StandardScaler
-    scaler = StandardScaler()
-    
-    # Fit the scaler to your data (compute the mean and standard deviation)
-    scaler.fit(df)
-    
-    # Transform the data using the fitted scaler
-    scaled_data = scaler.transform(df)
-    
-    # Create a new DataFrame with the scaled data
-    scaled_df = pd.DataFrame(scaled_data, columns=df.columns,index=df.index)
-
-    return(scaled_df,scaler)
 
 def calculate_idi(data, data_validation, outcome_column, prs_column, clinical_column):
     """
@@ -1400,291 +1931,25 @@ def visualize_idi(p_clinical, p_combined, y_validation,idi_results,clinical_mark
     
     return fig
 
-# Example usage
-#def main(pheno,binary_to_use):
-#   """Run an example using simulated data to demonstrate the function"""
-#   # Generate simulated data
-#
-#
-#   if binary_to_use:
-#       file_ext = 'holdout'
-#   else:
-#       file_ext = 'validation'
-#   
-#   df = pd.read_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/reducedSHAP/combinedPRSGroupsWithcardio_main.csv')
-#   
-#   #prs columns to use in analysis
-#   prs_columns = [col for col in df.columns if 'prs_' in col]
-#   prs_columns = [col for col in prs_columns if 'scaled' not in col]
-#
-#   if pheno == 'type2Diabetes':
-#       clinical_columns = ['Glycated haemoglobin (HbA1c)','Body mass index (BMI)','Glucose']
-#       # Specify custom thresholds for some measures (optional)
-#       clinical_thresholds = {
-#           'Glycated haemoglobin (HbA1c)': 41,
-#           'Body mass index (BMI)': 25,
-#           'Glucose' : 12
-#       }
-#
-#   else:
-#       clinical_columns = ['Basal metabolic rate','Urea','Haemoglobin concentration']
-#       clinical_thresholds = None
-#       
-#
-#   
-#   clinical_data = pd.read_csv('/Users/kerimulterer/ukbiobank/tanigawaData/environmentalCleaned/combinedmetabolomicsBloodChemistryFeatures.csv',usecols=['Participant ID']+clinical_columns)
-#   clinical_data.rename(columns={'Participant ID':'IID'},inplace=True)
-#   
-#   data = df[['IID','PHENOTYPE']+prs_columns].merge(clinical_data, on=['IID'],how='left')
-#   
-#   
-#   #download validation data to calculate 
-#   validation_df = pd.read_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/reducedSHAP/holdout/CohortAssignedMax.EnvQuintiles.combinedPRSGroupsWithcardio_main1Kbins.holdout.csv')
-#
-#   
-#   try:
-#       validation_data = validation_df[['IID','PHENOTYPE']+prs_columns].merge(clinical_data, on=['IID'],how='left')
-#   except Exception as e:
-#       print('exception on merge : ',e)
-#       prs_columns = [col for col in prs_columns if col in validation_df.columns]
-#       validation_data = validation_df[['IID','PHENOTYPE']+prs_columns].merge(clinical_data, on=['IID'],how='left')
-#       #get the column that wasn't in validation data
-#       diff = list(set(list(data.columns)) - set(list(validation_data.columns)))
-#       
-#       data.drop(columns=diff,inplace=True)
-#   
-#   train_imputed, test_imputed = impute_clinical_data(data, validation_data, clinical_columns, prs_columns, 'PHENOTYPE', method='mean', visualize=False)
-#   
-#   scaled_data,scaler = scale_data(train_imputed.set_index(['IID','PHENOTYPE'])[prs_columns])
-#   scaled_data.columns = prs_columns
-#   scaled_data.reset_index(inplace=True)
-#   
-#   #merge with train_imputed 
-#   scaled_data = scaled_data.merge(train_imputed[clinical_columns+['IID']], on=['IID'],how='left')
-#   # Update values
-#   scaled_data.loc[scaled_data["PHENOTYPE"] == 1, "PHENOTYPE"] = 0
-#   scaled_data.loc[scaled_data["PHENOTYPE"] == 2, "PHENOTYPE"] = 1
-#
-#
-#   
-#   #scale validation data with scaler from training data
-#   scaled_validation_data = scaler.transform(test_imputed.set_index(['IID','PHENOTYPE'])[prs_columns])
-#   # Create a new DataFrame with the scaled data
-#   scaled_validation_data = pd.DataFrame(scaled_validation_data, columns=prs_columns,index=validation_data.set_index(['IID','PHENOTYPE']).index)
-#   scaled_validation_data.reset_index(inplace=True)
-#   
-#   #merge with train_imputed 
-#   scaled_validation_data = scaled_validation_data.merge(test_imputed[clinical_columns + ['IID']], on=['IID'],how='left')
-#   # Update values
-#   scaled_validation_data.loc[scaled_validation_data["PHENOTYPE"] == 1, "PHENOTYPE"] = 0
-#   scaled_validation_data.loc[scaled_validation_data["PHENOTYPE"] == 2, "PHENOTYPE"] = 1
-#   
-#   #merge the prscr_mix data not present in the validation data
-#   if binary_to_use:
-#       prs_validation = [col for col in validation_df.columns if 'scaled_prs' in col]
-#       prs_test = [col for col in df.columns if 'scaled_prs' in col]
-#       prs_diff = list(set(prs_validation)-set(prs_test))
-#       scaled_validation_data = scaled_validation_data.merge(validation_df[['IID']+prs_diff],on=['IID'],how='left')
-#       prs_columns = prs_columns + prs_diff
-#   
-#   
-#   # Run comprehensive comparison with direction-aware threshold conversion
-#   results, df_binary, df_validation_binary = compare_prs_performance(
-#       scaled_data, scaled_validation_data, prs_columns, clinical_columns, 
-#       binary_to_use=binary_to_use,
-#       clinical_thresholds=clinical_thresholds,
-#       outcome_column='PHENOTYPE'  # Use this to help determine risk direction
-#   )
-#   
-#   if binary_to_use:
-#       plot_df = df_validation_binary.copy()
-#   else:
-#       plot_df = df_binary.copy()
-#
-#   # Print thresholds and risk directions used
-#   print("Thresholds and risk directions used for binarization:")
-#   for measure in clinical_columns:
-#       direction = "Higher values → higher risk" if results['risk_directions'][measure] else "Lower values → higher risk"
-#       print(f"  {measure}: threshold = {results['thresholds_used'][measure]}, {direction}")
-#       
-#       # Plot risk distribution for clinical measures
-#       fig = plot_risk_distribution(
-#           plot_df, 
-#           measure, 
-#           f'{measure}_binary',
-#           results['thresholds_used'][measure],
-#           higher_is_riskier=results['risk_directions'][measure]
-#       )
-#       plt.title(f"Distribution of {measure}")
-#       fig.savefig(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/figures/validation/clinicalFigures/riskDistribution.{measure}.{file_ext}.png')
-#       
-#       fig = plot_calibration_curves(results['calibration'], prs_columns, f'{measure}_binary', figsize=(10, 8))
-#       fig.savefig(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/figures/validation/clinicalFigures/calibrationPlots.{measure}.lowRisk.{file_ext}.png')
-#   
-##       for prs in prs_columns:
-##           if measure != 'None':
-##               fig = results['auc_plots'][prs][f'{measure}_binary']
-##           else:
-##               fig = results['auc_plots'][prs][measure]
-##           fig.savefig(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/figures/validation/clinicalFigures/AUC.{measure}.lowRisk.{prs}.png')
-#           
-#
-#   
-#   
-#   # Print AUC results
-#   print("\nAUC Results low clinical all prs:")
-#   print(results['auc_low_clinical'])
-##   results['auc_low_clinical'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossPRSLowClinicalMeasure.{file_ext}.csv')
-#   
-#   # Print AUC results
-#   print("\nAUC Results low clinical high prs")
-#   print(results['auc_low_clinical_high_prs'])
-##   results['auc_low_clinical_high_prs'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossHighPRSLowClinicalMeasure.{file_ext}.csv')
-#   
-#   
-#   # Print example NRI result
-##   bin_measure = f"{measure}_binary"
-##   print(f"\nNRI Example (Method1 vs Method2 for {bin_measure}):")
-##   print(results['nri'][f'{prs_columns[0]}_vs_{prs_columns[1]}'][bin_measure])
-#       
-#
-#   #calculate idi with both validation and holdout
-#   if not binary_to_use: 
-#   #   # Calculate IDI
-#       results['idi'] = {}
-#       
-#       scaled_data,scaler = scale_data(train_imputed.set_index(['IID','PHENOTYPE']))
-#       scaled_data.columns = prs_columns+clinical_columns
-#       scaled_data.reset_index(inplace=True)
-#       scaled_data.loc[scaled_data["PHENOTYPE"] == 1, "PHENOTYPE"] = 0
-#       scaled_data.loc[scaled_data["PHENOTYPE"] == 2, "PHENOTYPE"] = 1
-#   #   
-#       #scale validation data with scaler from training data
-#       scaled_validation_data = scaler.transform(test_imputed.set_index(['IID','PHENOTYPE']))
-#       
-#       # Create a new DataFrame with the scaled data
-#       scaled_validation_data = pd.DataFrame(scaled_validation_data, columns=prs_columns+clinical_columns,index=validation_data.set_index(['IID','PHENOTYPE']).index)
-#       scaled_validation_data.reset_index(inplace=True)
-#       scaled_validation_data.loc[scaled_validation_data["PHENOTYPE"] == 1, "PHENOTYPE"] = 0
-#       scaled_validation_data.loc[scaled_validation_data["PHENOTYPE"] == 2, "PHENOTYPE"] = 1
-#       
-#       for clinical_column in clinical_columns:
-#           #attach the binary outcome for high, low risk
-#           scaled_data = scaled_data.merge(df_binary[['IID',f'{clinical_column}_binary']],how='left')
-#           scaled_validation_data = scaled_validation_data.merge(df_validation_binary[['IID',f'{clinical_column}_binary']],how='left')
-#           
-#           #calculate IDI for all prs calculations
-#           idi_results,fig = calculate_idi(scaled_data, scaled_validation_data, 'PHENOTYPE', prs_columns, clinical_column)
-#           results['idi']['all_prs_calculations'] = idi_results
-#           
-#           print("IDI Analysis Results: for combined PRS calculations and {clinical_column}")
-#           print(f"IDI: {idi_results[clinical_column]['IDI']:.4f}")
-#           print(f"95% CI: ({idi_results[clinical_column]['IDI_CI_lower']:.4f}, {idi_results[clinical_column]['IDI_CI_upper']:.4f})")
-#           print(f"P-value: {idi_results[clinical_column]['p_value']:.4f}")
-#           print(f"Clinical AUC: {idi_results[clinical_column]['clinical_auc']:.4f}")
-#           print(f"Combined AUC: {idi_results[clinical_column]['combined_auc']:.4f}")
-#           
-#           fig.savefig(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/figures/validation/clinicalFigures/idi.{clinical_column}.performance.combinedPRS.{file_ext}.png')
-#           
-#           for prs_column in prs_columns:
-#               idi_results,fig = calculate_idi(scaled_data, scaled_validation_data, 'PHENOTYPE', prs_column, clinical_column)
-#               results['idi'][prs_column] = idi_results
-#               
-#               print(f"IDI Analysis Results: for prs {prs_column} and {clinical_column}")
-#               print(f"IDI: {idi_results[clinical_column]['IDI']:.4f}")
-#               print(f"95% CI: ({idi_results[clinical_column]['IDI_CI_lower']:.4f}, {idi_results[clinical_column]['IDI_CI_upper']:.4f})")
-#               print(f"P-value: {idi_results[clinical_column]['p_value']:.4f}")
-#               print(f"Clinical AUC: {idi_results[clinical_column]['clinical_auc']:.4f}")
-#               print(f"Combined AUC: {idi_results[clinical_column]['combined_auc']:.4f}")
-#               
-#           
-#               fig.savefig(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/figures/validation/clinicalFigures/idi.{clinical_column}.performance.{prs_column}.{file_ext}.png')
-#
-#
-#   #put the auc results into a combined dataframe to save
-#   clinical_auc = pd.DataFrame()
-#   auc_list = [x for x in results.keys() if 'auc' in x]
-#   for k in auc_list:
-#       auc_df = results[k]
-#       auc_df['threshold_used'] = k
-#       clinical_auc = pd.concat([clinical_auc,auc_df],ignore_index=False)
-#       del results[k]
-#       
-#   clinical_auc.reset_index(inplace=True)
-#   clinical_auc.columns = ['prs_type'] + list(clinical_auc.columns[1:])
-#   
-#   clinical_auc.to_csv(f"/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/data/clinicalMeasures/prsAUC.wrt.clinicalMeasures.{file_ext}.csv",index=False)
-#   
-#   # Save to a JSON file
-##   with open(f"/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/data/clinicalMeasures/ClincalMeasuresValidationSet.json", "w") as f:
-##       json.dump(results, f, indent=4)
-#   
-#   #put nri data into a csv
-#   df_nri = pd.DataFrame()
-#   for prs in results['nri'].keys():
-#       prs_nri = pd.DataFrame(results['nri'][prs]).T
-#       prs_nri['prs_calc'] = prs
-#       prs_nri.reset_index(inplace=True)
-#       prs_nri.columns = ['clinical_measure'] + list(prs_nri.columns[1:])
-#       df_nri = pd.concat([df_nri,prs_nri],ignore_index=True)
-#   df_nri.to_csv(f"/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/data/clinicalMeasures/nri.wrt.clinicalMeasures.{file_ext}.csv",index=False)
-#   
-#
-#   try:
-#       #put idi values across clinical markers into a dataframe
-#       df_idi = pd.DataFrame()
-#       for prs in results['idi'].keys():
-#           prs_idi = pd.DataFrame(results['idi'][prs]).T
-#           prs_idi['prs_calc'] = prs
-#           df_idi = pd.concat([df_idi,prs_idi],ignore_index=False)
-#       df_idi.reset_index(inplace=True)
-#       df_idi.columns = ['clinical_measure'] + list(df_idi.columns[1:])
-#       df_idi.to_csv(f"/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/data/clinicalMeasures/idi.wrt.clinicalMeasures.{file_ext}.csv",index=False)
-#       
-#   except KeyError:
-#       print(f'no idi calculated for {binary_to_use} .... ')
-#   
-#   #get calibration data
-#   df_calibration = pd.DataFrame()
-#   for prs in results['calibration'].keys():
-#       prs_cal = pd.DataFrame(results['calibration'][prs]).T
-#       prs_cal['prs_calc'] = prs
-#       df_calibration = pd.concat([df_calibration,prs_cal],ignore_index=False) 
-#       
-#   df_calibration.reset_index(inplace=True)
-#   df_calibration.columns = ['clinical_measure'] + list(df_calibration.columns[1:])
-#   df_calibration.to_csv(f"/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/data/clinicalMeasures/calibration.wrt.clinicalMeasures.{file_ext}.csv",index=False)
-#
-#
-#   for k in ['risk_directions','thresholds_used']:
-#       try:
-#           thresholds_risk[k] = pd.DataFrame(results[k],index=[k]).T
-#       except UnboundLocalError:
-#           thresholds_risk = pd.DataFrame(results[k],index=[k]).T
-#           
-#   thresholds_risk.reset_index(inplace=True)
-#   thresholds_risk.columns = ['clinical_measure'] + list(thresholds_risk.columns[1:])
-#           
-#   thresholds_risk.to_csv(f"/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/data/clinicalMeasures/thresholdsRiskDirection.wrt.clinicalMeasures.{file_ext}.csv",index=False)
     
     
-#   return results, df_binary, df_validation_binary
-    
-def main(pheno,dataPath):
+def main(pheno,pheno_data,results_path):
     """Run an example using simulated data to demonstrate the function"""
-    
-    
-    
     # Generate simulated data
-    figPath = f'{dataPath}/results/{pheno}/figures/clinicalFigures'
-    scoresPath = f'{dataPath}/results/{pheno}/scores'
+    figPath = f'{pheno_data}/figures/clinicalFigures'
+    scoresPath = f'{pheno_data}/scores/clinicalMeasures'
+    # Creates directory and all parent directories if needed
+    # Does nothing if it already exists (no error)
+    os.makedirs(f'{figPath}', exist_ok=True)
     
-    df = pd.read_csv(f'{scoresPath}/combinedPRSGroups.csv')
-    validation_df = pd.read_csv(f'{scoresPath}/combinedPRSGroups.holdout.csv')
+    os.makedirs(f'{scoresPath}', exist_ok=True)
+    
+    df = pd.read_csv(f'{pheno_data}/scores/combinedPRSGroups.csv')
+    validation_df = pd.read_csv(f'{pheno_data}/scores/combinedPRSGroups.holdout.csv')
     
     #prs columns to use in analysis
-    prs_columns = [col for col in df.columns if 'prs_' in col]
-    prs_columns = [col for col in prs_columns if 'scaled' not in col]
+#   prs_columns = [col for col in df.columns if 'scaled_prs' in col]
+    #prs_columns = [col for col in prs_columns if 'scaled' not in col]
     
     if pheno == 'type2Diabetes':
         clinical_columns = ['Glycated haemoglobin (HbA1c)','Body mass index (BMI)','Glucose']
@@ -1700,150 +1965,145 @@ def main(pheno,dataPath):
         clinical_thresholds = None
         
         
-    clinical_data = pd.read_csv(f'{dataPath}/participant_environment.csv',usecols=['Participant ID']+clinical_columns)
+    clinical_data = pd.read_csv(f'{results_path}/participant_environment.csv',usecols=['Participant ID']+clinical_columns)
     clinical_data.rename(columns={'Participant ID':'IID'},inplace=True)
     
-    data = df[['IID','PHENOTYPE']+prs_columns].merge(clinical_data, on=['IID'],how='left')
-    
-    
-    try:
-        validation_data = validation_df[['IID','PHENOTYPE']+prs_columns].merge(clinical_data, on=['IID'],how='left')
-    except Exception as e:
-        print('exception on merge : ',e)
-        prs_columns = [col for col in prs_columns if col in validation_df.columns]
-        validation_data = validation_df[['IID','PHENOTYPE']+prs_columns].merge(clinical_data, on=['IID'],how='left')
-        #get the column that wasn't in validation data
-        diff = list(set(list(data.columns)) - set(list(validation_data.columns)))
+    #combine clinical data with PHENOTYPE for imputation methods
+    data = df[['IID','PHENOTYPE']].merge(clinical_data, on=['IID'],how='left')
+    validation_data = validation_df[['IID','PHENOTYPE']].merge(clinical_data, on=['IID'],how='left')
         
-        data.drop(columns=diff,inplace=True)
-        
-    train_imputed, test_imputed = impute_clinical_data(data, validation_data, clinical_columns, prs_columns, 'PHENOTYPE', method='mean', visualize=False)
+    train_imputed, test_imputed = impute_clinical_data(data, validation_data, clinical_columns, 'PHENOTYPE', method='mean', visualize=False)
     
-    scaled_data,scaler = scale_data(train_imputed.set_index(['IID','PHENOTYPE'])[prs_columns])
-    scaled_data.columns = prs_columns
-    scaled_data.reset_index(inplace=True)
+    #merge with clinical train_imputed 
+    train_data_clinical = df.merge(train_imputed, on=['IID','PHENOTYPE'],how='left')
     
-    #merge with train_imputed 
-    scaled_data = scaled_data.merge(train_imputed[clinical_columns+['IID']], on=['IID'],how='left')
     # Update values
-    scaled_data.loc[scaled_data["PHENOTYPE"] == 1, "PHENOTYPE"] = 0
-    scaled_data.loc[scaled_data["PHENOTYPE"] == 2, "PHENOTYPE"] = 1
+    train_data_clinical.loc[train_data_clinical["PHENOTYPE"] == 1, "PHENOTYPE"] = 0
+    train_data_clinical.loc[train_data_clinical["PHENOTYPE"] == 2, "PHENOTYPE"] = 1
     
-    
-    
-    #scale validation data with scaler from training data
-    scaled_validation_data = scaler.transform(test_imputed.set_index(['IID','PHENOTYPE'])[prs_columns])
-    # Create a new DataFrame with the scaled data
-    scaled_validation_data = pd.DataFrame(scaled_validation_data, columns=prs_columns,index=validation_data.set_index(['IID','PHENOTYPE']).index)
-    scaled_validation_data.reset_index(inplace=True)
-    
-    #merge with train_imputed 
-    scaled_validation_data = scaled_validation_data.merge(test_imputed[clinical_columns + ['IID']], on=['IID'],how='left')
-    # Update values
-    scaled_validation_data.loc[scaled_validation_data["PHENOTYPE"] == 1, "PHENOTYPE"] = 0
-    scaled_validation_data.loc[scaled_validation_data["PHENOTYPE"] == 2, "PHENOTYPE"] = 1
-    
-    #merge the prscr_mix data not present in the validation data
-    
-    prs_validation = [col for col in validation_df.columns if 'scaled_prs' in col]
-    prs_test = [col for col in df.columns if 'scaled_prs' in col]
-    prs_diff = list(set(prs_validation)-set(prs_test))
-    prs_diff = [col.replace('scaled_','') for col in prs_diff]
-    scaled_validation_data = scaled_validation_data.merge(validation_df[['IID']+prs_diff],on=['IID'],how='left')
+    holdout_data_clinical = validation_df.merge(test_imputed, on=['IID','PHENOTYPE'],how='left')
+    holdout_data_clinical.loc[holdout_data_clinical["PHENOTYPE"] == 1, "PHENOTYPE"] = 0
+    holdout_data_clinical.loc[holdout_data_clinical["PHENOTYPE"] == 2, "PHENOTYPE"] = 1
+
     
     # First convert clinical measures to binary if needed
     df_binary_test, df_binary_validation, used_thresholds, determined_directions = convert_to_binary(
-        scaled_data, scaled_validation_data, clinical_columns, thresholds=clinical_thresholds, 
+        train_data_clinical, holdout_data_clinical, clinical_columns, thresholds=clinical_thresholds, 
         high_risk_quintile=True, risk_directions=None,outcome_column='PHENOTYPE'
     )
     
     
-    for item_tuple in [(df_binary_validation,'holdout'),(df_binary_test,'')]:
-        
+#   for item_tuple in [(df_binary_validation,'holdout'),(df_binary_test,'')]:
+    for item_tuple in [(df_binary_validation,'holdout')]:
+            
         
     # Print thresholds and risk directions used
         df_binary = item_tuple[0].copy()
         file_ext = item_tuple[1]
         
-        # Run comprehensive comparison with direction-aware threshold conversion
-        results = compare_prs_performance(
-            df_binary, clinical_columns, figPath, file_ext,
-            risk_thresholds=used_thresholds,
-            outcome_column='PHENOTYPE'  # Use this to help determine risk direction
-        )
+        create_sankey_plot_clinical_data(df_binary,figPath,use_epi_main=False)
         
+        for eval_type in ['centile_bin','scaled_prs']:   
+            prs_methods = [col for col in df_binary if eval_type in col]
         
-        results['thresholds_used'] = used_thresholds
-        results['risk_directions'] = determined_directions
-        
-        print("Thresholds used for binarization:")
-        print(f'\nthresholds: {used_thresholds}')
-        
-        
-        # Print AUC results
-        print(f"\n Clinical measures for {file_ext} results")
-        print("\nAUC Results low clinical all prs:")
-        print(results['auc_low_clinical'])
-#       results['auc_low_clinical'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossPRSLowClinicalMeasure.{file_ext}.csv')
-        
-        # Print AUC results
-        print("\nAUC Results low clinical high prs")
-        print(results['auc_low_clinical_high_prs'])
-#       results['auc_low_clinical_high_prs'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossHighPRSLowClinicalMeasure.{file_ext}.csv')
-        
-        #put the auc results into a combined dataframe to save
-        clinical_auc = pd.DataFrame()
-        auc_list = [x for x in results.keys() if 'auc' in x]
-        for k in auc_list:
-            auc_df = results[k]
-            auc_df['threshold_used'] = k
-            clinical_auc = pd.concat([clinical_auc,auc_df],ignore_index=False)
-            del results[k]
-            
-        clinical_auc.reset_index(inplace=True)
-        clinical_auc.columns = ['prs_type'] + list(clinical_auc.columns[1:])
-        
-        clinical_auc.to_csv(f"/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/data/clinicalMeasures/prsAUC.wrt.clinicalMeasures.{file_ext}.csv",index=False)
-        
-        for measure in clinical_columns:
-            direction = "Higher values → higher risk" if results['risk_directions'][measure] else "Lower values → higher risk"
-            print(f"  {measure}: threshold = {results['thresholds_used'][measure]}, {direction}")
-            
-            # Plot risk distribution for clinical measures
-            fig = plot_risk_distribution(
-                df_binary, 
-                measure, 
-                f'{measure}_binary',
-                results['thresholds_used'][measure],
-                higher_is_riskier=results['risk_directions'][measure]
+            # Run comprehensive comparison with direction-aware threshold conversion
+            results = compare_prs_performance(
+                df_binary, clinical_columns, figPath, file_ext, prs_methods,
+                risk_thresholds=used_thresholds,
+                outcome_column='PHENOTYPE'  # Use this to help determine risk direction
             )
-            plt.title(f"Distribution of {measure}")
-            fig.savefig(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/figures/validation/clinicalFigures/riskDistribution.{measure}.{file_ext}.png')
-            plt.close(fig)
+            
+
+            results['thresholds_used'] = used_thresholds
+            results['risk_directions'] = determined_directions
+            
+            print("Thresholds used for binarization:")
+            print(f'\nthresholds: {used_thresholds}')
+            
+            
+            # Print AUC results
+            print(f"\n Clinical measures for {file_ext} results")
+            print("\nAUC Results low clinical all prs:")
+            print(results['auc_low_clinical'])
+            auc_low_clinical = results['auc_low_clinical']
+    #       results['auc_low_clinical'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossPRSLowClinicalMeasure{file_ext}.csv')
+            
+            # Print AUC results
+            print("\nAUC Results low clinical high prs")
+            print(results['auc_low_clinical_high_prs'])
+            auc_low_clinical_high_prs = results['auc_low_clinical_high_prs']
+    #       results['auc_low_clinical_high_prs'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossHighPRSLowClinicalMeasure{file_ext}.csv')
+            
+            #put the auc results into a combined dataframe to save
+            clinical_auc = pd.DataFrame()
+            auc_list = [x for x in results.keys() if 'auc' in x]
+            for k in auc_list:
+                auc_df = results[k]
+                auc_df['threshold_used'] = k
+                clinical_auc = pd.concat([clinical_auc,auc_df],ignore_index=False)
+                del results[k]
+                
+            clinical_auc.reset_index(inplace=True)
+            clinical_auc.columns = ['prs_type'] + list(clinical_auc.columns[1:])
+            
+            #clinical_auc.to_csv(f"{scoresPath}/prsAUC.wrt.clinicalMeasures{file_ext}.csv",index=False)
+            
 
             
-        #put nri data into a csv
-        df_nri = pd.DataFrame()
-        for prs in results['nri'].keys():
-            prs_nri = pd.DataFrame(results['nri'][prs]).T
-            prs_nri['prs_calc'] = prs
-            prs_nri.reset_index(inplace=True)
-            prs_nri.columns = ['clinical_measure'] + list(prs_nri.columns[1:])
-            df_nri = pd.concat([df_nri,prs_nri],ignore_index=True)
-        df_nri.to_csv(f"/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/data/clinicalMeasures/nri.wrt.clinicalMeasures.{file_ext}.csv",index=False)
-
-        
-        
-        for k in ['risk_directions','thresholds_used']:
-            try:
-                thresholds_risk[k] = pd.DataFrame(results[k],index=[k]).T
-            except UnboundLocalError:
-                thresholds_risk = pd.DataFrame(results[k],index=[k]).T
+            
+            for measure in clinical_columns:
+                direction = "Higher values → higher risk" if results['risk_directions'][measure] else "Lower values → higher risk"
+                print(f"  {measure}: threshold = {results['thresholds_used'][measure]}, {direction}")
                 
-        thresholds_risk.reset_index(inplace=True)
-        thresholds_risk.columns = ['clinical_measure'] + list(thresholds_risk.columns[1:])
+                # Plot risk distribution for clinical measures
+                fig = plot_risk_distribution(
+                    df_binary, 
+                    measure, 
+                    f'{measure}_binary',
+                    results['thresholds_used'][measure],
+                    higher_is_riskier=results['risk_directions'][measure]
+                )
+                plt.title(f"Distribution of {measure}")
+                fig.savefig(f'{figPath}/riskDistribution.{measure}{file_ext}.png')
+                plt.close(fig)
+            
+            
+            #put nri data into a csv
+            df_nri = pd.DataFrame()
+            for prs in results['nri'].keys():
+                prs_nri = pd.DataFrame(results['nri'][prs]).T
+                prs_nri['prs_calc'] = prs
+                prs_nri.reset_index(inplace=True)
+                prs_nri.columns = ['clinical_measure'] + list(prs_nri.columns[1:])
+                df_nri = pd.concat([df_nri,prs_nri],ignore_index=True)
+                #df_nri.to_csv(f"{scoresPath}/nri.wrt.clinicalMeasures{file_ext}.csv",index=False)
+    
+            
+            
+            for k in ['risk_directions','thresholds_used']:
+                try:
+                    thresholds_risk[k] = pd.DataFrame(results[k],index=[k]).T
+                except UnboundLocalError:
+                    thresholds_risk = pd.DataFrame(results[k],index=[k]).T
+                    
+            thresholds_risk.reset_index(inplace=True)
+            thresholds_risk.columns = ['clinical_measure'] + list(thresholds_risk.columns[1:])
+            
+            #thresholds_risk.to_csv(f"{scoresPath}/thresholdsRiskDirection.wrt.clinicalMeasures{file_ext}.csv",index=False)
+            
+            # Export results to Excel with multiple sheets
+            with pd.ExcelWriter(f'{scoresPath}/clinicalMeasurePerformanceResults{file_ext}.{eval_type}.xlsx') as writer:
+                thresholds_risk.to_excel(writer, sheet_name='thresholds RiskDirection')
+                df_nri.to_excel(writer, sheet_name='nri')
+                clinical_auc.to_excel(writer, sheet_name='auc ')
+                auc_low_clinical_high_prs.to_excel(writer, sheet_name='auc low clinical high prs')
+                auc_low_clinical.to_excel(writer, sheet_name='auc low clinical')
+                
+            print(f"\nResults exported to 'clinicalMeasurePerformanceResults{file_ext}.{eval_type}.xlsx'")
+            
+        #save binary file with prs calculation and clinical marker data
+        df_binary.to_csv(f"{scoresPath}/combinedPRS.holdout.ClinicalMeasures.csv",index=False)
         
-        thresholds_risk.to_csv(f"/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/data/clinicalMeasures/thresholdsRiskDirection.wrt.clinicalMeasures.{file_ext}.csv",index=False)
         
         
         
@@ -1851,17 +2111,39 @@ def main(pheno,dataPath):
         
 if __name__ == '__main__':
     
-    pheno = 'type2Diabetes'
-    main(pheno)
+    parser = argparse.ArgumentParser(description="Calculating clinical performance measures against prs ....")
+    parser.add_argument("--pheno_data",help="path to pheno results directory")
+    parser.add_argument("--pheno",help="path to pheno")
+    parser.add_argument("--results_path",help="path to cleaned covariate file")
     
+    args = parser.parse_args()
+    
+    pheno = args.pheno or os.environ.get("PHENO")
+    print(f"[PYTHON] Phenotype is : {pheno}")
+    
+    pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
+    print(f"[PYTHON] Reading from: {pheno_data}")
+    
+    results_path = args.results_path or os.environ.get("RESULTS_PATH")
+    print(f"[PYTHON] Reading from: {results_path}")
+    
+    pheno = "type2Diabetes"    
+    pheno_data = "/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi"
+    results_path = "/Users/kerimulterer/prsInteractive/results"
+    
+    
+    if not pheno_data:
+        raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")
+    
+    if not pheno:
+        raise ValueError("You must provide a phenotype via --pheno or set the PHENO environment variable.")
+        
+    if not results_path:
+        raise ValueError("You must provide a results path via --results_path or set the RESULTS_PATH environment variable.")
+        
+    main(pheno,pheno_data,results_path)
     
 
-    
-#if __name__ == '__main__':
-#   
-#   pheno = 'celiacDisease'
-#   for t in [False,True]:
-#       main(pheno,t)
     
     
     

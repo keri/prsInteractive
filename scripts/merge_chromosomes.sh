@@ -2,22 +2,32 @@
 
 #pheno='type2Diabetes'
 pheno=$1
+EPI_COMBO=${2:-"sum"}
 # Source config
-source ../env.config # because you're in prsInteractive/hpc
+source ../env.config # because you're in prsInteractive/scripts
+
+if [ "${EPI_COMBO}" == "sum" ]; then
+	COMBO_FOLDER='summedEpi'
+else
+	COMBO_FOLDER='productEpi'
+fi
+echo "[WORKFLOW] RESULTS_PATH is set to : $RESULTS_PATH"
+PHENO_DATA="${RESULTS_PATH}/$pheno/${COMBO_FOLDER}"
 
 #check that a results folder for phenotype exists
-if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
-	echo "Folder '${RESULTS_PATH}/$pheno' does not exist..."
+if [ ! -d "${PHENO_DATA}" ]; then
+	echo "Folder $PHENO_DATA does not exist..."
 	echo "run envSetUp.sh <pheno> <icd10> <phenoStr> <n cores to use in epistatic interaction analysis>"
 	exit 1
 	
 else
 	echo "sourcing $pheno env variables."
 	#source pheno specific environment variables
-	source "${RESULTS_PATH}/$pheno/pheno.config"
+	source "${PHENO_DATA}/pheno.config"
 fi
 
-export PHENO_PATH=$PHENO_PATH
+
+export PHENO_PATH
 
 
 OUTPUT_FILE="${PHENO_PATH}/mergeChromosomeList.txt"
@@ -75,51 +85,49 @@ plink --bfile "${PHENO_PATH}"/merged_allChromosomes --recode A --keep "${PHENO_P
 
 ####################### CONVERT COLUMNS IN FILES TO REMOVE THE VARIANTS IN ORDER TO MATCH OUTPUT FROM EPISTATIC ANALYSIS  #############################
 
-awk 'BEGIN{FS="\t"; OFS=" "} {
-for (i=1; i<=NF; i++) {
-sub(/_[^_]*$/, "", $i)
-}
-for (i=1; i<=NF; i++) {
-printf "%s", $i
-if (i < NF) printf " "
-}
-printf "\n"
+####################### CONVERT COLUMNS AND FIX DELIMITERS #############################
+
+# Holdout - removes everything after last underscore
+awk 'BEGIN{OFS=" "} {
+	for (i=1; i<=NF; i++) {
+		sub(/_[^_]*$/, "", $i)  # Matches _anything at the end
+	}
+	print
 }' "${PHENO_PATH}/holdoutCombinedRaw.raw" > "${PHENO_PATH}/holdoutCombined.raw"
-	
+
 rm "${PHENO_PATH}/holdoutCombinedRaw.raw"
 
-
-awk 'BEGIN{FS="\t"; OFS=" "} NR==1 {
-for (i=1; i<=NF; i++) {
-sub(/_[^_]*$/, "", $i)
-}
-} { print }' "trainingCombinedRaw.raw" > "trainingCombined.raw"
-
+# Training
+awk 'BEGIN{OFS=" "} {
+	for (i=1; i<=NF; i++) {
+		sub(/_[^_]*$/, "", $i)
+	}
+	print
+}' "${PHENO_PATH}/trainingCombinedRaw.raw" > "${PHENO_PATH}/trainingCombined.raw"
 
 rm "${PHENO_PATH}/trainingCombinedRaw.raw"
 
-
-awk 'BEGIN{FS="\t"; OFS=" "} NR==1 {
-for (i=1; i<=NF; i++) {
-sub(/_[^_]*$/, "", $i)
-}
-} { print }' "${PHENO_PATH}/testCombinedRaw.raw" > "${PHENO_PATH}/testCombined.raw"
-
+# Test
+awk 'BEGIN{OFS=" "} {
+	for (i=1; i<=NF; i++) {
+		sub(/_[^_]*$/, "", $i)
+	}
+	print
+}' "${PHENO_PATH}/testCombinedRaw.raw" > "${PHENO_PATH}/testCombined.raw"
 
 rm "${PHENO_PATH}/testCombinedRaw.raw"
 
-
 # Validate pheno_config file exists 
-if [ ! -f "$PHENO_PATH/pheno.config" ]; then
+if [ ! -f "$PHENO_DATA/pheno.config" ]; then
 	echo "Creating pheno_config file '${PHENO_PATH}/pheno.config' ... "
-	touch "$PHENO_PATH/pheno.config"
+	touch "$PHENO_DATA/pheno.config"
 	
 else
-	echo "Pheno_config file '${PHENO_PATH}/pheno.config' already exists ... "
+	echo "Pheno_config file '${PHENO_DATA}/pheno.config' already exists ... "
 fi
 
 
-PHENO_CONFIG="$PHENO_PATH/pheno.config"
+PHENO_CONFIG="$PHENO_DATA/pheno.config"
 
 TEST_PATH="${PHENO_PATH}/testCombined.raw"
 export TEST_PATH

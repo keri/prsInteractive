@@ -12,15 +12,12 @@ import os
 data_path = os.environ.get("DATA_PATH")
 print(f"[PYTHON] Reading from: {data_path}")
 
-# Prefer command-line input if provided; fallback to env var
-results_path = os.environ.get("RESULTS_PATH")
-print(f"[PYTHON] writing to: {results_path}")
-
-pheno_path = os.environ.get("PHENO_PATH")
-print(f"[PYTHON] Reading from: {pheno_path}")
-
-pheno = os.environ.get("PHENO")
-print(f"[PYTHON] Phenotype : {pheno}")
+#
+#pheno_path = os.environ.get("PHENO_PATH")
+#print(f"[PYTHON] Reading from: {pheno_path}")
+#
+#pheno = os.environ.get("PHENO")
+#print(f"[PYTHON] Phenotype : {pheno}")
 
 #participant_columns = ["Participant ID",
 #    "Diagnoses - main ICD10",
@@ -87,7 +84,8 @@ environmentalData = covar[['IID']]
 environmentalData.columns = ['Participant ID']
 
 for measure,thresholds in clinical_measures.items():
-    environmentalData[measure] = np.random.randint(thresholds[0], thresholds[1], len(environmentalData))
+#   environmentalData[measure] = np.random.randint(thresholds[0], thresholds[1], len(environmentalData))
+    environmentalData.loc[:, measure] = np.random.randint(thresholds[0], thresholds[1], len(environmentalData))
     
     # Percentage of rows to set as NaN (e.g., 30%)
     percentage = thresholds[2]
@@ -190,9 +188,13 @@ participants.loc[selected_rows, 'Date E11 first reported (non-insulin-dependent 
 
 withdrawals = covar.sample(n=3)[['IID','FID']]
 
+#also create a withdrawalsID.txt to use in --remove argument for plink cleaning step
+withdrawalsID = withdrawals.copy()
+
+
 
 #change Participant ID to int which will be done for the remaining data as well
-withdrawals['IID'] = withdrawals['IID'].apply( lambda x : int(x.replace('per','')))
+#withdrawals['IID'] = withdrawals['IID'].apply( lambda x : int(x.replace('per','')))
 
 
 # Save files
@@ -206,11 +208,11 @@ try:
     #the download data function need IID in format int N
     withdrawals[['IID']].to_csv(f"{data_path}/withdrawals.csv",index=False,header=None)
     #the cleaning process needs IID in format of perN
-    withdrawals[['IID','FID']].to_csv(f"{data_path}/withdrawalsID.txt",sep=' ',index=False,header=None)
+    withdrawalsID.to_csv(f"{data_path}/withdrawalsID.txt",sep=' ',index=False,header=None)
     
     
     print(f"\nSuccessfully saved files to {data_path}:")
-    for filename in ['participant.csv','hla_participant.csv','ukb_hla_v2.txt','withdrawals.csv',"withdrawalsID.txt",'covar.txt']:
+    for filename in ['participant.csv','hla_participant.csv','ukb_hla_v2.txt','withdrawals.csv',"withdrawalsID.txt",'covar.txt',"participant_environment.csv"]:
         filepath = os.path.join(data_path, filename)
         if os.path.exists(filepath):
             print(f"  ✅ {filename} ({os.path.getsize(filepath)} bytes)")

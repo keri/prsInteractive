@@ -54,7 +54,7 @@ def download_data(pheno_path,i,data_type,test_path,epi_path,withdrawal_path):
             
     
     
-def main(pheno_path,test_path,epi_file,withdrawal_path):
+def main(pheno_path,test_path,epi_file,withdrawal_path,epi_combo,threshold):
     figPath = f'{pheno_path}/figures'
     scoresPath = f'{pheno_path}/scores'
     modelPath = f'{pheno_path}/models'
@@ -107,9 +107,9 @@ def main(pheno_path,test_path,epi_file,withdrawal_path):
             print('Xmain array = ',Xmain.shape)
             
             if data_type != 'main':
-                Xmain = create_epi_df(Xmain,sectionPairs,combo="sum")
+                Xmain = create_epi_df(Xmain,sectionPairs,combo=epi_combo)
                 
-            topFeatures,featuresZscores = calculate_plot_shap_values(clfHGB,Xmain,y,i,figPath,data_type)
+            topFeatures,featuresZscores = calculate_plot_shap_values(clfHGB,Xmain,y,i,figPath,data_type,threshold)
             #get the featureZscores into a dataframe to merge with dfSnps2
             zscores = pd.DataFrame(data=featuresZscores).reset_index()
             zscores.columns=['feature','shap_zscore']
@@ -151,5 +151,7 @@ if __name__ == '__main__':
     test_path = f'/nfs/scratch/projects/ukbiobank/prsInteractive/results/{pheno}/testCombined.raw'
     epi_file = f'/nfs/scratch/projects/ukbiobank/prsInteractive/results/{pheno}/epiFiles/trainingCombinedEpi.epi.cc.summary.filtered'
     withdrawal_path=f'/nfs/scratch/projects/ukbiobank/prsInteractive/data/withdrawals.csv'
+    epi_combo='sum'
+    threshold=1.99
     
-    main(pheno_path,test_path,epi_file,withdrawal_path)
+    main(pheno_path,test_path,epi_file,withdrawal_path,epi_combo,threshold)

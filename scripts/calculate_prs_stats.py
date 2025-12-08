@@ -3,6 +3,9 @@
 import pandas as pd
 import os
 import argparse
+import sys
+from datetime import datetime
+from helper.mcnemar_stats_tests import *
 
 def add_iid_simple(long_df, phenotype_df):
     
@@ -118,7 +121,7 @@ def calculate_fp_fn_tp_percentile_alt_coding(df, cohort, phenotype_col='PHENOTYP
     
     return {'false_pos':fp, 'false_neg': fn, 'true_pos': tp, 'true_neg': tn, 'precision':precision, 'recall':recall, 'specificity': specificity, 'sensitivity': sensitivity}
         
-def calculate_cases_exclusive(df, cohort, threshold_percentile=80, case_value=1,main_col='main'):
+def calculate_cases_exclusive(df, cohort, threshold_percentile=80, case_value=2,main_col='main'):
     """
     Calculate cases found exclusively by a cohort compared to others.
     
@@ -158,7 +161,8 @@ def calculate_cases_exclusive(df, cohort, threshold_percentile=80, case_value=1,
     # Get all PRS columns (excluding PHENOTYPE and other non-PRS columns)
     prs_columns = [col for col in df.columns 
                    if col not in ['PHENOTYPE', 'IID'] 
-                   and not col.startswith('PRScr')  # Exclude any score columns
+                   and not col.startswith('PRScr') 
+                   and not col.startswith('prscr') # Exclude any score columns
                    and col != cohort]  # Exclude current cohort
     
     print(f"Comparing against PRS models: {prs_columns}")
@@ -211,6 +215,15 @@ def calculate_percent_improvement(extra_cases, baseline_cases):
 def calculate_precision_recall_improvement(scoresPath,model_type='prs'):
     outputPath = f'{scoresPath}/model_recall_precision_improvement.csv'
 
+    # Auto-generate log filename with timestamp
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    log_path = os.path.join(scoresPath, f'prs_stats_{timestamp}.log')
+    
+    # Open log file and redirect stdout
+    log_file = open(log_path, 'w')
+    original_stdout = sys.stdout  # Save original stdout
+    sys.stdout = log_file
+
     if model_type == "prs":
 #       for h in ['validation','holdout']:
         for h in ['validation']:
@@ -219,19 +232,41 @@ def calculate_precision_recall_improvement(scoresPath,model_type='prs'):
             else:
                 filePath = f'{scoresPath}/CombinedPRSGroups.holdout.csv'
             df = pd.read_csv(filePath)
+            
+            #calculate McNemar test
+            calculate_mcnemar_test(filePath,scoresPath)
+            
             cohorts = [col for col in df.columns if 'scaled_prs' in col]
+            
+            #get the case value based on PHENOTYPE column
+            if 0 in df['PHENOTYPE'].unique():
+                case_value = 1
+            else:
+                case_value = 2
 
+            print('case value is set to :',case_value)
+            
             for cohort in cohorts:
                 fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(df[cohorts+['PHENOTYPE']],cohort)
-                performance_values = calculate_cases_exclusive(df, cohort, threshold_percentile=80, case_value=2,main_col='scaled_prs_main')
+                performance_values = calculate_cases_exclusive(df[cohorts+['PHENOTYPE']], cohort, threshold_percentile=80, case_value=case_value,main_col='scaled_prs_main')
                 tempDf = pd.DataFrame(fp_fn_dict | performance_values,index=[0])
                 tempDf['data_type'] = 'prs'
                 tempDf['data_subset'] = h
                 add_row_efficient(outputPath, tempDf)
+                
+                
     else: #calculate stats for trained models
         filePath = f'{scoresPath}/predictProbsReducedFinalModel.csv'
         phenotype = pd.read_csv(f'{scorePath}/combinedPRSGroups.csv',usecols=['IID','PHENOTYPE'])
         df = pd.read_csv(filePath)
+        
+        #get the case value in phenotype file
+        if 0 in df['PHENOTYPE'].unique():
+            case_value = 1
+        else:
+            case_value = 2
+            
+        print('case value is set to :',case_value)
         
         #remove covariate model
         df = df[df['model'] != 'covariate']
@@ -256,11 +291,18 @@ def calculate_precision_recall_improvement(scoresPath,model_type='prs'):
         for cohort in cohorts:
             fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(df_wide[cohorts.tolist()+['PHENOTYPE']],cohort)
 #           missed_list = calculate_cases_exclusive(df_wide[cohorts.tolist()+['PHENOTYPE']],cohort)
-            performance_values = calculate_cases_exclusive(df_wide, cohort, threshold_percentile=80, case_value=2)
+            performance_values = calculate_cases_exclusive(df_wide[cohorts+['PHENOTYPE']], cohort, threshold_percentile=80, case_value=case_value)
             tempDf = pd.DataFrame(fp_fn_dict | performance_values,index=[0])
             tempDf['data_type'] = 'penalized_model'
             tempDf['data_subset'] = 'validation'
             add_row_efficient(outputPath, tempDf)
+    
+    # Always restore stdout and close log file
+    sys.stdout = original_stdout
+    log_file.close()
+    
+    # Print to console where log was saved
+    print(f"Log saved to: {log_path}")
         
 
             
@@ -270,19 +312,19 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="calculating model performance of G vs other using predictions of trained models and PRS calculations....")
     parser.add_argument("--pheno_path", help="Path to the input pheno folder")
 
-
     args = parser.parse_args()
     
     # Prefer command-line input if provided; fallback to env var
-    pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
-    print(f"[PYTHON] Reading from: {pheno_path}")
+    pheno_data = args.pheno_path or os.environ.get("PHENO_DATA")
+    print(f"[PYTHON] Reading from: {pheno_data}")
     
-    if not pheno_path:
-        raise ValueError("You must provide a data pheno path via --pheno_path or set the PHENO_PATH environment variable.")
-    
-#   scores_path = '/Users/kerimulterer/ukbiobank/type2Diabetes/tanigawaSet/prs/reducedSHAP'
-    
+    pheno_data = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
 
-    scores_path = f'{pheno_path}/scores'
+    
+    if not pheno_data:
+        raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")
+        
+    scores_path = f'{pheno_data}/scores'
+    
     for t in ['prs']:
         calculate_precision_recall_improvement(scores_path,model_type=t)

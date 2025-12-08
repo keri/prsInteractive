@@ -155,10 +155,10 @@ def create_saturation_plots(df,featureScores,data_type,figurePath,prsPath):
     featureScoreDict.clear()
     
 
-def main(withdrawal_path,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,topN=10000):
+def main(withdrawal_path,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,epi_combo):
     #def main(pheno,withdrawalPath,phenoPath,testPathway,holdoutPathway,covarFile,hlaFile,featureFile,topN=10000):
 #   pheno = 'type2Diabetes'
-#   topN=1000
+
         ##########################################
         #          CREATE VARIABLES              #
         ##########################################
@@ -273,7 +273,7 @@ def main(withdrawal_path,pheno_path,test_path,test_env_file,holdout_path,holdout
         print('final shape of training dataframe for all features after hla merge = ',mainEpiDf.shape)
         
         #create combined feature dataframe  
-        mainEpiDf = create_epi_df(mainEpiDf,geneticFeatures,combo='sum')
+        mainEpiDf = create_epi_df(mainEpiDf,geneticFeatures,combo=epi_combo)
         
         #merge back to the PHENOTYPE column
         mainEpiDf = mainEpiDf.merge(phenotype,left_index=True,right_index=True)
@@ -348,7 +348,7 @@ if __name__ == '__main__':
     parser.add_argument("--holdout_env_gen_file", help="holdout environmental data to use")
     parser.add_argument("--feature_scores_file", help="data path to feature scores from association modelling")
     parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
-    
+    parser.add_argument("--epi_combo",default='sum',help='method to use for combining epi interactions (default: sum)')
     
     args = parser.parse_args()
     
@@ -379,6 +379,9 @@ if __name__ == '__main__':
     
     withdrawal_path = args.withdrawal_path or os.environ.get("WITHDRAWAL_PATH")
     print(f"reading withdrawals from file : {withdrawal_path}")
+    
+    epi_combo = args.epi_combo or os.environ.get("EPI_COMBO")
+    print(f"method to use for combining epi interactions : {epi_combo}")
     
 
     
@@ -421,8 +424,11 @@ if __name__ == '__main__':
     
     if not withdrawal_path:
         raise ValueError("You must provide a path to withdrawals --withdrawal_path or set the WITHDRAWAL_PATH environment variable.")
+        
+    if not epi_combo:
+        raise ValueError("You must provide a epi_combo via --epi_combo or set the EPI_COMBO environment variable.")
             
-    main(withdrawal_path,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,topN=10000)
+    main(withdrawal_path,pheno_path,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,epi_combo)
 #   main(pheno,withdrawal_path,pheno_path,test_path,holdout_path,covar_file,hla_file,feature_file,topN=10000)
     
 

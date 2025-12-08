@@ -30,24 +30,24 @@ def	main(phenoPath,feature_scores_file):
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description="creating LD SNP list ...")
-    parser.add_argument("--pheno_path", help="Path to the input pheno")
+    parser.add_argument("--pheno_data", help="Path to the input scores")
     
     
     args = parser.parse_args()
     
-    pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
-    print(f"[PYTHON] Reading from: {pheno_path}")
+    pheno_data = args.pheno_path or os.environ.get("PHENO_DATA")
+#   print(f"[PYTHON] Reading from: {pheno_path}")
+
+    
 #   pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
-    feature_scores_file = f"{pheno_path}/scores/importantFeaturesPostShap.csv"
+    feature_scores_file = f"{pheno_data}/scores/importantFeaturesPostShap.csv"
     print(f"[PYTHON] Reading features for LD from: {feature_scores_file}")
     
-    
-    
-    if not pheno_path:
-        raise ValueError("You must provide a data pheno path via --pheno_path or set the PHENO_PATH environment variable.")
+    if not pheno_data:
+        raise ValueError("You must provide a data scores path via --pheno_data or set the PHENO_DATA environment variable.")
         
     
-    main(pheno_path,feature_scores_file)
+    main(pheno_data,feature_scores_file)
 
     
 

@@ -784,23 +784,8 @@ get_epi_snps <- function(epiFeatures) {
   return(epiSnps)
 }
 
-#get_important_features <- function(feature_file){
-#
-# #file has 3 columns : [feature,data_type:(main,epi)]
-## feature_file = paste0(feature_pathway,'/importantFeaturesForAssociationAnalysis.csv')
-# #feature_file = paste0(feature_pathway,'/importantFeaturesPostShap.csv')
-# important_features = read.csv(feature_file)
-#
-# epi_main_features = c(important_features$feature)
-#
-# main_features = important_features$feature[important_features$data_type == "main"]
-#
-# epi_features = important_features$feature[important_features$data_type == "epi"]
-#
-# return(list(epi_main_features=epi_main_features,main_features=main_features,epi_features=epi_features))
-#}
 
-get_important_features <- function(feature_file,threshold=1.99){
+get_important_features <- function(feature_file,threshold){
   
   print("=== LOADING AND CLEANING FEATURE LIST ===")
   
@@ -885,53 +870,61 @@ check_merge_compatibility <- function(df1, df2, merge_col = "IID") {
 
 ################################ GLOBAL VARIABLES  ########################
 # 
-# parser <- ArgumentParser()
-# parser$add_argument("--results_path", required = TRUE)
-# parser$add_argument("--data_path", required = TRUE)
-# parser$add_argument("--hla_file", required = TRUE)
-# parser$add_argument("--covar_file", required = TRUE)
-# parser$add_argument("--pheno_path", required = TRUE)
-# parser$add_argument("--training_file", required = TRUE)
-# parser$add_argument("--test_file", required = TRUE)
-# parser$add_argument("--training_env_gen_file", required = TRUE)
-# parser$add_argument("--test_env_gen_file", required = TRUE)
-# parser$add_argument("--feature_model_file" ,required = TRUE)
-# #
-# args <- parser$parse_args()
-# 
-# results_path <- args$results_path
-# data_path <- args$data_path
-# pheno_path <- args$pheno_path
-# hla_file <- args$hla_file
-# training_file <- args$training_file
-# test_file <- args$test_file
-# training_env_gen_file <- args$training_env_gen_file
-# test_env_gen_file <- args$test_env_gen_file
-# covar_file <- args$covar_file
-# feature_model_file <- args$feature_model_file
-# participant_env_file <- file.path(results_path, "participant_environment.csv")
+parser <- ArgumentParser()
+parser$add_argument("--results_path", required = TRUE)
+parser$add_argument("--data_path", required = TRUE)
+parser$add_argument("--hla_file", required = TRUE)
+parser$add_argument("--covar_file", required = TRUE)
+parser$add_argument("--pheno_data", required = TRUE)
+parser$add_argument("--training_file", required = TRUE)
+parser$add_argument("--test_file", required = TRUE)
+parser$add_argument("--training_env_gen_file", required = TRUE)
+parser$add_argument("--test_env_gen_file", required = TRUE)
+parser$add_argument("--training_env_main_file", required = TRUE)
+parser$add_argument("--test_env_main_file", required = TRUE)
+parser$add_argument("--reduced_feature_file" ,required = TRUE)
+parser$add_argument("--epi_combo", required=TRUE)
+parser$add_argument("--threshold", required=TRUE)
 
-results_path <- '/Users/kerimulterer/prsInteractive/results'
-pheno_path <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
-data_path <- '/Users/kerimulterer/prsInteractive/data'
-hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw'
-test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined.raw'
-# test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined_final.raw'
-# training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTraining.csv'
-# test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTest.csv'
-covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
-feature_model_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes/scores/importantFeaturesPostShap.csv'
-participant_env_file='/Users/kerimulterer/prsInteractive/results/participant_environment.csv'
+#
+args <- parser$parse_args()
 
-scores_path = paste0(pheno_path,'/scores')
+results_path <- args$results_path
+data_path <- args$data_path
+pheno_data <- args$pheno_data
+hla_file <- args$hla_file
+training_file <- args$training_file
+test_file <- args$test_file
+training_env_gen_file <- args$training_env_gen_file
+test_env_gen_file <- args$test_env_gen_file
+training_env_main_file <- args$training_env_main_file
+test_env_main_file <- args$test_env_main_file
+covar_file <- args$covar_file
+feature_model_file <- args$reduced_feature_file
+participant_env_file <- file.path(results_path, "participant_environment.csv")
+epi_combo <- args$epi_combo
+threshold <- args$threshold
+
+#results_path <- '/Users/kerimulterer/prsInteractive/results'
+#pheno_data <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
+#data_path <- '/Users/kerimulterer/prsInteractive/data'
+#hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
+#training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/trainingCombined.raw'
+#test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/testCombined.raw'
+# training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/geneEnvironmentTraining.csv'
+# test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/geneEnvironmentTest.csv'
+#covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
+#feature_model_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/scores/importantFeaturesPostShap.csv'
+#participant_env_file='/Users/kerimulterer/prsInteractive/results/participant_environment.csv'
+
+scores_path = paste0(pheno_data,'/scores')
 #covar_pathway = paste0(results_path,'/covar.txt')
 
 
 ############################### FEATURES TO BE USED IN EACH MODEL ###############
 
 #combined epi and main snps after filtering for FDR
-all_features = get_important_features(feature_model_file)
+all_features = get_important_features(feature_model_file,threshold)
 
 epi_main_features = all_features$epi_main_features
 main_features = all_features$main_features
@@ -967,7 +960,7 @@ if (!file.exists(model_scores_file)) {
 ###### PREDICTION FILE ##########
 
 predictions_file = paste0(scores_path,'/predictProbsReducedFinalModel.csv')
-predictions_colnames = c("yProba","model")
+predictions_colnames = c("IID","yProba","model")
 
 # Check if the file exists
 if (!file.exists(predictions_file)) {
@@ -1017,6 +1010,15 @@ if (!file.exists(feature_scores_file)) {
 
 ######################### DATASETS TO BE USED IN EACH MODEL #####################
 
+######################### MAIN ENV DATA  ##################
+
+mainEnvTraining = fread(training_env_main_file,sep=",")
+mainEnvTraining[, IID := as.integer(IID)]
+
+mainEnvTest = fread(test_env_main_file,sep=",")
+mainEnvTest[, IID := as.integer(IID)]
+
+
 ################### COVARIATE DATA ######################
 #covariate data with IID + first 10 PCs, SEX, and AGE
 covariate_data = download_covariate_data(covar_file)
@@ -1034,35 +1036,13 @@ cat("HLA IID column set to integer type\n")
 
 hla_columns = setdiff(names(hlaData), "IID")
 
-################## CARDIO METABOLIC DATA ##########
+############### COMBINED GENO CARDIO DATASETS  ##############
 
-# epi_cardio_participant_feature_list = download_important_cardiometabolic_features(feature_pathway,env_type,machine_path)
-# envTraining <- fread(training_env_gen_file)
-# envTest <- fread(test_env_gen_file)
+envTraining = fread(training_env_gen_file,sep=",")
+envTraining[, IID := as.integer(IID)]
 
-# CRITICAL: Ensure IID is integer type in both
-# envTraining[, IID := as.integer(IID)]
-# envTest[, IID := as.integer(IID)]
-# cat("Environment data IID columns set to integer type\n")
-# 
-# epi_cardio_features = setdiff(names(envTraining), "IID")
-
-############## MAIN CARDIO FEATURES TO MODEL ##########
-
-# main_cardio_file=paste0(pheno_path,'/scores/','cardioMetabolicimportantFeaturesPostShap.csv')
-# main_cardio_df = get_main_cardio_features(main_cardio_file,participant_env_file)
-# main_cardio_features = setdiff(names(main_cardio_df),'IID')
-
-
-################### ARRAY TYPE DATA #####################
-#get the genotype batch : column Genotype measurement batch
-# array_path = paste0(machine_path,'/ukbiobank/tanigawaData/participant.csv')
-#array_path = paste0(results_path,'/participant.csv')
-#array_data <- fread(array_path, sep=",", select = c('Participant ID','Genotype measurement batch'))
-#colnames(array_data) = c("IID","array")
-#change batch to 0 and 1 if UK in name for the 2 types of arrays
-#array_data$array <- ifelse(grepl("UK", array_data$array), 0, 1)
-
+envTest = fread(test_env_gen_file,sep=",")
+envTest[, IID := as.integer(IID)]
 
 ################# TRAINING data #####################
 # trainingDf = get_geno_dataset(paste0(training_path,'/data/',training_file),machine_path,columns_to_get)
@@ -1072,7 +1052,7 @@ trainingDf = get_geno_read_table_fixed(training_file,data_path,columns_to_get)
 yTraining = trainingDf$PHENOTYPE
 
 #combined main SNPs and epi pairs in which haplotypes are added for snp1 and snp2 of pair
-trainingDf = create_epi_df(trainingDf,epi_main_features,combo="product")
+trainingDf = create_epi_df(trainingDf,epi_main_features,combo=epi_combo)
 
 #merge covariate data to geno data
 # Before merging with covariate data:
@@ -1087,10 +1067,10 @@ trainingDf = merge(trainingDf,hlaData, by = "IID", all.x = TRUE)
 #combine cardio and geno features and scale data after combined
 #shape will be length(epi geno features to combine list X # people in test)
 
-# trainingDf = merge(trainingDf,envTraining, by = "IID", all.x = TRUE)
+trainingDf = merge(trainingDf,envTraining, by = "IID", all.x = TRUE)
 
 #merge with cardio main features
-# trainingDf = merge(trainingDf,main_cardio_df, by= "IID", all.x = TRUE)
+trainingDf = merge(trainingDf,mainEnvTraining, by= "IID", all.x = TRUE)
 
 ################# TEST data #####################
 testDf = get_geno_read_table_fixed(test_file,data_path,columns_to_get)
@@ -1099,8 +1079,7 @@ testDf = get_geno_read_table_fixed(test_file,data_path,columns_to_get)
 yTest = testDf$PHENOTYPE
 
 #combined main SNPs and epi pairs in which haplotypes are added for snp1 and snp2 of pair
-testDf = create_epi_df(testDf,epi_main_features,combo="product")
-
+testDf = create_epi_df(testDf,epi_main_features,combo=epi_combo)
 
 #merge covariate data to geno data
 testDf = merge(testDf,covariate_data, by = "IID", all.x = TRUE)
@@ -1108,10 +1087,10 @@ testDf = merge(testDf,covariate_data, by = "IID", all.x = TRUE)
 #merge HLA data to geno data
 testDf = merge(testDf,hlaData, by = "IID", all.x = TRUE)
 
-# testDf = merge(testDf,envTest, by = "IID", all.x = TRUE)
+testDf = merge(testDf,envTest, by = "IID", all.x = TRUE)
 
 #merge with cardio main features
-# testDf = merge(testDf,main_cardio_df, by= "IID", all.x = TRUE)
+testDf = merge(testDf,mainEnvTest, by= "IID", all.x = TRUE)
 
 
 #####################################################################################
@@ -1207,17 +1186,17 @@ all_features = setdiff(names(trainingDf),'IID')
 #list of lists include the data_type and features in data_type
 
 #get a list of epi cardio features to use in modelling
-# epi_cardio_features = setdiff(names(cardioTraining), "IID")
-# epi_cardio_features = setdiff(names(envTestDf), "IID")
+env_genetic_features = setdiff(names(envTraining), "IID")
+env_main_features = setdiff(names(mainEnvTraining), "IID")
 
 dataset_list = list(
   list('main',c(main_features,covariate_columns,hla_columns)),
   list('epi',c(epi_features,covariate_columns,hla_columns)),
   list('epi+main',c(epi_main_features,covariate_columns,hla_columns)),
-  # list('cardio',c(epi_cardio_features,covariate_columns,hla_columns)),
-  # list('all',c(epi_cardio_features,epi_main_features,hla_columns,covariate_columns)),
-  # list('cardio_main',c(main_cardio_features,covariate_columns)),
-  # list('all+cardio_main',c(epi_cardio_features,epi_main_features,hla_columns,main_cardio_features,covariate_columns)),
+  list('cardio',c(env_genetic_features,covariate_columns)),
+  list('all',c(env_genetic_features,epi_main_features,hla_columns,covariate_columns)),
+  list('env_main',c(env_main_features,covariate_columns)),
+  list('all+env_main',c(env_genetic_features,epi_main_features,hla_columns,env_main_features,covariate_columns)),
   list('covariate',c(covariate_columns))
   
 )

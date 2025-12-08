@@ -102,7 +102,7 @@ def train_models(X,y,modelPath,pheno,data_type,i):
     print('time if took to train HGB = ',timeHGB,' minutes')
     return(imp_mean,clfNVB,grid_search_hgb)
 
-def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath): 
+def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,threshold): 
     '''load pickled models and score with test set'''
     print('scoring models .....')
 
@@ -178,7 +178,7 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
     print('time if took to score models = ',timenvb,' minutes')
     
     if rank_features or auc > .51:
-        topFeatures,featuresZscores = calculate_plot_shap_values(clfHGB,X,y,i,figPath,data_type)
+        topFeatures,featuresZscores = calculate_plot_shap_values(clfHGB,X,y,i,figPath,data_type,threshold)
         #get the featureZscores into a dataframe to merge with dfSnps2
         zscores = pd.DataFrame(data=featuresZscores).reset_index()
         zscores.columns=['feature','shap_zscore']
@@ -190,7 +190,7 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath)
 
 
 
-def main(pheno,withdrawalPath,pheno_path,training_path,test_path,epi_path,data_type,start,end):
+def main(pheno,withdrawalPath,pheno_path,training_path,test_path,epi_path,data_type,start,end,threshold,epi_combo):
 
     print('starting analysis .....')
 
@@ -288,7 +288,7 @@ def main(pheno,withdrawalPath,pheno_path,training_path,test_path,epi_path,data_t
         Xmain = mainArray.drop(columns=["PHENOTYPE"])
 
         if data_type != 'main':
-            Xmain = create_epi_df(Xmain,sectionPairs,combo="product")
+            Xmain = create_epi_df(Xmain,sectionPairs,combo=epi_combo)
 
 
         print('Xmain array = ',Xmain.shape)
@@ -308,12 +308,12 @@ def main(pheno,withdrawalPath,pheno_path,training_path,test_path,epi_path,data_t
             Xtest = testArray.drop(columns=['PHENOTYPE'])
 
             if data_type != 'main':
-                Xtest = create_epi_df(Xtest,sectionPairs,combo="product")
+                Xtest = create_epi_df(Xtest,sectionPairs,combo=epi_combo)
 
 
             print('Test array shape = ',Xtest.shape)
 
-            allModelFeatures,topFeatures = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,)
+            allModelFeatures,topFeatures = score_models(Xtest,yTest,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,threshold)
             allModelFeatures['model#'] = i
 #           allModelFeatures['feature'] = sectionPairs
             allModelFeatures['model'] = data_type
@@ -343,7 +343,7 @@ def main(pheno,withdrawalPath,pheno_path,training_path,test_path,epi_path,data_t
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description="running models for wrapper...")
-    parser.add_argument("--pheno_folder", help="Path to the input pheno folder")
+    parser.add_argument("--pheno_data", help="Path to the input pheno data directory")
     parser.add_argument("--training_file", help="data file of training data")
     parser.add_argument("--epi_file", help="epi file with epi pairs to analyze")
     parser.add_argument("--test_file", help="data file of test data")
@@ -352,8 +352,11 @@ if __name__ == '__main__':
     parser.add_argument("--end", help="end job")
     parser.add_argument("--pheno", help="Phenotype to analyze")
     parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
+    parser.add_argument("--threshold",type=float,default=1.99, help="Z-score threshold for identifying important features (default: 2.0)")
+    parser.add_argument("--epi_combo",default='sum',help='method to use for combining epi interactions (default: sum)')
 
     args = parser.parse_args()
+    
     
     #########   FOR DEBUGGING ######
 #   data_type = 'epi'
@@ -369,12 +372,11 @@ if __name__ == '__main__':
     
     
     # Prefer command-line input if provided; fallback to env var
-    pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
-    print(f"[PYTHON] Reading from: {pheno_path}")
+    pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
+    print(f"[PYTHON] Reading from: {pheno_data}")
     
     pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
-
 
     data_type = args.data_type or os.environ.get("DATA_TYPE")
     print(f"data type : {data_type}")
@@ -388,25 +390,27 @@ if __name__ == '__main__':
     withdrawal_path = args.withdrawal_path or os.environ.get("WITHDRAWAL_PATH")
     print(f"reading withdrawals from file : {withdrawal_path}")
     
+    epi_file = args.epi_file or os.environ.get("EPI_FILE")
+    print(f"epi file being read : {epi_file}")
     
-    if data_type == 'epi':
-        epi_file = args.epi_file or os.environ.get("EPI_FILE")
-        if not epi_file:
-            raise ValueError("You must provide a data type code via --epi_file or set the EPI_FILE environment variable.")
-        print(f"epi file : {epi_file}")
-    else:
-        epi_file = 'None'
-        
     start = args.start or os.environ.get("START")
     print(f"start : {start}")
     
     end = args.end or os.environ.get("END")
     print(f"end : {end}")
     
+    threshold = os.environ.get("THRESHOLD")
+    threshold = float(threshold) if threshold else args.threshold
+    print(f"analyzing top features based on shap z score : {threshold}")
     
+    epi_combo = args.epi_combo or os.environ.get("EPI_COMBO")
+    print(f"method to use for combining epi interactions : {epi_combo}")
     
-    if not pheno_path:
-        raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
+    if not epi_file:
+        raise ValueError("You must provide a data type code via --epi_file or set the EPI_FILE environment variable.")
+    
+    if not pheno_data:
+        raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")
         
     if not pheno:
         raise ValueError("You must provide a phenotype via --pheno or set the PHENO environment variable.")
@@ -426,17 +430,20 @@ if __name__ == '__main__':
     if not end:
         raise ValueError("You must provide a data type code via --end or set the END environment variable.")
         
+    if not epi_combo:
+        raise ValueError("You must provide a epi_combo via --epi_combo or set the EPI_COMBO environment variable.")
+        
     
     #check to see that scores, models, and figures folder has been created
-    dir_path = f"{pheno_path}/models"
+    dir_path = f"{pheno_data}/models"
     os.makedirs(dir_path, exist_ok=True)
     
-    dir_path = f"{pheno_path}/scores"
+    dir_path = f"{pheno_data}/scores"
     os.makedirs(dir_path, exist_ok=True)
     
-    dir_path = f"{pheno_path}/figures"
+    dir_path = f"{pheno_data}/figures"
     os.makedirs(dir_path, exist_ok=True)
 
         
-    main(pheno,withdrawal_path,pheno_path,training_path,test_path,epi_file,data_type,start,end)
+    main(pheno,withdrawal_path,pheno_data,training_path,test_path,epi_file,data_type,start,end,threshold,epi_combo)
     

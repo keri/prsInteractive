@@ -80,21 +80,23 @@ def compare_gene_env_to_genetic(scoresPath):
 
 def calculate_training_statistics(training_df):
     """
-    Calculate mean and standard deviation for each PRS column in training data.
+    Calculate mean and standard deviation from UNSCALED training data.
+    These stats will be used to scale both training and validation data.
     
     Parameters:
-    training_df: Training DataFrame with scaled PRS columns
+    training_df: Training DataFrame with UNSCALED PRS columns
     
     Returns:
     training_stats: Dictionary with mean and std for each PRS type
     """
     
-    prs_columns = ['scaled_prs_main', 'scaled_prs_epi', 'scaled_prs_epi+main', 
-                   'scaled_prs_cardio', 'scaled_prs_all']
+    # Use UNSCALED column names
+    prs_columns = [col for col in training_df.columns if 'prs' in col]
+    prs_columns = [col for col in prs_columns if 'scaled' not in col]
     
     training_stats = {}
     
-    print("Calculating training statistics for scaling...")
+    print("Calculating training statistics from unscaled data...")
     
     for prs_col in prs_columns:
         if prs_col in training_df.columns:
@@ -273,7 +275,8 @@ def calculate_odds_ratio_for_prs(df,binned_prs,prscr=False):
         try:
             df.sort_values(prs_col,inplace=True)
             # Assign numeric labels
-            bins = pd.qcut(df[prs_col], 100, labels=list(range(1,101)),duplicates='drop')
+            bins = pd.qcut(df[prs_col], 100, labels=False, duplicates='drop')
+            bins = bins + 1
         except IndexError:
             print('index error out of bounds when creating centiles')
             print('model which threw the error was :',prs_col)

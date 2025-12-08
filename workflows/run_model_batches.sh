@@ -6,12 +6,11 @@
 # and submits jobs for all batches.
 PHENO=$1
 DATA_TYPE=$2
+threshold=${3: 2}
 #PHENO='type2Diabetes_test'
 #DATA_TYPE='epi'
 
-echo "PHENO is set to : $PHENO"
-echo "DATA_TYPE is set to : $DATA_TYPE"
-
+EPI_COMBO=${4:-"sum"}
 
 # Source config with error handling
 if [ ! -f "../env.config" ]; then
@@ -24,38 +23,52 @@ else
     source ../env.config
 fi
 
+
+if [ "${EPI_COMBO}" == "sum" ]; then
+    COMBO_FOLDER='summedEpi'
+else
+    COMBO_FOLDER='productEpi'
+fi
+
+PHENO_DATA="${RESULTS_PATH}/$PHENO/${COMBO_FOLDER}"
+
+
 #check that a results folder for phenotype exists
-if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
-    echo "Folder '${RESULTS_PATH}/$pheno' does not exist..."
+if [ ! -d "${PHENO_DATA}" ]; then
+    echo "Folder '${PHENO_DATA}' does not exist..."
     echo "run envSetUp.sh <pheno> <icd10> <phenoStr> <n cores to use in epistatic interaction analysis>"
     exit 1
     
 else
-    echo "sourcing $pheno env variables."
+    echo "sourcing $PHENO env variables."
     #source pheno specific environment variables
-    source "${RESULTS_PATH}/$PHENO/pheno.config"
+    source "${PHENO_DATA}/pheno.config"
 fi
 
+echo "PHENO_DATA is to : $PHENO_DATA"
+echo "PHENO_PATH is to : $PHENO_PATH"
+echo "TRAINING_PATH is to : $TRAINING_PATH"
+echo "TEST_PATH is to : $TEST_PATH"
+echo "PHENO is to : $PHENO"
 
 
 echo "Running batch models for $DATA_TYPE data... "	
 
-PHENO_PATH="$RESULTS_PATH/$PHENO"
 
 # Validate model folders exist in pheno folder
-if [ ! -d "$PHENO_PATH/scores" ]; then
-    echo "creating '$PHENO_PATH/scores' folder ... "
-    mkdir "$PHENO_PATH/scores"
+if [ ! -d "$PHENO_DATA/scores" ]; then
+    echo "creating '$PHENO_DATA/scores' folder ... "
+    mkdir "$PHENO_DATA/scores"
 fi
 
-if [ ! -d "$PHENO_PATH/models" ]; then
-    echo "creating '$PHENO_PATH/models' folder ... "
-    mkdir "$PHENO_PATH/models"
+if [ ! -d "$PHENO_DATA/models" ]; then
+    echo "creating '$PHENO_DATA/models' folder ... "
+    mkdir "$PHENO_DATA/models"
 fi
 
-if [ ! -d "$PHENO_PATH/figures" ]; then
-    echo "creating '$PHENO_PATH/figures' folder ... "
-    mkdir "$PHENO_PATH/figures"
+if [ ! -d "$PHENO_DATA/figures" ]; then
+    echo "creating '$PHENO_DATA/figures' folder ... "
+    mkdir "$PHENO_DATA/figures"
 fi
 
 
@@ -79,7 +92,7 @@ if [ "$DATA_TYPE" == "epi" ]; then
         fi
         
         # Update config file
-        CONFIG_FILE="${PHENO_PATH}/pheno.config"
+        CONFIG_FILE="${PHENO_DATA}/pheno.config"
         echo "Updating config file: $CONFIG_FILE"
         echo "New EPI_FILE value: $NEW_EPI_FILE"
         
@@ -110,6 +123,7 @@ if [ "$DATA_TYPE" == "epi" ]; then
     
 else
     INPUT_FILE="$PHENO_PATH/merged_allChromosomes.snplist"
+    EPI_FILE="None"
 fi
 
 # Validate input file exists 
@@ -151,10 +165,12 @@ for JOB_ID in $(seq 1 $TOTAL_JOBS); do
     export END=$JOB_END_BATCH
     export DATA_TYPE
     export PHENO
-    export PHENO_PATH
+    export PHENO_DATA
     export TRAINING_PATH
     export TEST_PATH
-    export EPI_FILE 
+    export EPI_FILE
+    export THRESHOLD=$threshold
+    export EPI_COMBO
     
     
     # Submit the SLURM job

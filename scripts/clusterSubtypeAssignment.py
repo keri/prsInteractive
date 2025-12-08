@@ -3,6 +3,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.gridspec as gridspec
 import seaborn as sns
 from typing import Dict, List, Tuple, Optional
 from matplotlib.colors import LinearSegmentedColormap
@@ -12,20 +13,28 @@ from matplotlib.colors import LinearSegmentedColormap
 # CALCULATE FUNCTIONAL CLUSTER RANKING ENRICHMENT
 # ============================================================================
 
-SUBTYPE_COLORS = {
-	'SAID': '#e28743',
-	'SIDD': '#873e23',
-	'SIRD': '#eeeee4',
-	'MOD': '#21130d',
-	'MARD': '#eab676',
-	'UNKNOWN': '#938369'
+# Colorblind-friendly palettes
+# Okabe-Ito palette for cohorts
+COHORT_COLORS = {
+	'G': '#E69F00',      # Orange
+	'GxG': '#56B4E9',    # Sky blue
+	'GxGxE': '#009E73'   # Bluish green
 }
 
-COHORT_COLORS = {
-	'GxGxE': '#f2de19',
-	'GxG': '#19f0f2',
-	'G+(GxG)': '#39c700',
-	'G': '#C90016'
+# Colorblind-friendly palette for subtypes (using ColorBrewer Set2)
+SUBTYPE_COLORS = {
+	'SIRD': '#8DA0CB',   # Light blue-purple
+	'MOD': '#FC8D62',    # Salmon
+	'SIDD': '#66C2A5',   # Teal
+	'MARD': '#E78AC3',   # Pink
+	'SAID': '#A6D854'    # Yellow-green
+}
+
+# Cohort markers for additional distinction
+COHORT_MARKERS = {
+	'G': 'o',      # Circle
+	'GxG': 's',    # Square
+	'GxGxE': '^'   # Triangle
 }
 
 def expand_cohort_rows(df,cohort_col='cohort'):
@@ -105,33 +114,7 @@ def rank_functional_clusters_by_cohort(df, cohort_col='cohort',
 		- 'summary': Dict with analysis metadata
 	"""
 	
-#	# Identify functional cluster columns
-#	cluster_cols = [col for col in df.columns if col.endswith('_count')]
-#	cluster_cols = [col for col in cluster_cols if 'opathy' not in col]
-#	cluster_cols = [col for col in cluster_cols if 'wnt' not in col]
-#	cluster_cols = [col for col in cluster_cols if 'mitochondria' not in col]
-#	
-#	
-#	# Expand rows where cohort column contains multiple comma-separated cohorts
-#	expanded_rows = []
-#	for _, row in df.iterrows():
-#		cohort_value = row[cohort_col]
-#		if pd.isna(cohort_value):
-#			continue
-#		
-#		# Split by comma and strip whitespace
-#		cohorts = [c.strip() for c in str(cohort_value).split(',')]
-#		
-#		#for cohort in cohorts:
-#		# Create a row for each cohort
-#		if len(cohorts) == 1:
-#			#if cohort:  # Skip empty strings
-#			row_copy = row.copy()
-#			row_copy[cohort_col] = cohorts[0]
-#			expanded_rows.append(row_copy)
-#				
-#	# Create expanded dataframe
-#	df_expanded = pd.DataFrame(expanded_rows)
+
 	df_expanded,cluster_cols = expand_cohort_rows(df, 'cohort')
 		
 	# Initialize results
@@ -339,50 +322,11 @@ def display_direction_analysis(results):
 					print(f"  {cluster_name}: {score:.4f} (risk effect)")
 					
 
-#def display_results(results, top_n=3):
-#	"""Display analysis results in a readable format"""
-#	
-#	print("=" * 80)
-#	print("SUMMARY STATISTICS")
-#	print("=" * 80)
-#	print(f"Total cohorts: {results['summary']['total_cohorts']}")
-#	print(f"Total clusters: {results['summary']['total_clusters']}")
-#	print(f"Total genes/features: {results['summary']['total_genes']}")
-#	print(f"Weighted by OR: {results['summary']['weight_by_or']}")
-#	
-#	print("\n" + "=" * 80)
-#	print("TOP CLUSTER PER COHORT (normalized by number of genes)")
-#	print("=" * 80)
-#	print(results['top_clusters'].sort_values('score', ascending=False).to_string())
-#	
-#	print("\n" + "=" * 80)
-#	print(f"TOP {top_n} COHORTS PER CLUSTER")
-#	print("=" * 80)
-#	
-#	# For each cluster, show top cohorts
-#	scores_df = results['scores_df']
-#	for cluster in scores_df.columns[:5]:  # Show first 5 clusters as example
-#		cluster_name = cluster.replace('_count', '')
-#		print(f"\n{cluster_name}:")
-#		top_cohorts = scores_df[cluster].nlargest(top_n)
-#		for cohort, score in top_cohorts.items():
-#			n_genes = results['summary']['genes_per_cohort'][cohort]
-#			print(f"  {cohort} (n={n_genes}): {score:.4f}")
-#			
-#	print("\n" + "=" * 80)
-#	print("NORMALIZED SCORES (sample - showing first 5 cohorts × 5 clusters)")
-#	print("=" * 80)
-#	print(results['scores_df'].iloc[:5, :5].round(4).to_string())
-#	
-#	print("\n" + "=" * 80)
-#	print("CLUSTER RANKINGS PER COHORT (sample - 1 = top cluster)")
-#	print("=" * 80)
-#	print(results['cluster_ranks_df'].iloc[:5, :5].to_string())
 
 def calculate_weighted_subtype_enrichment(df, results, cluster_subtype_mapping,
-																					cohort_col='cohort',
-																					or_col='OR',
-																					weighting='effect_size'):
+															cohort_col='cohort',
+															or_col='OR',
+															weighting='effect_size'):
 	"""
 	Calculate T2D subtype enrichment weighted by effect size and optionally distinctiveness.
 	
@@ -416,24 +360,6 @@ def calculate_weighted_subtype_enrichment(df, results, cluster_subtype_mapping,
 	"""
 	
 		# Expand rows with comma-separated cohorts
-#		expanded_rows = []
-#		for _, row in df.iterrows():
-#				cohort_value = row[cohort_col]
-#				if pd.isna(cohort_value):
-#						continue
-#			
-#				cohorts = [c.strip() for c in str(cohort_value).split(',')]
-#			
-#				for cohort in cohorts:
-#						if cohort:
-#								row_copy = row.copy()
-#								row_copy[cohort_col] = cohort
-#								expanded_rows.append(row_copy)
-#							
-#		df_expanded = pd.DataFrame(expanded_rows)
-#	
-#		# Get cluster columns
-#		cluster_cols = [col for col in df_expanded.columns if col.endswith('_count')]
 	
 	df_expanded,cluster_cols = expand_cohort_rows(df, 'cohort')
 
@@ -550,15 +476,16 @@ def calculate_weighted_subtype_enrichment(df, results, cluster_subtype_mapping,
 	protective_df = pd.DataFrame(subtype_cohort_protective).T.fillna(0)
 	protective_df.index.name = 'subtype'
 
-	# Calculate percentages
-	percentages_df = weights_df.div(weights_df.sum(axis=1), axis=0) * 100
+	# Calculate percentages based on RISK contributions only
+	percentages_df = risk_df.div(risk_df.sum(axis=1), axis=0) * 100
+	percentages_df = percentages_df.fillna(0)  # Handle cases where risk sum is 0
 
 	# Summary
 	enrichment_summary = {
-			'total_subtypes': len(weights_df),
-			'cohorts_contributing': weights_df.columns.tolist(),
+			'total_subtypes': len(risk_df),
+			'cohorts_contributing': risk_df.columns.tolist(),
 			'weighting_method': weighting,
-			'total_weighted_contribution_per_subtype': weights_df.sum(axis=1).to_dict()
+			'total_weighted_contribution_per_subtype': risk_df.sum(axis=1).to_dict()
 	}
 
 	return {
@@ -588,22 +515,23 @@ def plot_weighted_subtype_pies(subtype_results, save_path='weighted_subtype_comp
 	weights_df = subtype_results['cohort_weights_per_subtype']
 	counts_df = subtype_results['gene_counts']
 
-	# Custom colors
-	SUBTYPE_COLORS = {
-			'SAID': '#e28743',
-			'SIDD': '#873e23',
-			'SIRD': '#eeeee4',
-			'MOD': '#21130d',
-			'MARD': '#eab676',
-			'UNKNOWN': '#938369'
-	}
-
+	# Colorblind-friendly palettes
+	# Okabe-Ito palette for cohorts
 	COHORT_COLORS = {
-			'GxGxE': '#f2de19',
-			'GxG': '#19f0f2',
-			'G+(GxG)': '#39c700',
-			'G': '#C90016'
+		'G': '#E69F00',      # Orange
+		'GxG': '#56B4E9',    # Sky blue
+		'GxGxE': '#009E73'   # Bluish green
 	}
+	
+	# Colorblind-friendly palette for subtypes (using ColorBrewer Set2)
+	SUBTYPE_COLORS = {
+		'SIRD': '#8DA0CB',   # Light blue-purple
+		'MOD': '#FC8D62',    # Salmon
+		'SIDD': '#66C2A5',   # Teal
+		'MARD': '#E78AC3',   # Pink
+		'SAID': '#A6D854'    # Yellow-green
+	}
+	
 
 	subtypes = percentages_df.index.tolist()
 	n_subtypes = len(subtypes)
@@ -1127,114 +1055,95 @@ def load_cluster_subtype_mapping(mapping_file='clusterToSubtype.csv'):
 # CALCULATE SUBTYPE ENRICHMENT
 # ============================================================================
 
-def calculate_subtype_enrichment(df, results, cluster_subtype_mapping, 
-									cohort_col='cohort'):
-	"""
-	Calculate T2D subtype enrichment showing cohort composition within each subtype.
-	
-	This determines what proportion of each subtype's associations come from each cohort.
-	
-	Parameters:
-	-----------
-	df : pandas.DataFrame
-		Original data with genes and cluster associations
-	results : dict
-		Results from rank_functional_clusters_by_cohort
-	cluster_subtype_mapping : DataFrame
-		Mapping from load_cluster_subtype_mapping()
-	cohort_col : str
-		Name of cohort column
-		
-	Returns:
-	--------
-	dict with:
-		- 'cohort_counts_per_subtype': DataFrame (subtypes × cohorts) with counts
-		- 'cohort_percentages_per_subtype': DataFrame (subtypes × cohorts) with percentages
-		- 'enrichment_summary': Summary statistics
-	
-	Example:
-	--------
-	>>> mapping = load_cluster_subtype_mapping('clusterToSubtype.csv')
-	>>> subtype_results = calculate_subtype_enrichment(df, results, mapping)
-	>>> print(subtype_results['cohort_percentages_per_subtype'])
-	"""
-	
-	# Expand rows with comma-separated cohorts (same as in main function)
-#	expanded_rows = []
-#	for _, row in df.iterrows():
-#		cohort_value = row[cohort_col]
-#		if pd.isna(cohort_value):
-#			continue
-#		
-#		cohorts = [c.strip() for c in str(cohort_value).split(',')]
-#		
-#		for cohort in cohorts:
-#			if cohort:
-#				row_copy = row.copy()
-#				row_copy[cohort_col] = cohort
-#				expanded_rows.append(row_copy)
-#				
-#	df_expanded = pd.DataFrame(expanded_rows)
+#def calculate_subtype_enrichment(df, results, cluster_subtype_mapping, 
+#									cohort_col='cohort'):
+#	"""
+#	Calculate T2D subtype enrichment showing cohort composition within each subtype.
 #	
-#	# Get cluster columns
-#	cluster_cols = [col for col in df_expanded.columns if col.endswith('_count')]
-	
-	df_expanded,cluster_cols = expand_cohort_rows(df, 'cohort')
-	
-	# Create mapping dictionary for quick lookup
-	cluster_to_subtypes = {}
-	for cluster in cluster_cols:
-		cluster_name = cluster.replace('_count', '')
-		matching = cluster_subtype_mapping[
-			cluster_subtype_mapping['functional_cluster'] == cluster_name
-		]
-		if len(matching) > 0:
-			cluster_to_subtypes[cluster] = matching['subtype'].tolist()
-		else:
-			cluster_to_subtypes[cluster] = []
-			
-	# Calculate subtype-cohort counts (what cohorts contribute to each subtype)
-	subtype_cohort_counts = {}
-	
-	for cohort in df_expanded[cohort_col].unique():
-		cohort_data = df_expanded[df_expanded[cohort_col] == cohort]
-		
-		# For each gene in the cohort
-		for _, row in cohort_data.iterrows():
-			# Check each cluster
-			for cluster in cluster_cols:
-				# If gene is associated with this cluster
-				if pd.notna(row.get(cluster)) and row[cluster] == 1:
-					# Get subtypes for this cluster
-					subtypes = cluster_to_subtypes.get(cluster, [])
-					
-					# Count this cohort's contribution to each subtype
-					for subtype in subtypes:
-						if subtype not in subtype_cohort_counts:
-							subtype_cohort_counts[subtype] = {}
-						if cohort not in subtype_cohort_counts[subtype]:
-							subtype_cohort_counts[subtype][cohort] = 0
-						subtype_cohort_counts[subtype][cohort] += 1
-						
-	# Convert to DataFrame (rows = subtypes, columns = cohorts)
-	counts_df = pd.DataFrame(subtype_cohort_counts).T.fillna(0).astype(int)
-	counts_df.index.name = 'subtype'
-	
-	# Calculate percentages (what % of each subtype comes from each cohort)
-	percentages_df = counts_df.div(counts_df.sum(axis=1), axis=0) * 100
-	
-	# Summary statistics
-	enrichment_summary = {
-		'total_subtypes': len(counts_df),
-		'cohorts_contributing': counts_df.columns.tolist(),
-		'total_associations_per_subtype': counts_df.sum(axis=1).to_dict()
-	}
-	
-	return {
-		'cohort_counts_per_subtype': counts_df,
-		'cohort_percentages_per_subtype': percentages_df,
-		'enrichment_summary': enrichment_summary
-	}
+#	This determines what proportion of each subtype's associations come from each cohort.
+#	
+#	Parameters:
+#	-----------
+#	df : pandas.DataFrame
+#		Original data with genes and cluster associations
+#	results : dict
+#		Results from rank_functional_clusters_by_cohort
+#	cluster_subtype_mapping : DataFrame
+#		Mapping from load_cluster_subtype_mapping()
+#	cohort_col : str
+#		Name of cohort column
+#		
+#	Returns:
+#	--------
+#	dict with:
+#		- 'cohort_counts_per_subtype': DataFrame (subtypes × cohorts) with counts
+#		- 'cohort_percentages_per_subtype': DataFrame (subtypes × cohorts) with percentages
+#		- 'enrichment_summary': Summary statistics
+#	
+#	Example:
+#	--------
+#	>>> mapping = load_cluster_subtype_mapping('clusterToSubtype.csv')
+#	>>> subtype_results = calculate_subtype_enrichment(df, results, mapping)
+#	>>> print(subtype_results['cohort_percentages_per_subtype'])
+#	"""
+#	
+#	
+#	df_expanded,cluster_cols = expand_cohort_rows(df, 'cohort')
+#	
+#	# Create mapping dictionary for quick lookup
+#	cluster_to_subtypes = {}
+#	for cluster in cluster_cols:
+#		cluster_name = cluster.replace('_count', '')
+#		matching = cluster_subtype_mapping[
+#			cluster_subtype_mapping['functional_cluster'] == cluster_name
+#		]
+#		if len(matching) > 0:
+#			cluster_to_subtypes[cluster] = matching['subtype'].tolist()
+#		else:
+#			cluster_to_subtypes[cluster] = []
+#			
+#	# Calculate subtype-cohort counts (what cohorts contribute to each subtype)
+#	subtype_cohort_counts = {}
+#	
+#	for cohort in df_expanded[cohort_col].unique():
+#		cohort_data = df_expanded[df_expanded[cohort_col] == cohort]
+#		
+#		# For each gene in the cohort
+#		for _, row in cohort_data.iterrows():
+#			# Check each cluster
+#			for cluster in cluster_cols:
+#				# If gene is associated with this cluster
+#				if pd.notna(row.get(cluster)) and row[cluster] == 1:
+#					# Get subtypes for this cluster
+#					subtypes = cluster_to_subtypes.get(cluster, [])
+#					
+#					# Count this cohort's contribution to each subtype
+#					for subtype in subtypes:
+#						if subtype not in subtype_cohort_counts:
+#							subtype_cohort_counts[subtype] = {}
+#						if cohort not in subtype_cohort_counts[subtype]:
+#							subtype_cohort_counts[subtype][cohort] = 0
+#						subtype_cohort_counts[subtype][cohort] += 1
+#						
+#	# Convert to DataFrame (rows = subtypes, columns = cohorts)
+#	counts_df = pd.DataFrame(subtype_cohort_counts).T.fillna(0).astype(int)
+#	counts_df.index.name = 'subtype'
+#	
+#	# Calculate percentages (what % of each subtype comes from each cohort)
+#	percentages_df = counts_df.div(counts_df.sum(axis=1), axis=0) * 100
+#	
+#	# Summary statistics
+#	enrichment_summary = {
+#		'total_subtypes': len(counts_df),
+#		'cohorts_contributing': counts_df.columns.tolist(),
+#		'total_associations_per_subtype': counts_df.sum(axis=1).to_dict()
+#	}
+#	
+#	return {
+#		'cohort_counts_per_subtype': counts_df,
+#		'cohort_percentages_per_subtype': percentages_df,
+#		'enrichment_summary': enrichment_summary
+#	}
 	
 
 	
@@ -1470,66 +1379,66 @@ def plot_risk_protective_comparison(results, save_path='risk_protective_comparis
 # DISPLAY SUBTYPE RESULTS
 # ============================================================================
 
-def display_subtype_results(subtype_results):
-	"""
-	Display subtype enrichment results in readable format.
-	
-	Parameters:
-	-----------
-	subtype_results : dict
-		Results from calculate_subtype_enrichment
-	
-	Example:
-	--------
-	>>> display_subtype_results(subtype_results)
-	"""
-	
-	print("\n" + "=" * 80)
-	print("T2D SUBTYPE ENRICHMENT ANALYSIS")
-	print("=" * 80)
-	
-	print(f"\nSubtypes identified: {', '.join(subtype_results['cohort_counts_per_subtype'].index.tolist())}")
-	print(f"Total cohorts analyzed: {len(subtype_results['cohort_counts_per_subtype'].columns)}")
-	
-	print("\n" + "=" * 80)
-	print("COHORT COUNTS WITHIN EACH SUBTYPE")
-	print("(How many associations from each cohort contribute to each subtype)")
-	print("=" * 80)
-	print(subtype_results['cohort_counts_per_subtype'].to_string())
-	
-	print("\n" + "=" * 80)
-	print("COHORT PERCENTAGES WITHIN EACH SUBTYPE")
-	print("(What % of each subtype comes from each cohort)")
-	print("=" * 80)
-	print(subtype_results['cohort_percentages_per_subtype'].round(1).to_string())
-	
-	# Find dominant cohort per subtype
-	print("\n" + "=" * 80)
-	print("DOMINANT COHORT FOR EACH SUBTYPE")
-	print("=" * 80)
-	
-	for subtype, row in subtype_results['cohort_percentages_per_subtype'].iterrows():
-		if row.sum() > 0:
-			dominant = row.idxmax()
-			percentage = row.max()
-			total = subtype_results['cohort_counts_per_subtype'].loc[subtype].sum()
-			print(f"{subtype}: {dominant} contributes {percentage:.1f}% (n={int(total)} total associations)")
-			
-	# Show subtype composition details
-	print("\n" + "=" * 80)
-	print("SUBTYPE COMPOSITION DETAILS")
-	print("=" * 80)
-	
-	for subtype in subtype_results['cohort_percentages_per_subtype'].index:
-		total = subtype_results['cohort_counts_per_subtype'].loc[subtype].sum()
-		print(f"\n{subtype} (n={int(total)} associations):")
-		
-		composition = subtype_results['cohort_percentages_per_subtype'].loc[subtype].sort_values(ascending=False)
-		for cohort, pct in composition.items():
-			if pct > 0:
-				count = subtype_results['cohort_counts_per_subtype'].loc[subtype, cohort]
-				print(f"  {cohort}: {pct:.1f}% (n={int(count)})")
-
+#def display_subtype_results(subtype_results):
+#	"""
+#	Display subtype enrichment results in readable format.
+#	
+#	Parameters:
+#	-----------
+#	subtype_results : dict
+#		Results from calculate_subtype_enrichment
+#	
+#	Example:
+#	--------
+#	>>> display_subtype_results(subtype_results)
+#	"""
+#	
+#	print("\n" + "=" * 80)
+#	print("T2D SUBTYPE ENRICHMENT ANALYSIS")
+#	print("=" * 80)
+#	
+#	print(f"\nSubtypes identified: {', '.join(subtype_results['cohort_counts_per_subtype'].index.tolist())}")
+#	print(f"Total cohorts analyzed: {len(subtype_results['cohort_counts_per_subtype'].columns)}")
+#	
+#	print("\n" + "=" * 80)
+#	print("COHORT COUNTS WITHIN EACH SUBTYPE")
+#	print("(How many associations from each cohort contribute to each subtype)")
+#	print("=" * 80)
+#	print(subtype_results['cohort_counts_per_subtype'].to_string())
+#	
+#	print("\n" + "=" * 80)
+#	print("COHORT PERCENTAGES WITHIN EACH SUBTYPE")
+#	print("(What % of each subtype comes from each cohort)")
+#	print("=" * 80)
+#	print(subtype_results['cohort_percentages_per_subtype'].round(1).to_string())
+#	
+#	# Find dominant cohort per subtype
+#	print("\n" + "=" * 80)
+#	print("DOMINANT COHORT FOR EACH SUBTYPE")
+#	print("=" * 80)
+#	
+#	for subtype, row in subtype_results['cohort_percentages_per_subtype'].iterrows():
+#		if row.sum() > 0:
+#			dominant = row.idxmax()
+#			percentage = row.max()
+#			total = subtype_results['cohort_counts_per_subtype'].loc[subtype].sum()
+#			print(f"{subtype}: {dominant} contributes {percentage:.1f}% (n={int(total)} total associations)")
+#			
+#	# Show subtype composition details
+#	print("\n" + "=" * 80)
+#	print("SUBTYPE COMPOSITION DETAILS")
+#	print("=" * 80)
+#	
+#	for subtype in subtype_results['cohort_percentages_per_subtype'].index:
+#		total = subtype_results['cohort_counts_per_subtype'].loc[subtype].sum()
+#		print(f"\n{subtype} (n={int(total)} associations):")
+#		
+#		composition = subtype_results['cohort_percentages_per_subtype'].loc[subtype].sort_values(ascending=False)
+#		for cohort, pct in composition.items():
+#			if pct > 0:
+#				count = subtype_results['cohort_counts_per_subtype'].loc[subtype, cohort]
+#				print(f"  {cohort}: {pct:.1f}% (n={int(count)})")
+#
 # ============================================================================
 # CREATE HEATMAP
 # ============================================================================
@@ -1760,6 +1669,348 @@ def _plot_combined_heatmap(subtype, cohorts, cluster_mapping, cluster_columns,
 	ax.set_yticklabels(ax.get_yticklabels(), rotation=0)
 	
 	
+def prepare_forest_plot_data(risk_contributions_per_subtype,
+	protective_contributions_per_subtype,
+	cluster_contributions_per_cohort,
+	cluster_subtype_mapping):
+	"""
+		Prepare data for forest plot showing functional cluster contributions by cohort for each subtype.
+		
+		Parameters:
+		-----------
+		risk_contributions_per_subtype : pd.DataFrame
+				Risk weights per cohort per subtype
+		protective_contributions_per_subtype : pd.DataFrame
+				Protective weights per cohort per subtype
+		cluster_contributions_per_cohort : pd.DataFrame
+				Cohorts as index, functional clusters as columns
+		cluster_subtype_mapping : pd.DataFrame
+				Columns: 'functional_cluster', 'subtype', 'cluster_with_suffix'
+		
+		Returns:
+		--------
+		dict : {subtype: {cluster: {cohort: net_contribution}}}
+		"""
+	forest_data = {}
+	
+	# Get net contributions (risk - protective) for weighting
+	net_cohort_contributions = risk_contributions_per_subtype 
+#	net_cohort_contributions = risk_contributions_per_subtype - protective_contributions_per_subtype
+	
+	cluster_contributions_per_cohortCopy = cluster_contributions_per_cohort.copy()
+	cluster_contributions_per_cohortCopy.columns = [col.replace('_count','') for col in cluster_contributions_per_cohort.columns]
+	
+	# Group mapping by subtype
+	for subtype in cluster_subtype_mapping['subtype'].unique():
+		forest_data[subtype] = {}
+		
+		# Get clusters for this subtype
+		subtype_clusters = cluster_subtype_mapping[
+			cluster_subtype_mapping['subtype'] == subtype
+		]['functional_cluster'].unique()
+		
+		for cluster in subtype_clusters:
+			# Skip if cluster not in contributions dataframe
+			if cluster not in cluster_contributions_per_cohortCopy.columns:
+				continue
+			
+			forest_data[subtype][cluster] = {}
+			
+			# For each cohort, calculate weighted contribution
+			for cohort in cluster_contributions_per_cohortCopy.index:
+				# Get cluster contribution from this cohort
+				cluster_contrib = cluster_contributions_per_cohortCopy.loc[cohort, cluster]
+				
+				# Weight by the cohort's net contribution to this subtype
+				if cohort in net_cohort_contributions.columns and subtype in net_cohort_contributions.index:
+					cohort_weight = net_cohort_contributions.loc[subtype, cohort]
+					weighted_contrib = cluster_contrib * cohort_weight
+				else:
+					weighted_contrib = 0
+					
+				forest_data[subtype][cluster][cohort] = weighted_contrib
+						
+	return forest_data
+	
+#def prepare_forest_plot_data(risk_contributions_per_subtype,
+#	protective_contributions_per_subtype,
+#	cluster_contributions_per_cohort,
+#	cluster_subtype_mapping):
+#	"""
+#	Prepare data for forest plot showing functional cluster contributions by cohort for each subtype.
+#	Now preserves separate risk and protective contributions.
+#	
+#	Parameters:
+#	-----------
+#	risk_contributions_per_subtype : pd.DataFrame
+#			Risk weights per cohort per subtype
+#	protective_contributions_per_subtype : pd.DataFrame
+#			Protective weights per cohort per subtype
+#	cluster_contributions_per_cohort : pd.DataFrame
+#			Cohorts as index, functional clusters as columns
+#	cluster_subtype_mapping : pd.DataFrame
+#			Columns: 'functional_cluster', 'subtype', 'cluster_with_suffix'
+#	
+#	Returns:
+#	--------
+#	dict : {subtype: {cluster: {cohort: {'risk': value, 'protective': value}}}}
+#	"""
+#	forest_data = {}
+#	
+#	cluster_contributions_per_cohortCopy = cluster_contributions_per_cohort.copy()
+#	cluster_contributions_per_cohortCopy.columns = [col.replace('_count','') for col in cluster_contributions_per_cohort.columns]
+#	
+#	# Group mapping by subtype
+#	for subtype in cluster_subtype_mapping['subtype'].unique():
+#		forest_data[subtype] = {}
+#		
+#		# Get clusters for this subtype
+#		subtype_clusters = cluster_subtype_mapping[
+#			cluster_subtype_mapping['subtype'] == subtype
+#		]['functional_cluster'].unique()
+#		
+#		for cluster in subtype_clusters:
+#			# Skip if cluster not in contributions dataframe
+#			if cluster not in cluster_contributions_per_cohortCopy.columns:
+#				continue
+#			
+#			forest_data[subtype][cluster] = {}
+#			
+#			# For each cohort, calculate weighted contributions (keep risk and protective separate)
+#			for cohort in cluster_contributions_per_cohortCopy.index:
+#				# Get cluster contribution from this cohort
+#				cluster_contrib = cluster_contributions_per_cohortCopy.loc[cohort, cluster]
+#				
+#				# Weight by the cohort's risk and protective contributions to this subtype
+#				risk_weighted = 0
+#				protective_weighted = 0
+#				
+#				if cohort in risk_contributions_per_subtype.columns and subtype in risk_contributions_per_subtype.index:
+#					risk_weight = risk_contributions_per_subtype.loc[subtype, cohort]
+#					risk_weighted = cluster_contrib * risk_weight
+#					
+#					if cohort in protective_contributions_per_subtype.columns and subtype in protective_contributions_per_subtype.index:
+#						protective_weight = protective_contributions_per_subtype.loc[subtype, cohort]
+#						protective_weighted = cluster_contrib * protective_weight
+#						
+#						forest_data[subtype][cluster][cohort] = {
+#							'risk': risk_weighted,
+#							'protective': protective_weighted
+#						}
+#						
+#	return forest_data
+#	
+	
+#def create_forest_plot(forest_data, output_path, top_n_clusters=10):
+#	"""Create forest plot showing functional cluster contributions"""
+#	
+#	fig, ax_forest = plt.subplots(figsize=(14, 16))
+#	
+#	subtypes = ['SIRD', 'MOD', 'SIDD', 'MARD', 'SAID']
+#	cohorts = ['G', 'GxG', 'GxGxE']
+#	
+#	# Prepare data for forest plot
+#	y_positions = []
+#	x_values = []
+#	colors_list = []
+#	markers_list = []
+#	
+#	y_pos = 0
+#	y_ticks = []
+#	y_labels = []
+#	subtype_positions = {}  # Track subtype y-positions for horizontal lines
+#	
+#	
+#	# Iterate through subtypes
+#	for subtype in subtypes:
+#		
+#		# Store subtype position for horizontal line
+#		subtype_positions[subtype] = y_pos
+#		y_pos -= 0.8
+#		
+#		# Add subtype header
+#		y_ticks.append(y_pos)
+#		y_labels.append(f'{subtype}')
+#		y_pos -= 0.8
+#		
+#		# Get clusters for this subtype
+#		if subtype not in forest_data or not forest_data[subtype]:
+#			y_pos -= 0.5
+#			continue
+#		
+#		clusters = forest_data[subtype]
+#		
+#		# Sort clusters by total absolute contribution (for better visualization)
+#		cluster_totals = {
+#			cluster: sum(abs(forest_data.get(cohort, 0)['risk'] - forest_data.get(cohort, 0)['protective']) 
+#				for cohort in cohorts)
+#			for cluster, forest_data in clusters.items()
+#		}
+#		sorted_clusters = sorted(cluster_totals.items(), 
+#			key=lambda x: x[1], 
+#			reverse=True)
+#		
+#		# Plot each cluster
+#		for cluster, total_contrib in sorted_clusters[:top_n_clusters]:
+#			if total_contrib < 1e-6:  # Skip clusters with negligible contribution
+#				continue
+#		
+#		cohort_data = clusters[cluster]
+#		has_contribution = False
+#		
+#		# Plot each cohort's contribution for this cluster
+#		for cohort in cohorts:
+#			contribution = abs(cohort_data.get(cohort, 0)['risk'] - cohort_data.get(cohort, 0)['protective'])
+#			
+#			if abs(contribution) > 0.0001:  # Only plot non-zero contributions
+#				y_positions.append(y_pos)
+#				x_values.append(contribution)
+#				colors_list.append(COHORT_COLORS[cohort])
+#				markers_list.append(COHORT_MARKERS[cohort])
+#				has_contribution = True
+#			
+#			# Only add cluster label if it has contributions
+#			if has_contribution:
+#				y_ticks.append(y_pos)
+#				# Clean up cluster name
+#				cluster_display = cluster.replace('_', ' ').title()
+#				if len(cluster_display) > 35:
+#					cluster_display = cluster_display[:32] + '...'
+#					y_labels.append(f'  {cluster_display}')
+#					y_pos -= 1.0
+#					
+#					y_pos -= 0.5  # Extra space between subtypes
+#					
+#		# Get x-axis limits first (before plotting) to span full width
+#		if x_values:
+#			x_min = min(x_values)
+#			x_max = max(x_values)
+#			x_range = x_max - x_min
+#			x_padding = x_range * 0.1
+#			xlim = (x_min - x_padding, x_max + x_padding)
+#			ax_forest.set_xlim(xlim)
+#		else:
+#			xlim = ax_forest.get_xlim()
+#			
+#			# Draw horizontal lines for each subtype section
+#		for subtype, y_subtype in subtype_positions.items():
+#			# Draw horizontal line spanning the plot
+#			ax_forest.axhline(y=y_subtype, color='gray', linestyle='-', 
+#				linewidth=2, alpha=0.4, zorder=0)
+#			
+#			# Add subtype label centered on the line
+#			x_center = (xlim[0] + xlim[1]) / 2
+#			ax_forest.text(x_center, y_subtype, f'  {subtype}  ',
+#				ha='center', va='center',
+#				fontsize=16, weight='bold',
+#				color=SUBTYPE_COLORS[subtype],
+#				bbox=dict(boxstyle='round,pad=0.5', 
+#					facecolor='white', 
+#					edgecolor=SUBTYPE_COLORS[subtype],
+#					linewidth=2,
+#					alpha=0.95),
+#				zorder=5)
+#				
+#				# Add horizontal lines connecting to dots
+#			for y, x in zip(y_positions, x_values):
+#				ax_forest.plot([0, x], [y, y], 
+#					color='gray', 
+#					linestyle='-', 
+#					linewidth=1.2, 
+#					alpha=0.4,
+#					zorder=1)
+#				
+#				# Plot the forest plot points
+#			for i, (y, x, color, marker) in enumerate(zip(y_positions, x_values, colors_list, markers_list)):
+#				ax_forest.scatter(x, y, 
+#					marker=marker,
+#					s=150, 
+#					color=color,
+#					edgecolor='black', 
+#					linewidth=1.0,
+#					alpha=0.85,
+#					zorder=3)
+#				
+#				# Add vertical line at x=0
+#			ax_forest.axvline(x=0, color='black', linestyle='-', linewidth=2, 
+#				zorder=1, alpha=0.9)
+#			
+#			# Styling
+#			ax_forest.set_yticks(y_ticks)
+#			ax_forest.set_yticklabels(y_labels, fontsize=11)
+#			ax_forest.set_xlabel('Net Contribution (Weighted)', 
+#				fontsize=14, weight='bold')
+#			ax_forest.set_title('Functional Cluster Contributions to T2D Subtypes',
+#				fontsize=16, weight='bold', pad=20)
+#			
+#			# Style y-axis labels - bold for subtypes
+#			for tick_label, label_text in zip(ax_forest.get_yticklabels(), y_labels):
+#				if not label_text.startswith('  '):  # Subtype labels
+#					tick_label.set_weight('bold')
+#					tick_label.set_fontsize(16)
+#					# Color code subtype labels
+#					subtype_name = label_text.strip()
+#				if subtype_name in SUBTYPE_COLORS:
+#					tick_label.set_color(SUBTYPE_COLORS[subtype_name])
+#					
+#					# Grid
+#			ax_forest.grid(axis='x', alpha=0.3, linestyle='--', linewidth=0.8, zorder=0)
+#			ax_forest.set_axisbelow(True)
+#			
+#			# Spines
+#			ax_forest.spines['top'].set_visible(False)
+#			ax_forest.spines['right'].set_visible(False)
+#			ax_forest.spines['left'].set_linewidth(1.5)
+#			ax_forest.spines['bottom'].set_linewidth(1.5)
+#			
+#			# Add shaded regions to distinguish risk vs protective
+#			#		xlim = ax_forest.get_xlim()
+#			#		ax_forest.axvspan(0, xlim[1], alpha=0.05, color='white', zorder=0)
+#			#		ax_forest.axvspan(xlim[0], 0, alpha=0.05, color='white', zorder=0)
+#			
+#			# Add text labels for risk/protective
+#			y_max = y_ticks[0] if y_ticks else 0
+#			ax_forest.text(xlim[1]*0.95, y_max + 1, 'Risk →', 
+#				ha='right', va='bottom', fontsize=20, 
+#				weight='bold', style='italic', color='darkred')
+#			ax_forest.text(xlim[0]*0.95, y_max + 1, '← Protective', 
+#				ha='left', va='bottom', fontsize=20, 
+#				weight='bold', style='italic', color='darkblue')
+#			
+#			# Legend for cohorts
+#			legend_elements = [
+#				plt.Line2D([0], [0], marker=COHORT_MARKERS[cohort], 
+#					color='w', 
+#					markerfacecolor=COHORT_COLORS[cohort],
+#					markeredgecolor='black',
+#					markeredgewidth=1.0,
+#					markersize=11, 
+#					label=f'{cohort}',
+#					linestyle='None')
+#				for cohort in cohorts
+#			]
+#			
+#			legend = ax_forest.legend(handles=legend_elements, 
+#				loc='lower right',
+#				title='ePRS model Type',
+#				frameon=True,
+#				fancybox=True,
+#				shadow=True,
+#				fontsize=11,
+#				title_fontsize=12)
+#			legend.get_frame().set_alpha(0.95)
+#			legend.get_frame().set_linewidth(1.5)
+#			
+#			# Adjust layout
+#			plt.tight_layout()
+#			
+#			# Save figure
+#			plt.savefig(output_path, dpi=300, bbox_inches='tight', 
+#				facecolor='white', edgecolor='none')
+#			print(f"Forest plot saved: {output_path}")
+#			plt.close()
+				
+	
 def _plot_risk_protective_heatmaps(subtype, cohorts, cluster_mapping, cluster_columns,
 									risk_df, protective_df, cluster_df,
 									ax_risk, ax_protective, risk_cmap, protective_cmap):
@@ -1840,6 +2091,281 @@ def _plot_risk_protective_heatmaps(subtype, cohorts, cluster_mapping, cluster_co
 	ax_protective.set_xticklabels(ax_protective.get_xticklabels(), rotation=45, ha='right')
 	ax_protective.set_yticklabels(ax_protective.get_yticklabels(), rotation=0)
 	
+def create_combined_visualization(df, forest_data, output_path, top_n_clusters=10):
+		"""
+		Create combined visualization with pie charts and forest plots for each subtype.
+		
+		Parameters:
+		-----------
+		df : dataFrame
+				index : subtype,
+				columns: cohorts,
+				values: percentage contribution
+		forest_data : dict
+			{subtype: {cluster: {cohort: contribution}}}
+		output_path : str
+				Path to save the figure
+		top_n_clusters : int
+				Number of top clusters to show per subtype
+		"""
+	
+		subtypes = df.index.tolist()
+		cohorts = df.columns.tolist()
+	
+		# Create figure with GridSpec for better control
+		fig = plt.figure(figsize=(18, 22))
+		gs = gridspec.GridSpec(5, 2, figure=fig, width_ratios=[1, 2.5], 
+													hspace=0.35, wspace=0.3,
+													left=0.08, right=0.96, top=0.96, bottom=0.04)
+	
+		# Add main title
+		fig.suptitle('Cohort Composition and Functional Cluster Contributions to T2D Subtypes',
+								fontsize=20, weight='bold', y=0.985)
+						
+		# Convert to dict with proportions (divide by 100 since values are percentages)
+		cohort_proportions = {}
+		for subtype in df.index:
+			cohort_proportions[subtype] = {
+				cohort: df.loc[subtype, cohort]
+				for cohort in df.columns
+			}
+	
+		# Process each subtype
+		for idx, subtype in enumerate(subtypes):
+				# Create axes for this row
+				ax_pie = fig.add_subplot(gs[idx, 0])
+				ax_forest = fig.add_subplot(gs[idx, 1])
+			
+				# ===== PIE CHART =====
+				values = [cohort_proportions[subtype].get(cohort, 0) for cohort in cohorts]
+				colors = [COHORT_COLORS[cohort] for cohort in cohorts]
+			
+				# Only show labels for non-zero values
+				labels = []
+				for cohort, val in zip(cohorts, values):
+						if val > 0.01:  # Show label if > 1%
+								labels.append(cohort)
+						else:
+								labels.append('')
+							
+				wedges, texts = ax_pie.pie(
+						values,
+#						labels=labels,
+						colors=colors
+#						autopct=lambda pct: f'{pct:.1f}%' if pct > 1 else '',
+#						startangle=90,
+#						textprops={'fontsize': 11, 'weight': 'bold'}
+				)
+			
+				# Make percentage text white for better visibility
+#				for autotext in autotexts:
+#						autotext.set_color('white')
+#						autotext.set_fontsize(10)
+					
+#				ax_pie.set_title('Cohort Composition', fontsize=13, weight='bold', pad=10)
+			
+				# ===== FOREST PLOT =====
+				if subtype not in forest_data or not forest_data[subtype]:
+						ax_forest.text(0.5, 0.5, 'No data available', 
+													ha='center', va='center', fontsize=12, style='italic')
+						ax_forest.set_xlim(-1, 1)
+						ax_forest.set_ylim(-1, 1)
+						ax_forest.axis('off')
+				else:
+						clusters = forest_data[subtype]
+					
+					#Sort clusters by total absolute contribution
+						cluster_totals = {
+							cluster: sum(abs(cohort_data.get(cohort, 0)) 
+								for cohort in cohorts)
+							for cluster, cohort_data in clusters.items()
+						}
+					
+#						cluster_totals = {
+#							cluster: sum(abs(cohort_data.get(cohort, {}).get('risk', 0)) + 
+#								abs(cohort_data.get(cohort, {}).get('protective', 0))
+#								for cohort in cohorts)
+#							for cluster, cohort_data in clusters.items()
+#						}
+						sorted_clusters = sorted(cluster_totals.items(), 
+													key=lambda x: x[1], 
+													reverse=True)
+					
+						# Prepare data for plotting
+						y_positions = []
+						x_values = []
+						colors_list = []
+						markers_list = []
+						y_ticks = []
+						y_labels = []
+					
+						y_pos = 0
+					
+						# Plot each cluster
+						for cluster, total_contrib in sorted_clusters[:top_n_clusters]:
+								if total_contrib < 1e-6:
+										continue
+							
+								cohort_data = clusters[cluster]
+								has_contribution = False
+							
+								# Plot each cohort's contribution
+								for cohort in cohorts:
+									contribution = cohort_data.get(cohort, 0)
+										
+									if cohort not in cohort_data:
+										continue
+									
+#									risk_val = cohort_data[cohort].get('risk', 0)
+#									protective_val = cohort_data[cohort].get('protective', 0)
+									
+									if abs(contribution) > 0.0001:
+										y_positions.append(y_pos)
+										x_values.append(contribution)
+										colors_list.append(COHORT_COLORS[cohort])
+										markers_list.append(COHORT_MARKERS[cohort])
+										has_contribution = True
+									
+									# Plot risk contribution (positive, on right side)
+#									if abs(risk_val) > 0.0001:
+#										y_positions.append(y_pos)
+#										x_values.append(risk_val)
+#										colors_list.append(COHORT_COLORS[cohort])
+#										markers_list.append(COHORT_MARKERS[cohort])
+#										has_contribution = True
+#										
+#										# Plot protective contribution (negative, on left side)
+#										if abs(protective_val) > 0.0001:
+#											y_positions.append(y_pos)
+#											x_values.append(-protective_val)  # Negative for left side
+#											colors_list.append(COHORT_COLORS[cohort])
+#											markers_list.append(COHORT_MARKERS[cohort])
+#											has_contribution = True
+											
+								if has_contribution:
+										y_ticks.append(y_pos)
+										# Clean up cluster name
+										cluster_display = cluster.replace('_', ' ')
+										if len(cluster_display) > 35:
+												cluster_display = cluster_display[:32] + '...'
+										y_labels.append(cluster_display)
+										y_pos -= 1.0
+									
+						# Get x-axis limits
+						if x_values:
+#								x_min = min(x_values)
+								x_min = 0
+								x_max = max(x_values)
+								x_range = x_max - x_min
+								if x_range > 0:
+										x_padding = x_range * 0.15
+#										xlim = (x_min - x_padding, x_max + x_padding)
+										xlim = (x_min, x_max + x_padding)
+								else:
+										xlim = (-1, 1)
+								ax_forest.set_xlim(xlim)
+						else:
+								xlim = (-1, 1)
+								ax_forest.set_xlim(xlim)
+							
+						# Add horizontal lines connecting to dots
+						for y, x in zip(y_positions, x_values):
+								ax_forest.plot([0, x], [y, y], 
+															color='gray', 
+															linestyle='-', 
+															linewidth=1.0, 
+															alpha=0.3,
+															zorder=1)
+							
+						# Plot the forest plot points
+						for y, x, color, marker in zip(y_positions, x_values, colors_list, markers_list):
+								ax_forest.scatter(x, y, 
+													marker=marker,
+													s=120, 
+													color=color,
+													edgecolor='black', 
+													linewidth=0.8,
+													alpha=0.85,
+													zorder=3)
+							
+						# Add vertical line at x=0
+						ax_forest.axvline(x=0, color='black', linestyle='-', linewidth=1.5, 
+															zorder=2, alpha=0.8)
+					
+						# Styling
+						if y_ticks:
+								ax_forest.set_yticks(y_ticks)
+								ax_forest.set_yticklabels(y_labels, fontsize=10)
+								ax_forest.set_ylim(min(y_ticks) - 0.5, max(y_ticks) + 0.5)
+							
+
+					
+						# Grid
+						ax_forest.grid(axis='x', alpha=0.25, linestyle='--', linewidth=0.6, zorder=0)
+						ax_forest.set_axisbelow(True)
+					
+						# Spines
+						ax_forest.spines['top'].set_visible(False)
+						ax_forest.spines['right'].set_visible(False)
+						ax_forest.spines['left'].set_linewidth(1.2)
+						ax_forest.spines['bottom'].set_linewidth(1.2)
+					
+						# Set white background
+						ax_forest.set_facecolor('white')
+						ax_forest.set_xlabel('Contribution Magnitude', fontsize=11, weight='bold')
+					
+						# Add risk/protective labels for first row only
+						if idx == 0:
+							ax_forest.set_title('Functional Cluster Contributions', fontsize=13, weight='bold', pad=10)
+							y_top = max(y_ticks) if y_ticks else 0
+							ax_forest.text(xlim[1]*0.95, y_top + 0.8, 'Risk →', 
+														ha='right', va='center', fontsize=11,
+														weight='bold', style='italic', color='darkred')
+							ax_forest.text(xlim[0]*0.95, y_top + 0.8, '← Protective', 
+														ha='left', va='center', fontsize=11,
+														weight='bold', style='italic', color='darkblue')
+							
+				# ===== ROW TITLE =====
+				# Add subtype label on the left side of the row
+				fig.text(0.01, 0.92 - (idx * 0.184), subtype,
+								fontsize=18, weight='bold', 
+								color='black',  # Changed to black
+								va='center', ha='left',
+								bbox=dict(boxstyle='round,pad=0.5', 
+													facecolor='white', 
+													edgecolor='black',
+													linewidth=2.5))
+			
+		# Add legend at the bottom
+		legend_elements = [
+				plt.Line2D([0], [0], marker=COHORT_MARKERS[cohort], 
+									color='w', 
+									markerfacecolor=COHORT_COLORS[cohort],
+									markeredgecolor='black',
+									markeredgewidth=1.0,
+									markersize=11, 
+									label=f'{cohort}',
+									linestyle='None')
+				for cohort in cohorts
+		]
+	
+		fig.legend(handles=legend_elements, 
+#							loc='best',
+							ncol=3,
+							frameon=True,
+							fancybox=True,
+							shadow=True,
+							fontsize=12,
+							title='ePRS model',
+							title_fontsize=13,
+							bbox_to_anchor=(0.5, 0.005))
+	
+		# Save figure
+		plt.savefig(output_path, dpi=300, bbox_inches='tight', 
+								facecolor='white', edgecolor='none')
+		print(f"Combined visualization saved: {output_path}")
+		plt.close()
+	
 	
 
 if __name__ == "__main__":
@@ -1851,7 +2377,7 @@ if __name__ == "__main__":
 	print("SUBTYPE ENRICHMENT ANALYSIS - COMPLETE WORKFLOW")
 	print("=" * 80)
 	
-	pheno_path = '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
+	pheno_path = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
 	# Load your data
 	df = pd.read_csv(f'{pheno_path}/scores/clusterWeights.csv')  # or pd.read_csv() if it's actually CSV
 	
@@ -1869,9 +2395,6 @@ if __name__ == "__main__":
 		signatures = pd.concat([signature,signatures],ignore_index=True)
 	
 
-			
-
-
 	# Step 1: Load cluster-subtype mapping
 	print("\nLoading cluster-subtype mapping...")
 	cluster_mapping = load_cluster_subtype_mapping(f'{pheno_path}/scores/clusterToSubtype.csv')
@@ -1887,7 +2410,25 @@ if __name__ == "__main__":
 		weighting='effect_size'
 	)
 	display_weighted_results(subtype_weighted)
-	plot_weighted_subtype_pies(subtype_weighted, f'{pheno_path}/figures/weighted_by_effect_size.png')
+	
+	#plot forest plot
+	forest_data = prepare_forest_plot_data(
+		subtype_weighted['risk_contributions'],
+		subtype_weighted['protective_contributions'],
+		results['scores_df'],
+		cluster_mapping
+	)
+	
+	create_combined_visualization(subtype_weighted['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/combined_pie_forest_weighted_by_effect_size.png')
+	
+	
+#	create_forest_plot(
+#		forest_data,
+#		f'{pheno_path}/figures/cohort_composition_forest_plot_combined_weighted_by_effect_size.png'
+#	)
+	
+	plot_weighted_subtype_pies(subtype_weighted, f'{pheno_path}/figures/pie_weighted_by_effect_size.png')
+
 	
 	# Method 2: Distinctiveness weighting
 	print("\n2. Distinctiveness Weighting (effect × uniqueness)")
@@ -1895,7 +2436,23 @@ if __name__ == "__main__":
 		df, results, cluster_mapping,
 		weighting='distinctiveness'
 	)
-	plot_weighted_subtype_pies(subtype_distinctive, f'{pheno_path}/figures/weighted_by_distinctiveness.png')
+	#plot forest plot
+	forest_data = prepare_forest_plot_data(
+		subtype_distinctive['risk_contributions'],
+		subtype_distinctive['protective_contributions'],
+		results['scores_df'],
+		cluster_mapping
+	)
+	
+	create_combined_visualization(subtype_distinctive['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/combined_pie_forest_weighted_by_distinctiveness.png')
+	
+#	create_forest_plot(
+#		forest_data,
+#		f'{pheno_path}/figures/cohort_composition_forest_plot_combined_weighted_by_distinctiveness.png'
+#	)
+	
+	
+	plot_weighted_subtype_pies(subtype_distinctive, f'{pheno_path}/figures/pie_weighted_by_distinctiveness.png')
 	
 	# Method 3: Normalized weighting
 	print("\n3. Normalized Score Weighting")
@@ -1903,7 +2460,37 @@ if __name__ == "__main__":
 		df, results, cluster_mapping,
 		weighting='normalized'
 	)
-	plot_weighted_subtype_pies(subtype_normalized, f'{pheno_path}/figures/weighted_by_normalized.png')
+	
+	#plot forest plot
+	forest_data = prepare_forest_plot_data(
+		subtype_normalized['risk_contributions'],
+		subtype_normalized['protective_contributions'],
+		results['scores_df'],
+		cluster_mapping
+	)
+	
+	create_combined_visualization(subtype_normalized['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/combined_pie_forest_weighted_by_effect_size_normalized.png')
+	
+	#Method 4: Normalized weighting for subtype pie chart with effect_size weighting for the forest plot
+	
+	forest_data = prepare_forest_plot_data(
+		subtype_weighted['risk_contributions'],
+		subtype_weighted['protective_contributions'],
+		results['scores_df'],
+		cluster_mapping
+	)
+	
+	create_combined_visualization(subtype_normalized['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/combined_pie_forest_normalized_forest_weighted_by_effect_size.png')
+	
+	
+#	create_forest_plot(
+#		forest_data,
+#		f'{pheno_path}/figures/cohort_composition_forest_plot_combined_weighted_by_effect_size_normalized.png'
+#	)
+	
+	
+	plot_weighted_subtype_pies(subtype_normalized, f'{pheno_path}/figures/pie_weighted_by_normalized.png')
+	
 	
 	# Create comparison
 	print("\n4. Creating Comparison Plots...")
@@ -1916,6 +2503,9 @@ if __name__ == "__main__":
 		results['cluster_ranks_df'].to_excel(writer, sheet_name='Cluster Rankings')
 		results['cohort_ranks_df'].to_excel(writer, sheet_name='Cohort Rankings')
 		results['top_cohorts'].to_excel(writer, sheet_name='Top Cohorts by Cluster')
+		results['effect_directions'].to_excel(writer, sheet_name='Direction of Top Clusters')
+		results['protective_scores'].to_excel(writer, sheet_name='Protective scores')
+		results['risk_scores'].to_excel(writer, sheet_name='Risk scores')
 		signatures.to_excel(writer,sheet_name='Signature Clusters by Cohort')
 		
 	print("\nResults exported to 'cluster_rankings_results.xlsx'")
@@ -1940,7 +2530,7 @@ if __name__ == "__main__":
 		
 	print("\nResults exported to 'cluster_subtype_results_effect_sizes.xlsx'")
 	
-	with pd.ExcelWriter(f'{pheno_path}/scores/cluster_subtype_results_normalized_gene_count.xlsx') as writer:
+	with pd.ExcelWriter(f'{pheno_path}/scores/cluster_subtype_results_effect_size_normalized_gene_count.xlsx') as writer:
 		subtype_normalized['cohort_weights_per_subtype'].to_excel(writer, sheet_name='cohort_weights_per_subtype')
 		subtype_normalized['cohort_percentages_per_subtype'].to_excel(writer, sheet_name='cohort_percentages_per_subtype')
 		subtype_normalized['gene_counts'].to_excel(writer, sheet_name='gene_counts')
@@ -1957,19 +2547,7 @@ if __name__ == "__main__":
 	scores_df_plot = results['scores_df']
 	scores_df_plot.columns = [col.replace("_count","") for col in scores_df_plot.columns]
 	
-	#plot heatmaps
-	fig = create_cohort_cluster_heatmaps(
-		subtype_weighted['risk_contributions'],
-		subtype_weighted['protective_contributions'],
-		results['scores_df'],
-		cluster_mapping,
-		'combined',
-		(12, 5),
-		'Reds',
-		'Blues',
-		'RdBu_r',
-		save_path=f'{pheno_path}/figures/cohort_composition_heatmap_combined.png'
-	)
+	
 	
 	#plot heatmaps
 	fig = create_cohort_cluster_heatmaps(

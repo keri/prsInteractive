@@ -1,10 +1,11 @@
 #!/bin/bash
 
 
+#PHENO=$1
 
-pheno=$1
-#pheno="celiacDisease"
+PHENO='celiacDisease'
 
+EPI_COMBO=${2:-"sum"}
 
 # Source config with error handling
 if [ ! -f "../env.config" ]; then
@@ -17,26 +18,32 @@ else
     source ../env.config
 fi
 
+
+if [ "${EPI_COMBO}" == "sum" ]; then
+    COMBO_FOLDER='summedEpi'
+else
+    COMBO_FOLDER='productEpi'
+fi
+
+PHENO_DATA="${RESULTS_PATH}/$PHENO/${COMBO_FOLDER}"
+CONFIG_FILE="${PHENO_DATA}/pheno.config"
+
 #check that a results folder for phenotype exists
-if [ ! -d "${RESULTS_PATH}/$pheno" ]; then
-    echo "Folder '${RESULTS_PATH}/$pheno' does not exist..."
+if [ ! -d "${PHENO_DATA}" ]; then
+    echo "Folder '${PHENO_DATA}' does not exist..."
     echo "run envSetUp.sh <pheno> <icd10> <phenoStr> <n cores to use in epistatic interaction analysis>"
     exit 1
     
 else
-    echo "sourcing $pheno env variables."
+    echo "sourcing $PHENO env variables."
     #source pheno specific environment variables
-    source "${RESULTS_PATH}/$pheno/pheno.config"
+    source "${CONFIG_FILE}"
 fi
 
-
-
-# Check if RESULTS_PATH was set from env.config
-if [ -z "$RESULTS_PATH" ]; then
-    echo "ERROR: RESULTS_PATH not set from env.config"
-    exit 1
-fi
-
+echo "[WORKFLOW]PHENO_DATA is to : $PHENO_DATA"
+echo "[WORKFLOW]TRAINING_PATH is to : $TRAINING_PATH"
+echo "[WORKFLOW]TEST_PATH is to : $TEST_PATH"
+echo "[WORKFLOW]PHENO is to : $PHENO"
 echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 
 
@@ -44,30 +51,37 @@ echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 
 
 echo "[WORKFLOW] ENV_TYPE is set to: $env_type"
-export PHENO_PATH="$RESULTS_PATH/$pheno"
-export TEST_PATH=$TEST_PATH
-export HOLDOUT_PATH=$HOLDOUT_PATH
-export PHENO=$pheno
-export RESULTS_PATH=$RESULTS_PATH
-export WITHDRAWAL_PATH=$WITHDRAWAL_PATH
-export DATA_PATH=$DATA_PATH
-export HLA_FILE=$HLA_FILE
-export COVAR_FILE=$COVAR_FILE
-#export GENE_ENV_TEST=$GENE_ENV_TEST
-#export GENE_ENV_HOLDOUT=$GENE_ENV_HOLDOUT
-export FEATURE_SCORES_FILE=$FEATURE_SCORES_FILE
-export ENV_FILE=$ENV_FILE
+export PHENO_DATA
+export PHENO_PATH
+export TEST_PATH
+export HOLDOUT_PATH
+export PHENO
+export RESULTS_PATH
+export WITHDRAWAL_PATH
+export DATA_PATH
+export HLA_FILE
+export COVAR_FILE
+export GENE_ENV_TEST
+export GENE_ENV_HOLDOUT
+export GENE_MAIN_TEST
+export GENE_MAIN_HOLDOUT
+export FEATURE_SCORES_FILE
+export ENV_FILE
+export EPI_COMBO
 
 
 echo "[DEBUG] ===== ENVIRONMENT VARIABLES ====="
 echo "PHENOTYPE BEING ANALYZED: $PHENO"
-echo "PHENO_PATH: $PHENO_PATH"
+echo "PHENO_DATA: $PHENO_DATA"
 echo "SCRIPTS_DIR: $SCRIPTS_DIR"
 echo "TEST_PATH: $TEST_PATH"
 echo "HOLDOUT_PATH: $HOLDOUT_PATH"
 echo "RESULTS_PATH: $RESULTS_PATH"
-#echo "TEST_ENV_GEN_FILE: $GENE_ENV_TEST"
-#echo "HOLDOUT_ENV_GEN_FILE: $GENE_ENV_HOLDOUT"
+echo "TEST_ENV_GEN_FILE: $GENE_ENV_TEST"
+echo "HOLDOUT_ENV_GEN_FILE: $GENE_ENV_HOLDOUT"
+echo "TEST_ENV_MAIN_FILE: $MAIN_ENV_TEST"
+echo "HOLDOUT_ENV_MAIN_FILE: $MAIN_ENV_HOLDOUT"
+echo "FEATURE_SCORES_FILE : $FEATURE_SCORES_FILE"
 echo "====================================="
 
 # Check if required files exist before running Python
@@ -75,16 +89,16 @@ echo "[DEBUG] Checking required files..."
 
 required_files=(
     "$FEATURE_SCORES_FILE"
-#   "$GENE_ENV_HOLDOUT"
-#   "$GENE_ENV_TEST"
+    "$GENE_ENV_HOLDOUT"
+    "$GENE_ENV_TEST"
     "$WITHDRAWAL_PATH"
     "$COVAR_FILE"
     "$HLA_FILE"
     "$HOLDOUT_PATH"
     "$TEST_PATH"
-    "${SCRIPTS_DIR}/calculate_prs_for_filtered_main_epi.py"
+    "${SCRIPTS_DIR}/calculate_prs_post_modelling.py"
     "$SCRIPTS_DIR/run_plink_LD.sh"
-#   "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py"
+    "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py"
 )
 
 for file in "${required_files[@]}"; do
@@ -96,79 +110,54 @@ for file in "${required_files[@]}"; do
     fi
 done
 
-echo "[DEBUG] All required files found. Starting Python script..."
+echo "[DEBUG] All required files found. Starting Python scripts..."
 
-export FEATURE_SCORES_FILE=$FEATURE_SCORES_FILE
-#check to see if LD has been done previously before association
-if [ ! -f "$PHENO_PATH/finalModel.ld" ];then
-    if [ ! -f "$PHENO_PATH/scores/importantFeaturesForAssociationAnalysis.csv" ]; then
-        #run LD script
-        export PRE_POST_ASSOCIATION='post'
+#check if file exists post GxGxE filtering
+for file in "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv"; do
+    if [[ -f "$file" ]]; then
+        echo "✓ File exists: $file"
+        
     else
-        export PRE_POST_ASSOCIATION='pre'
+        echo "✗ File missing: $file"
+        export FEATURE_SCORES_FILE=$FEATURE_SCORES_FILE
+        export CONFIG_FILE=$CONFIG_FILE
+        python "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py"
     fi
+done
+
+source "${CONFIG_FILE}"
+
+#
+##### ENSURE CONFIG FILE IS UPDATED ##########
+if [[ "$FEATURE_SCORES_FILE" == *"filtered"* ]]; then
+    echo "✓ GxGxE features have been filtered for non-additive post modelling"
+else
+    #wait 10 mins for script to finish
+    echo "Python script filtering non-additive GxGxE features finished with exit code: $?"
+    echo "Continuing with original FEATURE SCORES file"
+fi
+
+#check to see if LD has been done previously before association
+if [ ! -f "$PHENO_DATA/finalModel.ld" ];then
+    export PHENO_DATA=$PHENO_DATA
+    export PHENO_PATH=$PHENO_PATH
     bash "$SCRIPTS_DIR/run_plink_LD.sh" $pheno
 fi
 
-#check to see if gene-environment additive analysis has been done
-#if [ ! -f "$PHENO_PATH/scores/featureScoresReducedFinalModel.filtered.csv" ]; then
-#   
-#   export SCORES_PATH="${PHENO_PATH}/scores"
-#   python "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py"
-#   
-#   #ensure file is there
-#   if [ ! -f "$PHENO_PATH/scores/featureScoresReducedFinalModel.filtered.csv" ]; then
-#       echo "❌ Expected filtered file not found: $PHENO_PATH/scores/featureScoresReducedFinalModel.filtered.csv"
-#       echo "Continuing with original FEATURE_SCORES_FILE"
-#   else
-#       #update config file
-#       NEW_FEATURE_SCORES_FILE="$PHENO_PATH/scores/featureScoresReducedFinalModel.filtered.csv" 
-#       #check to see if config has been updated
-#       if [ "$FEATURE_SCORES_FILE" == "featureScoresReducedFinalModel.csv" ]; then
-#           # Update config file
-#           CONFIG_FILE="${PHENO_PATH}/pheno.config"
-#           echo "Updating config file: $CONFIG_FILE"
-#           
-#           # Create backup
-#           cp "$CONFIG_FILE" "${CONFIG_FILE}.backup"
-#           
-#           if [[ "$(uname)" == "Darwin" ]]; then
-#               # macOS version
-#               sed -i '' "s|^FEATURE_SCORES_FILE=.*|FEATURE_SCORES_FILE=${NEW_FEATURE_SCORES_FILE}|" "$CONFIG_FILE"
-#           else
-#               # Linux version  
-#               sed -i "s|^FEATURE_SCORES_FILE=.*|FEATURE_SCORES_FILE=${NEW_FEATURE_SCORES_FILE}|" "$CONFIG_FILE"
-#           fi
-#           
-#           # Verify the change
-#           if grep -q "^FEATURE_SCORES_FILE=${NEW_FEATURE_SCORES_FILE}$" "$CONFIG_FILE"; then
-#               echo "✓ Successfully updated EPI_FILE in config"
-#               rm "${CONFIG_FILE}.backup"  # Remove backup if successful
-#               FEATURE_SCORES_FILE=$EW_FEATURE_SCORES_FILE
-#               export FEATURE_SCORES_FILE=$NEW_FEATURE_SCORES_FILE
-#           else
-#               echo "❌ Failed to update config file"
-#               mv "${CONFIG_FILE}.backup" "$CONFIG_FILE"  # Restore backup
-#               
-#           fi
-#       fi
-#   fi
-#fi
+#necessary exports are done at top of script
+#Run the Python script
 
-
-
-
-# Run the Python script
-python "${SCRIPTS_DIR}/calculate_prs_for_filtered_main_epi.py"
+python "${SCRIPTS_DIR}/calculate_prs_post_modelling.py"
 
 exit_code=$?
-echo "[DEBUG] Python script exited with code: $exit_code"
+echo "[DEBUG] Python script calculating prs exited with code: $exit_code"
 
 if [ $exit_code -ne 0 ]; then
-    echo "ERROR: Python script failed with exit code $exit_code"
+    echo "ERROR: Python script calculating prs failed with exit code $exit_code"
     exit $exit_code
 fi
 
+#export of PHENO_DATA done
 python "${SCRIPTS_DIR}/combine_prs.py"
 
 exit_code=$?
@@ -178,6 +167,33 @@ if [ $exit_code -ne 0 ]; then
     echo "ERROR: Python combine_prs.py script failed with exit code $exit_code"
     exit $exit_code
 fi
+
+#calculate statstics: McNemar, ttest, pearson correlation, precision/recall improvement over G and exclusive cases 
+python "${SCRIPTS_DIR}/calculate_prs_stats.py"
+
+exit_code=$?
+echo "[DEBUG] Python calculate_prs_stats.py script exited with code: $exit_code"
+
+if [ $exit_code -ne 0 ]; then
+    echo "ERROR: Python calculate_prs_stats.py script failed with exit code $exit_code"
+    exit $exit_code
+fi
+
+#calculate AUC Delong statistics
+Rscript "$SCRIPTS_DIR/prsAUCDelongStats.R" \
+--pheno_data "$PHENO_DATA" 
+
+exit_code=$?
+echo "[DEBUG] Rscript prsAUCDelongStats.R script exited with code: $exit_code"
+
+if [ $exit_code -ne 0 ]; then
+    echo "ERROR: Rscript prsAUCDelongStats.R script failed with exit code $exit_code"
+    exit $exit_code
+fi
+
+########  CALCULATE TOP FEATURES IN STATISTICALLY DISTINCT COHORTS ##########
+export FEATURE_SCORES_FILE=$FEATURE_SCORES_FILE
+python "${SCRIPTS_DIR}/calculate_top_features_in_cohort.py" 
 
 
 echo "[DEBUG] Script completed successfully"

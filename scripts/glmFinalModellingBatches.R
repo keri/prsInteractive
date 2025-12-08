@@ -935,7 +935,7 @@ parser$add_argument("--results_path", required = TRUE)
 parser$add_argument("--data_path", required = TRUE)
 parser$add_argument("--hla_file", required = TRUE) 
 parser$add_argument("--covar_file", required = TRUE)
-parser$add_argument("--pheno_path", required = TRUE)
+parser$add_argument("--pheno_data", required = TRUE)
 parser$add_argument("--training_file", required = TRUE)
 parser$add_argument("--test_file", required = TRUE)
 parser$add_argument("--training_env_gen_file", required = TRUE)
@@ -946,7 +946,7 @@ args <- parser$parse_args()
 
 results_path <- args$results_path
 data_path <- args$data_path
-pheno_path <- args$pheno_path
+pheno_path <- args$pheno_data
 hla_file <- args$hla_file
 training_file <- args$training_file
 test_file <- args$test_file

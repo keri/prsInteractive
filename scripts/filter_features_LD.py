@@ -126,34 +126,43 @@ def filter_main_in_ld(ld2,featuresMain,rank_feature):
 
 	return(mainFeaturesInLD)
 
-def main(phenoPath,feature_scores_file,pre_post_association):
+#def main(phenoPath,features_filter_ld,pre_post_association):
+def main(phenoPath,features_filter_ld):
 	'''run the LD command separately which generates the plink.ld'''
 	
 #	filePath = f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet'
 	ld = pd.read_csv(f'{phenoPath}/finalModel.ld',sep='\s+')
 	ld2 = ld[ld['R2'] > .6]
 #	features = pd.read_csv(f'{phenoPath}/scores/importantFeaturesPostShap.csv')
-	features = pd.read_csv(feature_scores_file)
+	features = pd.read_csv(features_filter_ld)
 	
-	if pre_post_association == 'post':
-		output_file = 'featureScoresReducedFinalModel.csv'
-	else:
-		output_file = 'importantFeaturesForAssociationAnalysis.csv'
+	#this determines if the LD analysis is done before or after glm association modelling 
+	#the 
+#	if pre_post_association == 'post':
+#	output_file = 'featureScoresReducedFinalModel.csv'
+#	else:
+#		output_file = 'importantFeaturesForAssociationAnalysis.csv'
 	
+	#refactored code includes a shap_zscore column not present in thesis results which means it will be the featureScoresReducedFinalModel created post glm modelling
 	try:
+		file_root = features_filter_ld.split('.')[0]
+		output_file = features_filter_ld
 		#get the main and epi weigths separate as the separate epi+main model performed best
 		rank_feature = 'shap_zscore'
 		featuresMain = features[features['data_type'] == 'main'][['feature','shap_zscore']]
 		featuresEpi = features[(features['data_type'] == 'epi') & (features['feature'].str.contains(','))][['feature','shap_zscore']]
+		features.to_csv(f'{file_root}.preLD.csv',index=False)
 	except KeyError:
-		features = pd.read_csv(f'{phenoPath}/scores/featureScoresReducedFinalModel.csv')
+		output_file = f'{phenoPath}/scores/featureScoresReducedFinalModel.csv'
+		features = pd.read_csv(output_file)
 		rank_feature = [col for col in features.columns if 'coef' in col][0]
 		features2 = features[['model','feature',rank_feature]]
 		featuresMain = features2[features2['model'] == 'main'][['feature',rank_feature]]
 		featuresEpi = features2[(features2['model'] == 'epi') & (features2['feature'].str.contains(','))][['feature',rank_feature]]
-		
-
-
+		features.to_csv(f'{phenoPath}/scores/featureScoresReducedFinalModel.preLD.csv',index=False)
+	
+	
+	
 	#############################################################################################
 	#                              LD FEATURES TO PRUNE FOR MAIN SNPS                           #
 	#############################################################################################
@@ -172,16 +181,20 @@ def main(phenoPath,feature_scores_file,pre_post_association):
 	
 	featuresFinal = features[~features['feature'].isin(featuresToPrune)]
 	
-
-	featuresFinal.to_csv(f'{phenoPath}/scores/{output_file}',index=False)
+	
+	featuresFinal.to_csv(output_file,index=False)
+	
+	#if LD is done post glm modelling save the original dataset preLD
+#	if pre_post_association == 'post':
+#		features.to_csv(f'{phenoPath}/scores/featureScoresReducedFinalModel.preLD.csv',index=False)
 	
 	
 		
 if __name__ == '__main__':
 	
 	parser = argparse.ArgumentParser(description="creating LD snp list ....")
-	parser.add_argument("--pheno_path", help="Path to the input pheno folder")
-	parser.add_argument("--pre_post_association", help="pre or post association LD")
+	parser.add_argument("--pheno_data", help="Path to the input pheno folder")
+	parser.add_argument("--features_to_ld_file", help="file used to filter ld")
 	
 	
 	
@@ -190,19 +203,25 @@ if __name__ == '__main__':
 	# Prefer command-line input if provided; fallback to env var
 #	pheno_path = '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
 #	pre_post_association='pre'
-	pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
-	print(f"[PYTHON] Reading from: {pheno_path}")
+	pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
+	print(f"[PYTHON] Reading from: {pheno_data}")
+
+#	pre_post_association = args.pre_post_association or os.environ.get("PRE_POST_ASSOCIATION")
+#	print(f"pre or post association set to : {pre_post_association}")
 	
-	pre_post_association = args.pre_post_association or os.environ.get("PRE_POST_ASSOCIATION")
-	print(f"pre or post association set to : {pre_post_association}")
+	features_to_ld_file = args.features_to_ld_file or os.environ.get("FEATURES_TO_FILTER_LD")
+	print(f'[PYTHON] Reading from feature files to filter for ld {features_to_ld_file}')
 	
-	feature_scores_file = f"{pheno_path}/scores/importantFeaturesPostShap.csv"
-	print(f"[PYTHON] Reading features for LD from: {feature_scores_file}")
+	#f"{pheno_data}/scores/importantFeaturesPostShap.csv"
+#	print(f"[PYTHON] Reading features for LD from: {features_to_ld_file}")
 	
 	
-	if not pheno_path:
-		raise ValueError("You must provide a data pheno path via --pheno_folder or set the PHENO_PATH environment variable.")
+	if not pheno_data:
+		raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")
+	
+	if not features_to_ld_file:
+		raise ValueError("You must provide a feature file to perform LD via --features_to_ld_file or set the FEATURES_TO_FILTER_LD environment variable.")	
 
 		
-	main(pheno_path,feature_scores_file,pre_post_association)
+	main(pheno_data,features_to_ld_file)
 	

@@ -51,7 +51,7 @@ done
 
 plink --epistasis-summary-merge $OUTPUT_FILE $N_CORES --out "${PHENO_PATH}/epiFiles/trainingCombinedEpi"
 
-PHENO_CONFIG="$PHENO_PATH/pheno.config"
+PHENO_CONFIG="$PHENO_DATA/pheno.config"
 
 # Validate pheno_config file exists 
 if [ ! -f "$PHENO_CONFIG" ]; then
