@@ -5,7 +5,7 @@ import os
 import argparse
 import sys
 from datetime import datetime
-from helper.mcnemar_stats_tests import *
+from helper.mcnemar_comparison_calculations import *
 
 def add_iid_simple(long_df, phenotype_df):
     
@@ -212,12 +212,17 @@ def calculate_percent_improvement(extra_cases, baseline_cases):
     return (extra_cases / baseline_cases) * 100
 
 
-def calculate_precision_recall_improvement(scoresPath,model_type='prs'):
-    outputPath = f'{scoresPath}/model_recall_precision_improvement.csv'
+def calculate_precision_recall_improvement(scoresPath,model_type='prs',include_all=False,include_epi_main=True):
+
 
     # Auto-generate log filename with timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    log_path = os.path.join(scoresPath, f'prs_stats_{timestamp}.log')
+    if include_all:
+        log_path = os.path.join(scoresPath, f'prs_stats_with_all{timestamp}.log')
+        outputPath = f'{scoresPath}/model_recall_precision_improvement_with_all.csv'
+    else:
+        log_path = os.path.join(scoresPath, f'prs_stats_{timestamp}.log')
+        outputPath = f'{scoresPath}/model_recall_precision_improvement.csv'
     
     # Open log file and redirect stdout
     log_file = open(log_path, 'w')
@@ -237,6 +242,11 @@ def calculate_precision_recall_improvement(scoresPath,model_type='prs'):
             calculate_mcnemar_test(filePath,scoresPath)
             
             cohorts = [col for col in df.columns if 'scaled_prs' in col]
+            if not include_all:
+                cohorts = [col for col in cohorts if 'all' not in col]
+                
+            if not include_epi_main:
+                cohorts = [col for col in cohorts if 'epi+main' not in col]
             
             #get the case value based on PHENOTYPE column
             if 0 in df['PHENOTYPE'].unique():
@@ -310,15 +320,15 @@ def calculate_precision_recall_improvement(scoresPath,model_type='prs'):
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description="calculating model performance of G vs other using predictions of trained models and PRS calculations....")
-    parser.add_argument("--pheno_path", help="Path to the input pheno folder")
+    parser.add_argument("--pheno_data", help="Path to the input pheno folder")
 
     args = parser.parse_args()
     
     # Prefer command-line input if provided; fallback to env var
-    pheno_data = args.pheno_path or os.environ.get("PHENO_DATA")
+    pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
     print(f"[PYTHON] Reading from: {pheno_data}")
     
-    pheno_data = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
+#   pheno_data = '/Users/kerimulterer/prsInteractive/results/celiacDisease/summedEpi'
 
     
     if not pheno_data:

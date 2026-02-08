@@ -271,7 +271,7 @@ def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_lin
         # CONTROLS: Clinical says HIGH risk (1), want PRS to correctly say LOW risk (0)
         # =====================================================================
         reclass_controls = pd.crosstab(
-            df.loc[controls, risk_cat1],  # Clinical risk (rows): 1=low, 0=high
+            df.loc[controls, risk_cat1],  # Clinical risk (rows): 0=low, 1=high
             df.loc[controls, prs_col],     # PRS risk (columns): 1=high, 0=low
             rownames=[risk_cat1],
             colnames=[prs_col]
@@ -285,7 +285,7 @@ def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_lin
             controls_correct = 0
             
         # Total controls at high risk in clinical measure (clinical = 1)
-        total_controls_high = reclass_controls.loc[0].sum() if 1 in reclass_controls.index else 0
+        total_controls_high = reclass_controls.loc[1].sum() if 1 in reclass_controls.index else 0
         
         # NRI- for controls (proportion correctly kept at/moved to low risk)
         nri_controls = controls_correct / len(df[controls]) if len(df[controls]) > 0 else 0
@@ -340,6 +340,13 @@ def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_lin
             # We'll distribute them proportionally based on overall cohort sizes
             controls_reclass_mask = (df[risk_cat1] == 1) & (df[prs_col] == 0) & controls
             controls_reclass_total = controls_reclass_mask.sum()
+            
+#           # Priority: main > epi > cardio
+#           controls_main = ((df[main_col] == 0) & controls_reclass_mask).sum()
+#           controls_epi = ((df[epi_col] == 0) & controls_reclass_mask & (df[main_col] == 1)).sum()
+#           controls_cardio = ((df[cardio_col] == 0) & controls_reclass_mask & 
+#                          (df[main_col] == 1) & (df[epi_col] == 1)).sum()
+            
             
             # Get overall cohort sizes for proportional attribution
             total_main = (df[main_col] == 1).sum()
@@ -1469,8 +1476,8 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, prs_method
         
         results['nri'][prs1] = {}
         for measure in binary_measures:
+            results['nri'][f"{prs1}_vs_{measure}"] = {}
             try:
-                results['nri'][f"{prs1}_vs_{measure}"] = {}
                 nri, nri_events, nri_non_events = calculate_nri(
                     df_copy, measure, prs_col1, True
                 )
@@ -1482,9 +1489,26 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, prs_method
                     'nri_non_events': nri_non_events
                 }
 
-                                    
             except Exception as e:
                 results['nri'][f"{prs1}_vs_{measure}"][measure] = {'error': str(e)}
+            
+            try:
+                #calculate nri with PRS_combined and low clinical measure
+#               results['nri'][f"{prs1}_vs_{measure}"] = {}
+                nri, nri_events, nri_non_events = calculate_nri(
+                    df_copy[df_copy[measure] == 0], measure, prs_col1, True
+                )
+                
+                
+                results['nri'][f"{prs1}_vs_{measure}"][f"{measure}_low"] = {
+                    'nri': nri,
+                    'nri_events': nri_events,
+                    'nri_non_events': nri_non_events
+                }
+            
+            except Exception as e:
+                results['nri'][f"{prs1}_vs_{measure}"][f"{measure}_low"] = {'error': str(e)}
+                
                 
             fig = plot_reclassification_table(df_copy, measure, prs_col1)
             fig.savefig(f'{figPath}/reclassificationHeatMap.{measure}v{prs1}{file_ext}.png',dpi=150, bbox_inches='tight')
@@ -1493,6 +1517,7 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, prs_method
             fig = plot_low_clinical_reclassification_table(df_copy, measure, prs_col1)
             fig.savefig(f'{figPath}/reclassificationHeatMap.LowOnly_{measure}v{prs1}{file_ext}.png',dpi=150, bbox_inches='tight')
             plt.close(fig)
+            
             
         
 #       if prs1 == 'combined_centile_bin':
@@ -1945,6 +1970,7 @@ def main(pheno,pheno_data,results_path):
     os.makedirs(f'{scoresPath}', exist_ok=True)
     
     df = pd.read_csv(f'{pheno_data}/scores/combinedPRSGroups.csv')
+
     validation_df = pd.read_csv(f'{pheno_data}/scores/combinedPRSGroups.holdout.csv')
     
     #prs columns to use in analysis

@@ -3,9 +3,10 @@
 
 #PHENO=$1
 
-PHENO='celiacDisease'
+PHENO='type2Diabetes'
 
-EPI_COMBO=${2:-"sum"}
+#EPI_COMBO=${2:-"sum"}
+EPI_COMBO="prod"
 
 # Source config with error handling
 if [ ! -f "../env.config" ]; then
@@ -51,6 +52,8 @@ echo "[WORKFLOW] RESULTS_PATH is set to: $RESULTS_PATH"
 
 
 echo "[WORKFLOW] ENV_TYPE is set to: $env_type"
+
+
 export PHENO_DATA
 export PHENO_PATH
 export TEST_PATH
@@ -99,74 +102,75 @@ required_files=(
     "${SCRIPTS_DIR}/calculate_prs_post_modelling.py"
     "$SCRIPTS_DIR/run_plink_LD.sh"
     "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py"
+    "$SCRIPTS_DIR/prsAUCDelongStats.R"
+    "${SCRIPTS_DIR}/calculate_top_features_in_cohort.py"
+    "${SCRIPTS_DIR}/calculate_prs_stats.py"
 )
 
-for file in "${required_files[@]}"; do
-    if [ ! -f "$file" ]; then
-        echo "ERROR: Required file does not exist: $file"
-        exit 1
-    else
-        echo "[DEBUG] Found: $file"
-    fi
-done
-
-echo "[DEBUG] All required files found. Starting Python scripts..."
-
-#check if file exists post GxGxE filtering
-for file in "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv"; do
-    if [[ -f "$file" ]]; then
-        echo "✓ File exists: $file"
-        
-    else
-        echo "✗ File missing: $file"
-        export FEATURE_SCORES_FILE=$FEATURE_SCORES_FILE
-        export CONFIG_FILE=$CONFIG_FILE
-        python "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py"
-    fi
-done
-
-source "${CONFIG_FILE}"
-
+#for file in "${required_files[@]}"; do
+#   if [ ! -f "$file" ]; then
+#       echo "ERROR: Required file does not exist: $file"
+#       exit 1
+#   else
+#       echo "[DEBUG] Found: $file"
+#   fi
+#done
 #
-##### ENSURE CONFIG FILE IS UPDATED ##########
-if [[ "$FEATURE_SCORES_FILE" == *"filtered"* ]]; then
-    echo "✓ GxGxE features have been filtered for non-additive post modelling"
-else
-    #wait 10 mins for script to finish
-    echo "Python script filtering non-additive GxGxE features finished with exit code: $?"
-    echo "Continuing with original FEATURE SCORES file"
-fi
-
-#check to see if LD has been done previously before association
-if [ ! -f "$PHENO_DATA/finalModel.ld" ];then
-    export PHENO_DATA=$PHENO_DATA
-    export PHENO_PATH=$PHENO_PATH
-    bash "$SCRIPTS_DIR/run_plink_LD.sh" $pheno
-fi
-
-#necessary exports are done at top of script
-#Run the Python script
-
-python "${SCRIPTS_DIR}/calculate_prs_post_modelling.py"
-
-exit_code=$?
-echo "[DEBUG] Python script calculating prs exited with code: $exit_code"
-
-if [ $exit_code -ne 0 ]; then
-    echo "ERROR: Python script calculating prs failed with exit code $exit_code"
-    exit $exit_code
-fi
-
-#export of PHENO_DATA done
-python "${SCRIPTS_DIR}/combine_prs.py"
-
-exit_code=$?
-echo "[DEBUG] Python combine_prs.py script exited with code: $exit_code"
-
-if [ $exit_code -ne 0 ]; then
-    echo "ERROR: Python combine_prs.py script failed with exit code $exit_code"
-    exit $exit_code
-fi
+#echo "[DEBUG] All required files found. Starting Python scripts..."
+#
+##check if file exists post GxGxE filtering
+#for file in "$PHENO_DATA/scores/cardioMetabolicimportantFeaturesPostShapFilteredZscore.csv"; do
+#   if [[ -f "$file" ]]; then
+#       echo "✓ File exists: $file"
+#       
+#   else
+#       echo "✗ File missing: $file"
+#       export FEATURE_SCORES_FILE=$FEATURE_SCORES_FILE
+#       export CONFIG_FILE=$CONFIG_FILE
+#       python "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py"
+#   fi
+#done
+#
+#source "${CONFIG_FILE}"
+#
+##
+###### ENSURE CONFIG FILE IS UPDATED ##########
+##if [[ "$FEATURE_SCORES_FILE" == *"filtered"* ]]; then
+##   echo "✓ GxGxE features have been filtered for non-additive post modelling"
+##else
+##   #wait 10 mins for script to finish
+##   echo "Python script filtering non-additive GxGxE features finished with exit code: $?"
+##   echo "Continuing with original FEATURE SCORES file"
+##fi
+#
+##check to see if LD has been done previously before association
+#if [ ! -f "$PHENO_PATH/finalModel.ld" ];then
+#   bash "$SCRIPTS_DIR/run_plink_LD.sh" $PHENO
+#fi
+#
+##necessary exports are done at top of script
+##Run the Python script
+#
+#python "${SCRIPTS_DIR}/calculate_prs_post_modelling.py"
+#
+#exit_code=$?
+#echo "[DEBUG] Python script calculating prs exited with code: $exit_code"
+#
+#if [ $exit_code -ne 0 ]; then
+#   echo "ERROR: Python script calculating prs failed with exit code $exit_code"
+#   exit $exit_code
+#fi
+#
+##export of PHENO_DATA done
+#python "${SCRIPTS_DIR}/combine_prs.py"
+#
+#exit_code=$?
+#echo "[DEBUG] Python combine_prs.py script exited with code: $exit_code"
+#
+#if [ $exit_code -ne 0 ]; then
+#   echo "ERROR: Python combine_prs.py script failed with exit code $exit_code"
+#   exit $exit_code
+#fi
 
 #calculate statstics: McNemar, ttest, pearson correlation, precision/recall improvement over G and exclusive cases 
 python "${SCRIPTS_DIR}/calculate_prs_stats.py"

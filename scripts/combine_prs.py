@@ -221,7 +221,7 @@ def main(phenoPath):
 	
 
 #	for holdout in [False,True]:
-	for holdout in [False,True]:
+	for holdout in [False]:
 			
 		if holdout:
 			combinedPRSBinned = pd.DataFrame()
@@ -296,7 +296,7 @@ if __name__ == '__main__':
 	print(f"[PYTHON] Reading from: {pheno_data}")
 
 	pheno = 'type2Diabetes'
-	pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi'
+	pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/productEpi'
 		
 	if not pheno_data:
 		raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")

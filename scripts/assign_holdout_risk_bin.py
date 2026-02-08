@@ -6,6 +6,55 @@ import numpy as np
 from helper.data_wrangling import *
 from helper.calculate_prs import *
     
+def create_case_control_histogram(df,pheno_col,continous_col,figPath,figsize=(12,6)):
+    """
+    Plot the distribution of a cases and controls
+    
+    Parameters:
+    -----------
+    df : pandas.DataFrame
+        DataFrame containing prs/bin calculations
+    pheno_col : str
+        Column name of the binarized version of the phenotype
+    continous_col : str
+        column name of the measure to be plotted
+    figsize : tuple
+        Figure size
+        
+    Returns:
+    --------
+    matplotlib.figure.Figure
+        Distribution plot
+    """
+    plt.figure(figsize=figsize)
+    
+    if not set(df[pheno_col].unique()).issubset({0, 1}):
+        df['phenotype'] = df['PHENOTYPE'] - 1
+        pheno_col = 'phenotype'
+        
+        
+    # Split data
+    cases = df[df[pheno_col] == 1][[continous_col]]
+    controls = df[df[pheno_col] == 0][[continous_col]]
+    
+    # Plot histograms
+    plt.hist(controls, bins=30, alpha=0.6, label='Controls', color='skyblue', edgecolor='black')
+    plt.hist(cases, bins=30, alpha=0.6, label='Cases', color='salmon', edgecolor='black')
+    
+    case_mean = cases[continous_col].mean()
+    # Plot threshold line
+    plt.axvline(x=case_mean, color='black', linestyle='--', linewidth=2)
+    
+    
+    plt.title(f'Distribution of cases/controls across: {continous_col}')
+    plt.xlabel(continous_col)
+    plt.ylabel('Frequency')
+    plt.grid(alpha=0.3)
+    
+    plt.savefig(f'{figPath}/histogramCaseControl.{continous_col}.png')
+    plt.close()
+    
+
 
 def create_risk_bins(training_df, n_bins=1000, phenotype_col='PHENOTYPE',use_epi_main=False):
     """
@@ -295,13 +344,21 @@ def assign_risk_thresholds(holdout_df, bin_stats, training_scalers=None, thresho
         combined_prs = np.zeros(len(holdout_processed))
         scaled_combined_prs = np.zeros(len(holdout_processed))
         
+        # Track assignment reasons for reporting
+        n_any_high_risk = 0
+        n_prop_high = 0
+        n_prop_low = 0
+        n_missing = 0
+        
         for idx in range(len(holdout_processed)):
             if valid_prs_count.iloc[idx] == 0:
                 combined_bin[idx] = np.nan
                 combined_prs[idx] = np.nan
                 scaled_combined_prs[idx] = np.nan
-            elif prop_case_bins.iloc[idx] > 0.6:
-                # If >60% case bins, use MAX bin
+                n_missing += 1
+                
+            elif holdout_processed['any_high_risk'].iloc[idx] > 0:
+                # Priority 1: If any_high_risk > 0, use MAX bin
                 max_bin = bins_df.iloc[idx].max()
                 combined_bin[idx] = max_bin
                 # Find which PRS type has this max bin
@@ -310,9 +367,22 @@ def assign_risk_thresholds(holdout_df, bin_stats, training_scalers=None, thresho
                 prs_col_name = f'scaled_prs_{max_prs_type}'
                 scaled_combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name]
                 combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name.replace('scaled_','')]
+                n_any_high_risk += 1
+                
+            elif prop_case_bins.iloc[idx] > 0.6:
+                # Priority 2: If >60% case bins (but not any_high_risk), use MAX bin
+                max_bin = bins_df.iloc[idx].max()
+                combined_bin[idx] = max_bin
+                # Find which PRS type has this max bin
+                max_prs_type = bins_df.iloc[idx].idxmax()
+                # Get the corresponding scaled PRS value
+                prs_col_name = f'scaled_prs_{max_prs_type}'
+                scaled_combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name]
+                combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name.replace('scaled_','')]
+                n_prop_high += 1
                 
             else:
-                # If ≤60% case bins, use MIN bin
+                # If any_high_risk = 0, use MIN bin
                 min_bin = bins_df.iloc[idx].min()
                 combined_bin[idx] = min_bin
                 # Find which PRS type has this min bin
@@ -321,32 +391,76 @@ def assign_risk_thresholds(holdout_df, bin_stats, training_scalers=None, thresho
                 prs_col_name = f'scaled_prs_{min_prs_type}'
                 scaled_combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name]
                 combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name.replace('scaled_','')]
+                n_prop_low += 1
+#       for idx in range(len(holdout_processed)):
+#           if valid_prs_count.iloc[idx] == 0:
+#               combined_bin[idx] = np.nan
+#               combined_prs[idx] = np.nan
+#               scaled_combined_prs[idx] = np.nan
+#           elif prop_case_bins.iloc[idx] > 0.6:
+#               # If >60% case bins, use MAX bin
+#               max_bin = bins_df.iloc[idx].max()
+#               combined_bin[idx] = max_bin
+#               # Find which PRS type has this max bin
+#               max_prs_type = bins_df.iloc[idx].idxmax()
+#               # Get the corresponding scaled PRS value
+#               prs_col_name = f'scaled_prs_{max_prs_type}'
+#               scaled_combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name]
+#               combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name.replace('scaled_','')]
+#               
+#           else:
+#               # If ≤60% case bins, use MIN bin
+#               min_bin = bins_df.iloc[idx].min()
+#               combined_bin[idx] = min_bin
+#               # Find which PRS type has this min bin
+#               min_prs_type = bins_df.iloc[idx].idxmin()
+#               # Get the corresponding scaled PRS value
+#               prs_col_name = f'scaled_prs_{min_prs_type}'
+#               scaled_combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name]
+#               combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name.replace('scaled_','')]
                 
                 
         holdout_processed['combined_centile_bin'] = combined_bin
         holdout_processed['scaled_prs_combined'] = scaled_combined_prs
         holdout_processed['prs_combined'] = combined_prs
         
-        # Calculate combined PRS score (mean of PRS values for combined approach)
-        prs_cols_for_combined = [col for col in bin_stats.keys() if col in holdout_processed.columns]
-#       if prs_cols_for_combined:
-#           holdout_processed['combined_prs'] = holdout_processed[prs_cols_for_combined].mean(axis=1)
-            
         # Assign combined high-risk (bin > threshold_bin)
         holdout_processed['combined_high_risk'] = (combined_bin >= threshold_bin).astype(int)
         
         # Statistics
-        high_case_prop = (prop_case_bins > 0.6).sum()
-        low_case_prop = (prop_case_bins <= 0.6).sum()
         combined_high_risk_count = holdout_processed['combined_high_risk'].sum()
         
-        print(f"Individuals with >30% case bins (using MAX): {high_case_prop} ({high_case_prop/len(holdout_processed)*100:.1f}%)")
-        print(f"Individuals with ≤30% case bins (using MIN): {low_case_prop} ({low_case_prop/len(holdout_processed)*100:.1f}%)")
-        print(f"Combined high-risk (bin > {threshold_bin}): {combined_high_risk_count}/{len(holdout_processed)} ({combined_high_risk_count/len(holdout_processed)*100:.1f}%)")
-        print(f"\nCase bin proportion statistics:")
-        print(f"  Mean: {prop_case_bins.mean():.3f}")
-        print(f"  Median: {prop_case_bins.median():.3f}")
-        print(f"  Range: {prop_case_bins.min():.3f} - {prop_case_bins.max():.3f}")
+        print(f"\nAssignment Strategy Breakdown:")
+        print(f"{'='*60}")
+        print(f"  Priority 1 - any_high_risk > 0 (MAX bin):    {n_any_high_risk:6d} ({n_any_high_risk/len(holdout_processed)*100:5.1f}%)")
+        print(f"  Priority 2 - prop_case_bins > 60% (MAX bin): {n_prop_high:6d} ({n_prop_high/len(holdout_processed)*100:5.1f}%)")
+        print(f"  Priority 3 - prop_case_bins ≤ 60% (MIN bin): {n_prop_low:6d} ({n_prop_low/len(holdout_processed)*100:5.1f}%)")
+        print(f"  Missing data:                                 {n_missing:6d} ({n_missing/len(holdout_processed)*100:5.1f}%)")
+        print(f"{'='*60}")
+        print(f"Total individuals assigned MAX bin: {n_any_high_risk + n_prop_high} ({(n_any_high_risk + n_prop_high)/len(holdout_processed)*100:.1f}%)")
+        print(f"Total individuals assigned MIN bin: {n_prop_low} ({n_prop_low/len(holdout_processed)*100:.1f}%)")
+        print(f"\nCombined high-risk (bin >= {threshold_bin}): {combined_high_risk_count}/{len(holdout_processed)} ({combined_high_risk_count/len(holdout_processed)*100:.1f}%)")
+        
+        # Calculate combined PRS score (mean of PRS values for combined approach)
+#       prs_cols_for_combined = [col for col in bin_stats.keys() if col in holdout_processed.columns]
+#       if prs_cols_for_combined:
+#           holdout_processed['combined_prs'] = holdout_processed[prs_cols_for_combined].mean(axis=1)
+            
+#       # Assign combined high-risk (bin > threshold_bin)
+#       holdout_processed['combined_high_risk'] = (combined_bin >= threshold_bin).astype(int)
+#       
+#       # Statistics
+#       high_case_prop = (prop_case_bins > 0.6).sum()
+#       low_case_prop = (prop_case_bins <= 0.6).sum()
+#       combined_high_risk_count = holdout_processed['combined_high_risk'].sum()
+#       
+#       print(f"Individuals with >30% case bins (using MAX): {high_case_prop} ({high_case_prop/len(holdout_processed)*100:.1f}%)")
+#       print(f"Individuals with ≤30% case bins (using MIN): {low_case_prop} ({low_case_prop/len(holdout_processed)*100:.1f}%)")
+#       print(f"Combined high-risk (bin > {threshold_bin}): {combined_high_risk_count}/{len(holdout_processed)} ({combined_high_risk_count/len(holdout_processed)*100:.1f}%)")
+#       print(f"\nCase bin proportion statistics:")
+#       print(f"  Mean: {prop_case_bins.mean():.3f}")
+#       print(f"  Median: {prop_case_bins.median():.3f}")
+#       print(f"  Range: {prop_case_bins.min():.3f} - {prop_case_bins.max():.3f}")
         
     return holdout_processed
 
@@ -518,7 +632,7 @@ if __name__ == "__main__":
     prsDf = holdout_processed[['IID','combined_centile_bin','PHENOTYPE']].rename(columns={'combined_centile_bin':'scaled_prs'})
     create_prs_plots(prsDf,'combined',figPath,scoresPath,'mixed.holdout')
     
-    create_case_control_histogram(prsDf,'PHENOTYPE','combined_centile_bin',figPath,figsize=(12,6))
+    create_case_control_histogram(holdout_processed,'PHENOTYPE','combined_centile_bin',figPath,figsize=(12,6))
     
     # Display sample results
     print("\n" + "="*60)

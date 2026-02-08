@@ -6,6 +6,7 @@ library(boot)
 library(dplyr)
 library(tidyr)
 library(argparse)
+library(DescTools)
 # ============================================================================
 # HELPER: Safely build formulas with special characters
 # ============================================================================
@@ -44,6 +45,72 @@ calculate_tjur_r2 <- function(y_true, y_pred) {
   
   tjur_r2 <- mean_cases - mean_controls
   return(tjur_r2)
+}
+
+# ============================================================================
+# FUNCTION: Calculate Nagelkerke R²
+# ============================================================================
+nagelkerke_with_ci <- function(formula, data, R = 2000, conf.level = 0.95, 
+            ci.type = "bca", seed = 123) {
+  
+  # Load required packages
+  require(DescTools)
+  require(boot)
+  
+
+  model <- glm(formula, 
+               data = data, 
+               family = binomial)
+  
+  # Calculate point estimate
+  nagelkerke <- PseudoR2(model, which = "Nagelkerke")
+  
+  # Extract model formula and family
+  formula <- formula(model)
+  family <- family(model)
+  
+  # Bootstrap function
+  boot_fun <- function(data, indices) {
+    d <- data[indices, ]
+    m <- glm(formula, data = d, family = family)
+    return(PseudoR2(m, which = "Nagelkerke"))
+  }
+  
+  # Run bootstrap
+  set.seed(seed)
+  boot_results <- boot(data = data, statistic = boot_fun, R = R)
+  
+  # Calculate confidence intervals
+  ci <- boot.ci(boot_results, conf = conf.level, type = ci.type)
+  
+  # Extract CI bounds based on type
+  if (ci.type == "bca") {
+    lower <- ci$bca[4]
+    upper <- ci$bca[5]
+  } else if (ci.type == "perc") {
+    lower <- ci$percent[4]
+    upper <- ci$percent[5]
+  } else if (ci.type == "norm") {
+    lower <- ci$normal[2]
+    upper <- ci$normal[3]
+  } else if (ci.type == "basic") {
+    lower <- ci$basic[4]
+    upper <- ci$basic[5]
+  }
+  
+  # Create results
+  results <- list(
+    nagelkerke_r2 = nagelkerke,
+    ci_lower = lower,
+    ci_upper = upper,
+    conf_level = conf.level,
+    ci_type = ci.type,
+    n_bootstrap = R
+  )
+  # Print results
+  print(results)
+  
+  return(results)
 }
 
 # ============================================================================
@@ -270,6 +337,13 @@ compare_prs_models <- function(data,
     
     # Tjur's R²
     tjur_cov <- calculate_tjur_se(data, formula_cov)
+    nagelkirke_cov <- tryCatch({
+      nagelkerke_with_ci(formula_cov, data = data, ci.type = "bca", R = 2000)
+    }, error = function(e) {
+      message("BCA failed, using percentile method instead")
+       nagelkerke_with_ci(formula_cov, data = data, ci.type = "perc", R = 2000)
+    })
+    # nagelkirke_cov <- nagelkerke_with_ci(formula_cov, data = data, R = 2000)
     
     results_list[[1]] <- data.frame(
       model = "covariates_only",
@@ -283,7 +357,11 @@ compare_prs_models <- function(data,
       tjur_ci_lower = tjur_cov$ci_lower,
       tjur_ci_upper = tjur_cov$ci_upper,
       tjur_z_score = tjur_cov$z_score,
-      tjur_p_value = tjur_cov$p_value
+      tjur_p_value = tjur_cov$p_value,
+      nagelkirke_r2 = nagelkirke_cov$nagelkerke_r2,
+      nagelkirke_ci_lower = nagelkirke_cov$ci_lower,
+      nagelkirke_ci_upper = nagelkirke_cov$ci_upper,
+      nagelkirke_conf_level = nagelkirke_cov$conf_level
     )
     
     cat(sprintf("AUC: %.4f [%.4f - %.4f]\n", 
@@ -310,6 +388,14 @@ compare_prs_models <- function(data,
     
     # Tjur's R²
     tjur_prs <- calculate_tjur_se(data, formula_prs)
+    nagelkirke_prs <- tryCatch({
+      nagelkerke_with_ci(formula_prs, data = data, ci.type = "bca", R = 2000)
+    }, error = function(e) {
+      message("BCA failed, using percentile method instead")
+      nagelkerke_with_ci(formula_prs, data = data, ci.type = "perc", R = 2000)
+    })
+    # nagelkirke_prs <- nagelkerke_with_ci(formula_prs, data = data, R = 2000)
+    
     
     results_list[[length(results_list) + 1]] <- data.frame(
       model = prs_col,
@@ -324,7 +410,11 @@ compare_prs_models <- function(data,
       tjur_ci_lower = tjur_prs$ci_lower,
       tjur_ci_upper = tjur_prs$ci_upper,
       tjur_z_score = tjur_prs$z_score,
-      tjur_p_value = tjur_prs$p_value
+      tjur_p_value = tjur_prs$p_value,
+      nagelkirke_r2 = nagelkirke_prs$nagelkerke_r2,
+      nagelkirke_ci_lower = nagelkirke_prs$ci_lower,
+      nagelkirke_ci_upper = nagelkirke_prs$ci_upper,
+      nagelkirke_conf_level = nagelkirke_prs$conf_level
     )
     
     cat(sprintf("AUC: %.4f [%.4f - %.4f]", 
@@ -355,6 +445,13 @@ compare_prs_models <- function(data,
       
       # Tjur's R²
       tjur_combined <- calculate_tjur_se(data, formula_combined)
+      nagelkirke_combined <- tryCatch({
+        nagelkerke_with_ci(formula_combined, data = data, ci.type = "bca", R = 2000)
+      }, error = function(e) {
+        message("BCA failed, using percentile method instead")
+        nagelkerke_with_ci(formula_combined, data = data, ci.type = "perc", R = 2000)
+      })
+      # nagelkirke_combined <- nagelkerke_with_ci(formula_combined, data = data, R = 2000)
       
       results_list[[length(results_list) + 1]] <- data.frame(
         model = paste0(prs_col, "_plus_covariates"),
@@ -369,7 +466,11 @@ compare_prs_models <- function(data,
         tjur_ci_lower = tjur_combined$ci_lower,
         tjur_ci_upper = tjur_combined$ci_upper,
         tjur_z_score = tjur_combined$z_score,
-        tjur_p_value = tjur_combined$p_value
+        tjur_p_value = tjur_combined$p_value,
+        nagelkirke_r2 = nagelkirke_combined$nagelkerke_r2,
+        nagelkirke_ci_lower = nagelkirke_combined$ci_lower,
+        nagelkirke_ci_upper = nagelkirke_combined$ci_upper,
+        nagelkirke_conf_level = nagelkirke_combined$conf_level
       )
       
       cat(sprintf("AUC: %.4f [%.4f - %.4f]", 
@@ -454,7 +555,7 @@ compare_prs_models <- function(data,
 # RUN SCRIPT WITHE INPUT
 # ============================================================================
 ################################ GLOBAL VARIABLES  ########################
-# 
+
 parser <- ArgumentParser()
 parser$add_argument("--pheno_data", required = TRUE)
 
@@ -463,7 +564,11 @@ args <- parser$parse_args()
 
 pheno_data <- args$pheno_data
 
+
+#pheno_data = "~/prsInteractive/results/type2Diabetes/summedEpi"
 scores_path = paste0(pheno_data,'/scores')
+
+
 
 # Define filepaths
 data_file = paste0(scores_path,'/combinedPRSGroups.csv')

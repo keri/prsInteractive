@@ -2,10 +2,13 @@
 
 
 
-pheno=$1
-env_type=$2
-threshold=${3:-2}
-EPI_COMBO=${4:-"sum"}
+#pheno=$1
+pheno='type2Diabetes'
+#env_type=$2
+env_type='cardioMetabolic'
+threshold=${3:-1.99}
+#EPI_COMBO=${4:-"sum"}
+EPI_COMBO='prod'
 
 # Source config with error handling
 if [ ! -f "../env.config" ]; then
@@ -55,6 +58,7 @@ export TEST_PATH=$TEST_PATH
 export ENV_TYPE=$env_type
 export PHENO=$pheno
 export RESULTS_PATH=$RESULTS_PATH
+export WITHDRAWAL_PATH
 
 
 echo "[DEBUG] ===== ENVIRONMENT VARIABLES ====="
@@ -91,7 +95,7 @@ echo "[DEBUG] All required files found. Starting Python script..."
 
 export INPUT_FILE="$PHENO_DATA/scores/importantFeaturesPostShap.csv"
 export THRESHOLD=$threshold
-eport EPI_COMBO
+export EPI_COMBO
 # Run the Python script
 python "${SCRIPTS_DIR}/gene_environment_feature_discovery.py"
 

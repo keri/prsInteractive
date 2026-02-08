@@ -98,8 +98,10 @@ def filter_epi_features(epiFeatures,ld2,rank_feature):
 
 def filter_main_in_ld(ld2,featuresMain,rank_feature):
 	#match to feature 1
+	
 	#if both in main, then filter SNP with the lowest beta coefficient
 	mainFeaturesInLD = []
+	
 	#filter data for those in which SNP_A is in main features
 	mainLD1 = featuresMain[(featuresMain['feature'].isin(ld2['SNP_A'].tolist()))]
 	
@@ -115,14 +117,14 @@ def filter_main_in_ld(ld2,featuresMain,rank_feature):
 			mainLD2 = featuresMain[(featuresMain['feature'].isin(ldTemp['SNP_B'].tolist()+[ldSnp]))]
 			if mainLD2.shape[0] > 1:
 				featuresToPrune = mainLD2.sort_values([rank_feature],ascending=False)['feature'].tolist()[1:]
-
+				for f in featuresToPrune:
+					mainFeaturesInLD.append(f)
 		except KeyError:
 			print(f'{rank_feature} not found in features dataset ...')
 			print(featuresMain.head())
 			pass
-				
-	for f in featuresToPrune:
-		mainFeaturesInLD.append(f)
+#	for f in featuresToPrune:
+#		mainFeaturesInLD.append(f)
 
 	return(mainFeaturesInLD)
 
@@ -144,22 +146,25 @@ def main(phenoPath,features_filter_ld):
 #		output_file = 'importantFeaturesForAssociationAnalysis.csv'
 	
 	#refactored code includes a shap_zscore column not present in thesis results which means it will be the featureScoresReducedFinalModel created post glm modelling
+	file_root = features_filter_ld.split('.')[0]
+	output_file = f'{file_root}.filteredLD.csv'
 	try:
 		file_root = features_filter_ld.split('.')[0]
-		output_file = features_filter_ld
+		output_file = f'{file_root}.filteredLD.csv'
 		#get the main and epi weigths separate as the separate epi+main model performed best
 		rank_feature = 'shap_zscore'
 		featuresMain = features[features['data_type'] == 'main'][['feature','shap_zscore']]
 		featuresEpi = features[(features['data_type'] == 'epi') & (features['feature'].str.contains(','))][['feature','shap_zscore']]
-		features.to_csv(f'{file_root}.preLD.csv',index=False)
+#		features.to_csv(f'{file_root}.preLD.csv',index=False)
 	except KeyError:
-		output_file = f'{phenoPath}/scores/featureScoresReducedFinalModel.csv'
-		features = pd.read_csv(output_file)
+		#the LD is done post glm modelling in early stages
+		input_file_root = '/'.join(phenoPath.split('/')[:-1])
+		input_file = f'{input_file_root}/featureScoresReducedFinalModel.csv'
+		features = pd.read_csv(input_file)
 		rank_feature = [col for col in features.columns if 'coef' in col][0]
 		features2 = features[['model','feature',rank_feature]]
 		featuresMain = features2[features2['model'] == 'main'][['feature',rank_feature]]
 		featuresEpi = features2[(features2['model'] == 'epi') & (features2['feature'].str.contains(','))][['feature',rank_feature]]
-		features.to_csv(f'{phenoPath}/scores/featureScoresReducedFinalModel.preLD.csv',index=False)
 	
 	
 	
@@ -193,7 +198,7 @@ def main(phenoPath,features_filter_ld):
 if __name__ == '__main__':
 	
 	parser = argparse.ArgumentParser(description="creating LD snp list ....")
-	parser.add_argument("--pheno_data", help="Path to the input pheno folder")
+	parser.add_argument("--pheno_path", help="Path to the input pheno folder")
 	parser.add_argument("--features_to_ld_file", help="file used to filter ld")
 	
 	
@@ -203,8 +208,8 @@ if __name__ == '__main__':
 	# Prefer command-line input if provided; fallback to env var
 #	pheno_path = '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
 #	pre_post_association='pre'
-	pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
-	print(f"[PYTHON] Reading from: {pheno_data}")
+	pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
+	print(f"[PYTHON] Reading from: {pheno_path}")
 
 #	pre_post_association = args.pre_post_association or os.environ.get("PRE_POST_ASSOCIATION")
 #	print(f"pre or post association set to : {pre_post_association}")
@@ -215,13 +220,16 @@ if __name__ == '__main__':
 	#f"{pheno_data}/scores/importantFeaturesPostShap.csv"
 #	print(f"[PYTHON] Reading features for LD from: {features_to_ld_file}")
 	
+#	pheno_path = '/Users/kerimulterer/prsInteractive/results/celiacDisease'
+#	features_to_ld_file = f"{pheno_path}/productEpi/scores/importantFeaturesPostShap.csv"
 	
-	if not pheno_data:
-		raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")
+	
+	if not pheno_path:
+		raise ValueError("You must provide a data pheno path via --pheno_path or set the PHENO_DATA environment variable.")
 	
 	if not features_to_ld_file:
 		raise ValueError("You must provide a feature file to perform LD via --features_to_ld_file or set the FEATURES_TO_FILTER_LD environment variable.")	
 
 		
-	main(pheno_data,features_to_ld_file)
+	main(pheno_path,features_to_ld_file)
 	

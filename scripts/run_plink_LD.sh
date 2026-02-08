@@ -45,7 +45,7 @@ python "$SCRIPTS_DIR/helper/create_LD_SnpList.py"
 wait 
 
 #creates the LD SNP data files to be used after looking for important features step
-plink --bfile "$PHENO_PATH/merged_allChromosomes" --extract "$PHENO_DATA/finalModelLDSnps.txt" --indep-pairwise 100kb 1 .6 --r2 --show-tags all --out "$PHENO_DATA/finalModel"
+plink --bfile "$PHENO_PATH/merged_allChromosomes" --extract "$PHENO_DATA/finalModelLDSnps.txt" --indep-pairwise 100kb 1 .6 --r2 --show-tags all --out "$PHENO_PATH/finalModel"
 
 #creates new feature_scores_file with pruned features in LD and reversed
 

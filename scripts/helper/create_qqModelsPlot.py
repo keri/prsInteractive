@@ -299,7 +299,7 @@ if __name__ == '__main__':
 	use_epi_main = args.use_epi_main or os.environ.get("USE_EPI_MAIN")
 	print(f"[PYTHON] setting use_epi_main to: {use_epi_main}")
 	
-	pheno_data = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
+	#pheno_data = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
 	
 	
 	if not pheno_data:

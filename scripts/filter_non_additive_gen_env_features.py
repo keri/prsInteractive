@@ -7,7 +7,7 @@ import re
 
 
 
-def compare_gene_env_to_genetic(inputFile, config_file):
+def compare_gene_env_to_genetic(inputFile,config_file):
     """
     Filter GxGxE features to keep only those that are MORE extreme than their GxG component.
     
@@ -45,7 +45,7 @@ def compare_gene_env_to_genetic(inputFile, config_file):
         eValue = eDf['coefs'].values[0]
         
         # Find corresponding GxG feature in epi or main models
-        gDf = df[(df['feature'] == g) & (df['model'].isin(['epi', 'main']))]
+        gDf = df[(df['feature'] == g) & (df['model'].isin(['epi', 'main','epi+main']))]
         
         if gDf.empty:
             # No corresponding GxG feature found - keep GxGxE
@@ -107,18 +107,17 @@ def compare_gene_env_to_genetic(inputFile, config_file):
         with open(config_file, 'r') as f:
             lines = f.readlines()
             
-        # Update the FEATURE_SCORES_FILE line
+            # Update the FEATURE_SCORES_FILE line
         updated_lines = []
         config_updated = False
         
         for line in lines:
-            if line.strip().startswith('FEATURE_SCORES_FILE='):
-                updated_lines.append(f'FEATURE_SCORES_FILE="{filteredFile}"\n')
+            if line.strip().startswith('FEATURE_SCORES_FILE_FILTERED='):
+                updated_lines.append(f'FEATURE_SCORES_FILE_FILTERED="{filteredFile}"\n')
                 config_updated = True
             else:
                 updated_lines.append(line)
                 
-        # Write back
         with open(config_file, 'w') as f:
             f.writelines(updated_lines)
             
@@ -131,8 +130,8 @@ def compare_gene_env_to_genetic(inputFile, config_file):
         print(f'Warning: Config file not found: {config_file}')
     except Exception as e:
         print(f'Warning: Could not update config file: {e}')
-        
-    return dfFiltered, filterList, kept_more_extreme
+#       
+#   return dfFiltered, filterList, kept_more_extreme
     
     
 if __name__ == '__main__':

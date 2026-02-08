@@ -400,9 +400,9 @@ if __name__ == '__main__':
     threshold = os.environ.get("THRESHOLD")
     threshold = float(threshold) if threshold else args.threshold
     
-    pheno = 'celiacDisease'
-    pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi'
-    feature_scores_file = f'{pheno_data}/scores/featureScoresReducedFinalModel.filtered.csv'
+    pheno = 'type2Diabetes'
+    pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/productEpi'
+    feature_scores_file = f'{pheno_data}/scores/featureScoresReducedFinalModel.csv'
     threshold = 1.99
     
     if not pheno_data:
@@ -414,3 +414,4 @@ if __name__ == '__main__':
     print(f"analyzing features based on shap z score : {feature_scores_file}")
     
     main(pheno_data,feature_scores_file,threshold)
+    

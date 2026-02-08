@@ -31,7 +31,7 @@ library(DescTools)
 library(stringr)
 library(argparse)
 
-registerDoMC(cores = 60)
+registerDoMC(cores = 18)
 
 get_main_cardio_features <- function(feature_file_path, participant_env_file) {
 
@@ -152,30 +152,33 @@ get_main_cardio_features <- function(feature_file_path, participant_env_file) {
 
 
 calculate_nagelkerke_rsquared <- function(yTest,yProba) {
-  
+
   # Fit the null model (intercept only)
   null_model <- glm(yTest ~ 1, family = binomial)
-  
+
   # Extract log-likelihood of the null model
-  logLik_null <- logLik(null_model)
-  
-  
+  # logLik_null <- logLik(null_model)
+  logLik_null <- as.numeric(logLik(null_model))
+
+
   # Manually calculate the log-likelihood of the fitted model
+  epsilon <- 1e-15
+  yProba <- pmax(pmin(yProba, 1 - epsilon), epsilon)
   logLik_fit <- sum(yTest * log(yProba) + (1 - yTest) * log(1 - yProba))
-  
-  
+
+
   # Calculate Cox-Snell's R^2
   R2_cox_snell <- 1 - exp((2 * (logLik_null - logLik_fit)) / length(yTest))
   print('cox snell R squared =')
   print(R2_cox_snell)
-  
+
   # Calculate Nagelkerke's R^2
   R2_nagelkerke <- R2_cox_snell / (1 - exp(2 * logLik_null / length(yTest)))
   print('Nagelkerke r squared = ')
   print(R2_nagelkerke)
-  
+
   return(R2_nagelkerke)
-  
+
 }
 
 # Fixed version of download_covariate_data to ensure consistent data types
@@ -878,13 +881,16 @@ parser$add_argument("--covar_file", required = TRUE)
 parser$add_argument("--pheno_data", required = TRUE)
 parser$add_argument("--training_file", required = TRUE)
 parser$add_argument("--test_file", required = TRUE)
+parser$add_argument("--reduced_feature_file" ,required = TRUE)
+parser$add_argument("--epi_combo", required=TRUE)
+parser$add_argument("--threshold", required=TRUE)
 parser$add_argument("--training_env_gen_file", required = TRUE)
 parser$add_argument("--test_env_gen_file", required = TRUE)
 parser$add_argument("--training_env_main_file", required = TRUE)
 parser$add_argument("--test_env_main_file", required = TRUE)
-parser$add_argument("--reduced_feature_file" ,required = TRUE)
-parser$add_argument("--epi_combo", required=TRUE)
-parser$add_argument("--threshold", required=TRUE)
+parser$add_argument("--training_env_clinical_file", required = TRUE)
+parser$add_argument("--test_env_clinical_file", required = TRUE)
+
 
 #
 args <- parser$parse_args()
@@ -895,15 +901,18 @@ pheno_data <- args$pheno_data
 hla_file <- args$hla_file
 training_file <- args$training_file
 test_file <- args$test_file
-training_env_gen_file <- args$training_env_gen_file
-test_env_gen_file <- args$test_env_gen_file
-training_env_main_file <- args$training_env_main_file
-test_env_main_file <- args$test_env_main_file
 covar_file <- args$covar_file
 feature_model_file <- args$reduced_feature_file
 participant_env_file <- file.path(results_path, "participant_environment.csv")
 epi_combo <- args$epi_combo
 threshold <- args$threshold
+training_env_gen_file <- args$training_env_gen_file
+test_env_gen_file <- args$test_env_gen_file
+training_env_main_file <- args$training_env_main_file
+test_env_main_file <- args$test_env_main_file
+training_env_clinical_file <- args$training_env_clinical_file
+test_env_clinical_file <- args$test_env_clinical_file
+
 
 #results_path <- '/Users/kerimulterer/prsInteractive/results'
 #pheno_data <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
@@ -1010,14 +1019,59 @@ if (!file.exists(feature_scores_file)) {
 
 ######################### DATASETS TO BE USED IN EACH MODEL #####################
 
-######################### MAIN ENV DATA  ##################
+######################### MAIN ENV & CLINICAL ENV DATA  ##################
 
-mainEnvTraining = fread(training_env_main_file,sep=",")
+#mainEnvTraining = fread(training_env_main_file,sep=",")
+#mainEnvTraining[, IID := as.integer(IID)]
+#
+#mainEnvTest = fread(test_env_main_file,sep=",")
+#mainEnvTest[, IID := as.integer(IID)]
+#
+#
+#clinicalEnvTraining = fread(training_env_clinical_file,sep=",")
+#clinicalEnvTraining[, IID := as.integer(IID)]
+#
+#clinicalEnvTest = fread(test_env_clinical_file,sep=",")
+#clinicalEnvTest[, IID := as.integer(IID)]
+
+# Load main environment training data
+mainEnvTraining = fread(training_env_main_file, sep=",")
 mainEnvTraining[, IID := as.integer(IID)]
 
-mainEnvTest = fread(test_env_main_file,sep=",")
+# Load main environment test data
+mainEnvTest = fread(test_env_main_file, sep=",")
 mainEnvTest[, IID := as.integer(IID)]
 
+# Load clinical environment data
+clinicalEnvTraining = fread(training_env_clinical_file, sep=",")
+clinicalEnvTraining[, IID := as.integer(IID)]
+
+clinicalEnvTest = fread(test_env_clinical_file, sep=",")
+clinicalEnvTest[, IID := as.integer(IID)]
+
+# Check if mainEnvTest has only IID column
+if (ncol(mainEnvTest) == 1) {
+  message("mainEnvTest contains only IID column. Loading alternative file: allEnvironmentTest.csv")
+  
+  # Load alternative environment file
+  allEnvironmentTest = fread(paste0(pheno_data,"/allEnvironmentTest.csv"), sep=",")
+  allEnvironmentTest[, IID := as.integer(IID)]
+  
+  # Load alternative environment file
+  allEnvironmentTraining = fread(paste0(pheno_data,"/allEnvironmentTraining.csv"), sep=",")
+  allEnvironmentTraining[, IID := as.integer(IID)]
+  
+  # Find features in allEnvironmentTest that are NOT in clinicalEnvTest
+  diff_features = setdiff(names(allEnvironmentTest), names(clinicalEnvTest))
+  
+  # Keep only IID + non-clinical features
+  mainEnvTest = allEnvironmentTest[, c("IID", diff_features), with=FALSE]
+  mainEnvTraining = allEnvironmentTraining[, c("IID", diff_features), with=FALSE]
+  
+  message(paste("mainEnvTest reconstructed with", length(diff_features), "non-clinical features + IID"))
+} else {
+  message(paste("mainEnvTest loaded successfully with", ncol(mainEnvTest)-1, "features"))
+}
 
 ################### COVARIATE DATA ######################
 #covariate data with IID + first 10 PCs, SEX, and AGE
@@ -1072,6 +1126,9 @@ trainingDf = merge(trainingDf,envTraining, by = "IID", all.x = TRUE)
 #merge with cardio main features
 trainingDf = merge(trainingDf,mainEnvTraining, by= "IID", all.x = TRUE)
 
+#merge with cardio clinical features
+trainingDf = merge(trainingDf,clinicalEnvTraining, by= "IID", all.x = TRUE)
+
 ################# TEST data #####################
 testDf = get_geno_read_table_fixed(test_file,data_path,columns_to_get)
 
@@ -1092,6 +1149,9 @@ testDf = merge(testDf,envTest, by = "IID", all.x = TRUE)
 #merge with cardio main features
 testDf = merge(testDf,mainEnvTest, by= "IID", all.x = TRUE)
 
+#merge with cardio clinical features
+testDf = merge(testDf,clinicalEnvTest, by= "IID", all.x = TRUE)
+cat("Sample columns:", paste(head(clinicalEnvTest, 5), collapse = ", "), "\n")
 
 #####################################################################################
 #                        PROCESS DATA FOR MODELLING                                 #
@@ -1188,15 +1248,18 @@ all_features = setdiff(names(trainingDf),'IID')
 #get a list of epi cardio features to use in modelling
 env_genetic_features = setdiff(names(envTraining), "IID")
 env_main_features = setdiff(names(mainEnvTraining), "IID")
+env_clinical_features = setdiff(names(clinicalEnvTraining), "IID")
 
 dataset_list = list(
+  list('clinical_main',c(env_clinical_features,covariate_columns)),
   list('main',c(main_features,covariate_columns,hla_columns)),
   list('epi',c(epi_features,covariate_columns,hla_columns)),
   list('epi+main',c(epi_main_features,covariate_columns,hla_columns)),
   list('cardio',c(env_genetic_features,covariate_columns)),
   list('all',c(env_genetic_features,epi_main_features,hla_columns,covariate_columns)),
   list('env_main',c(env_main_features,covariate_columns)),
-  list('all+env_main',c(env_genetic_features,epi_main_features,hla_columns,env_main_features,covariate_columns)),
+  list('all+env_main',c(env_genetic_features,epi_main_features,env_main_features,hla_columns,covariate_columns)),
+  list('all+env_main+clinical_main',c(env_genetic_features,epi_main_features,hla_columns,env_main_features,env_clinical_features,covariate_columns)),
   list('covariate',c(covariate_columns))
   
 )
@@ -1332,14 +1395,14 @@ for (dataset in dataset_list) {
   ci_intervals = ci.auc(roc_curve)
   
   #calculate nagelkerke r squared
-  n_rsquared = calculate_nagelkerke_rsquared(yTest,yProba_vector)
+  #n_rsquared = calculate_nagelkerke_rsquared(yTest,yProba_vector)
   
   # Convert CI results to a data frame
   model_scores <- data.frame(
     auc = c(auc_value[1]),
     ci_lower = c(ci_intervals[1]),
     ci_upper = c(ci_intervals[3]),
-    nagelkerke_rsquared = c(n_rsquared),
+    #nagelkerke_rsquared = c(n_rsquared),
     model = c(data_type)
   )
   

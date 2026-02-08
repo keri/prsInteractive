@@ -53,7 +53,7 @@ def calculate_mcnemar_test(validationPRSFile,scoresPath):
 
     test_threshold = 8
 
-    for risk_tuple in [('main','epi'),('epi','cardio'),('main','cardio'),('all','combined')]:
+    for risk_tuple in [('main','epi'),('main','epi+main'),('epi','cardio'),('epi','epi+main'),('main','cardio'),('cardio','epi+main'),('all','combined')]:
         resultsTemp = pd.DataFrame()
         
         test = []

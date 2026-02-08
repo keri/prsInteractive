@@ -7,21 +7,72 @@ import statsmodels.stats.contingency_tables as ct
 import statsmodels.api as sm
 from scipy.stats import fisher_exact
 
-def create_epi_df(epiDf,pairList,combo="sum"):
+#def create_epi_df(epiDf,pairList,combo="sum"):
+#   '''input : epiDf with snps as columns + PHENOTYPE
+#           pairList : [snp1pair1,snp2pair1,snp1pair2,snp2pair2...snp1pairN,snp2pairN]'''
+#   epiArrayFinal = pd.DataFrame()
+#   print('creating epi df with combo ',combo)
+#   
+#   for pair in pairList:
+#       if combo == "sum":
+#           snps = epiDf[pair.split(',')].sum(axis=1)
+#       else:
+#           snps = epiDf[pair.split(',')].prod(axis=1)
+#       snps.columns = pair
+#       epiArrayFinal = pd.concat([epiArrayFinal,snps],axis=1)
+#   epiArrayFinal.columns = pairList 
+#   
+#   return(epiArrayFinal)
+
+def create_epi_df(epiDf, pairList, combo="sum"):
     '''input : epiDf with snps as columns + PHENOTYPE
             pairList : [snp1pair1,snp2pair1,snp1pair2,snp2pair2...snp1pairN,snp2pairN]'''
     epiArrayFinal = pd.DataFrame()
+    print('creating epi df with combo ', combo)
+    
+    missing_snps = []
+    skipped_pairs = []
     
     for pair in pairList:
-        if combo == "sum":  
-            snps = epiDf[pair.split(',')].sum(axis=1)
-        else:
-            snps = epiDf[pair.split(',')].prod(axis=1)
-        snps.columns = pair
-        epiArrayFinal = pd.concat([epiArrayFinal,snps],axis=1)
-    epiArrayFinal.columns = pairList 
+        snp_pair = pair.split(',')
+        
+        # Check if both SNPs exist in the DataFrame
+        missing_in_pair = [snp for snp in snp_pair if snp not in epiDf.columns]
+        
+        if missing_in_pair:
+            missing_snps.extend(missing_in_pair)
+            skipped_pairs.append(pair)
+            continue
+        
+        # Process the pair if both SNPs exist
+        try:
+            if combo == "sum":
+                snps = epiDf[snp_pair].sum(axis=1)
+            else:
+                snps = epiDf[snp_pair].prod(axis=1)
+                
+            snps.name = pair  # Use .name instead of .columns for Series
+            epiArrayFinal = pd.concat([epiArrayFinal, snps], axis=1)
+            
+        except Exception as e:
+            print(f"Error processing pair {pair}: {e}")
+            skipped_pairs.append(pair)
+            continue
+        
+    # Print summary of missing features
+    if missing_snps:
+        unique_missing = list(set(missing_snps))
+        print(f"\nWarning: {len(unique_missing)} unique SNP(s) not found in DataFrame:")
+        print(unique_missing)
+        print(f"\nSkipped {len(skipped_pairs)} pair(s) due to missing SNPs:")
+        for pair in skipped_pairs[:10]:  # Show first 10
+            print(f"  - {pair}")
+        if len(skipped_pairs) > 10:
+            print(f"  ... and {len(skipped_pairs) - 10} more")
+            
+    print(f"\nSuccessfully processed {len(epiArrayFinal.columns)} pairs out of {len(pairList)} total")
     
-    return(epiArrayFinal)
+    return epiArrayFinal
 
 
 def get_epi_snps(epiFeatures):
@@ -362,7 +413,7 @@ def calculate_odds_ratio_for_prs(df,binned_prs,prscr=False):
         
     return(percentileOR)
 
-#def rank_gene_env_features(geneEnvShapleyFile,threshold=2):
+#def rank_gene_env_features(geneEnvShapleyFile,threshold=1.99):
 #   '''
 #   input : df with columns [envGeneticFeature,shap_zscore,env_type,geneticFeature,envFeature,main_E,epistatic]
 #   

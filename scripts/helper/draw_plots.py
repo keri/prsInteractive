@@ -20,7 +20,8 @@ COHORT_COLORS = {
     'epi': '#56B4E9',    # Sky blue
     'epi+main': '#CC79A7',    # Pinkish purple
     'cardio': '#009E73',   # Bluish green
-    'all': '#F0E442'   # Bluish green
+    'all': '#F0E442',  # Bluish green
+    'combined': '#D55E00'
     
 }
 
@@ -60,8 +61,8 @@ def create_case_control_histogram(df,pheno_col,continous_col,figPath,figsize=(12
     
     
     # Split data
-    cases = df[df[pheno_col] == 1]
-    controls = df[df[pheno_col] == 0]
+    cases = df[df[pheno_col] == 1][[continous_col]]
+    controls = df[df[pheno_col] == 0][[continous_col]]
     
     # Plot histograms
     plt.hist(controls, bins=30, alpha=0.6, label='Controls', color='skyblue', edgecolor='black')
@@ -353,10 +354,10 @@ def create_violin_plot(df,model_type,figurePath):
     
     fig.savefig(f'{figurePath}/{model_type}.violinplot.png')
 
-def create_prevalence_plot(df,model_type,figurePath):
+def create_prevalence_plot(df,model_type,figurePath,value_type='scaled_prs'):
     dfCopy = df.copy()
     #sort scaled prs for entire dataset and break up into centiles
-    dfCopy.sort_values(['scaled_prs'],inplace=True)
+    dfCopy.sort_values([value_type],inplace=True)
 
     #get min max values to create centiles
 #   prsMin = dfCopy['scaled_prs'].min()-.0001
@@ -368,16 +369,16 @@ def create_prevalence_plot(df,model_type,figurePath):
 #   len(bins)
     
     try:
-        dfCopy['centile'] = pd.qcut(dfCopy['scaled_prs'], 10, labels=list(range(1,11)),duplicates='drop')
+        dfCopy['centile'] = pd.qcut(dfCopy[value_type], 10, labels=list(range(1,11)),duplicates='drop')
         
         dfCount = dfCopy.groupby(['centile','PHENOTYPE']).count()
         dfCount.reset_index(inplace=True)
         dfCountCases = dfCount[dfCount['PHENOTYPE'] == 2]
-        dfCountCases['case_count'] = dfCountCases['scaled_prs']
+        dfCountCases['case_count'] = dfCountCases[value_type]
     
         dfTotal = dfCopy.groupby(['centile']).count()
         dfTotal.reset_index(inplace=True)
-        dfTotal['total'] = dfTotal['scaled_prs']
+        dfTotal['total'] = dfTotal[value_type]
     
         dfPrevalence = dfTotal[['centile','total']].merge(dfCountCases[['centile','case_count']],on=['centile'])
     
@@ -587,7 +588,7 @@ def draw_correlation_plot(cases,controls,str_text,figurePath,rsquared,pvalue):
     ax.clear()
     cases['color'] = 'black'
     
-def create_qq_plot_groups(combinedPRS,figurePath):
+def create_qq_plot_groups(combinedPRS,figurePath,use_epi_main=False):
     ''' use input to color cases in different colors based on group:
     input : dataframe columns = ['IID', 'PHENOTYPE', 'prs_epiMain', 'scaled_prs_epiMain', 'prs_main',
         'scaled_prs_main', 'prs_epi', 'scaled_prs_epi', 'use_epiMain',
@@ -610,27 +611,29 @@ def create_qq_plot_groups(combinedPRS,figurePath):
 #	correlationCardioMain, p_valueCardioMain = pearsonr(combinedPRS['main'], combinedPRS['epi'])
 
     
-#   for use_all in [False,True]:
-    for use_all in [False]:
-            
+    for use_all in [False,True]:
+#   for use_all in [False]:
         cases.loc[cases['bin_cardio'] > 8,'color'] = COHORT_COLORS['cardio']
-        cases.loc[cases['bin_epi+main'] > 8 ,'color'] = COHORT_COLORS['epi+main']
         cases.loc[cases['bin_epi'] > 8,'color'] = COHORT_COLORS['epi']
+        #if epi+main pvalue > 0
+        if use_epi_main:
+            cases.loc[cases['bin_epi+main'] > 8 ,'color'] = COHORT_COLORS['epi+main']
+            
         cases.loc[cases['bin_main'] > 8,'color'] = COHORT_COLORS['main']
-
-        
         
         if use_all:
             str_text = 'combinedPRS.withAll'
             cases.loc[cases['bin_all'] > 8,'color'] = COHORT_COLORS['all']
-
+        
         else:
             str_text = 'combinedPRS'
+            
+
 
         cases.loc[cases['color'] != 'black','size'] = 60
         cases.loc[cases['color'] != 'black','alpha'] = 1
         
-        corr, p_value = pearsonr(combinedPRS['scaled_prs_main'], combinedPRS['scaled_prs_epi'])
+        corr, p_value = pearsonr(combinedPRS['scaled_prs_main'], combinedPRS['scaled_prs_cardio'])
         
         draw_correlation_plot(cases,controls,str_text,figurePath,corr,p_value)
 
@@ -704,16 +707,16 @@ def create_density_plot(df,model_type,figurePath,prs_col='scaled_prs'):
         
 
 
-def create_box_plot(prsCopy,model_type,figurePath):
+def create_box_plot(prsCopy,model_type,figurePath,box_value='scaled_prs'):
     print('creating box plots ...')
     try:
-        meanDiff = prsCopy.groupby(['PHENOTYPE'])['scaled_prs'].mean().diff().loc[2]
+        meanDiff = prsCopy.groupby(['PHENOTYPE'])[box_value].mean().diff().loc[2]
         print(meanDiff)
-        ax = prsCopy.boxplot(column='scaled_prs',by='PHENOTYPE',figsize=(10,10))
+        ax = prsCopy.boxplot(column=box_value,by='PHENOTYPE',figsize=(10,10))
         ax.plot()
         title = f'prs mean diff for {model_type} = {meanDiff}'
         plt.title(title)
-        plt.savefig(f'{figurePath}/{model_type}.boxplot.png')
+        plt.savefig(f'{figurePath}/{model_type}.boxplot.{box_value}.png')
         plt.close()
     except KeyError: #means there are no cases to plot
         pass
@@ -978,6 +981,11 @@ def create_optimized_prevalence_plot(df,figurePath,image_str):
     ax.set_yticks(yticks,labels=ylabels)
     
     plt.savefig(f'{figurePath}/prevalenceAcrossModels{image_str}.scatter.png')
+    
+    
+    
+    
+
 
     
     
@@ -986,6 +994,9 @@ if __name__ == '__main__':
     
 #   pheno = sys.argv[1]
     pheno = 'type2Diabetes'
-    
-    main(pheno)
+    scoresPath = f'/Users/kerimulterer/prsInteractive/results/{pheno}/productEpi/scores' 
+    figPath = f'/Users/kerimulterer/prsInteractive/results/{pheno}/productEpi/figures'
+    combinedPRSFile = f'{scoresPath}/combinedPRSGroups.csv'
+    combinedPRS = pd.read_csv(combinedPRSFile)
+    create_qq_plot_groups(combinedPRS,figPath,use_epi_main=True)
     

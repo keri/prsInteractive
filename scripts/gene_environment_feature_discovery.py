@@ -138,7 +138,12 @@ def main(pheno,withdrawalPath,env_type,phenoData,trainingPath,testPath,resultsPa
     
     
     chunk_size=200
-
+    modelFeaturesFull = modelFeaturesFull[(modelFeaturesFull['shap_zscore'] < -threshold) | (modelFeaturesFull['shap_zscore'] > threshold)]
+#   modelFeaturesFull = modelFeaturesFull[(modelFeaturesFull['shap_zscore'] < -threshold)]
+    
+    print('running GxGxE for important genetic features ...')
+    print(f'running {len(modelFeaturesFull)} protective and risk features in original dataset')
+    
     modelFeatures = modelFeaturesFull.iloc[chunk_start:chunk_stop]
 
     if modelFeatures.shape[0] <= chunk_size:
@@ -269,13 +274,15 @@ def main(pheno,withdrawalPath,env_type,phenoData,trainingPath,testPath,resultsPa
                 
                 
                 # find index where envGeneticFeature == feature1
-                print('debugging idx feature1[0] out of index')
+                print('idx feature1[0] of environmentalFeature')
                 print(featureZscores.loc[featureZscores['envGeneticFeature'].str.contains(feature1)])
                 try:
                     idxFeature =  featureZscores.index[featureZscores['envGeneticFeature'] == feature1][0]
                     if idxFeature == 0:
                         featureZscores.loc[idxFeature,'main_E'] = 1
         
+                    elif idxFeature == featureZscores.shape[0]-1:
+                        featureZscores.loc[idxFeature,'main_E'] = 1
                     else:
                         # if the env feature has a high shap_value
                         featuresGreaterThanE = featureZscores[:idxFeature]
@@ -324,14 +331,14 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description="running models for GxGxE features...")
     parser.add_argument("--pheno_data", help="Path to the input pheno data")
-    parser.add_argument("--training_file", help="data file of training data")
-    parser.add_argument("--test_file", help="data file of test data")
+    parser.add_argument("--training_path", help="data file of training data")
+    parser.add_argument("--test_path", help="data file of test data")
     parser.add_argument("--env_type", default='cardioMetabolic', help="data type to analyze")
     parser.add_argument("--pheno", help="Phenotype to analyze")
     parser.add_argument("--results_path", help="data path to results")
     parser.add_argument("--withdrawal_path",help="Genetic data path for withdrawals.csv")
-    parser.add_argument("--batch_start", help="index to start processing data")
-    parser.add_argument("--batch_stop", help="index to stop processing data")
+    parser.add_argument("--chunk_start", type=int, default=1,help="index to start processing data")
+    parser.add_argument("--chunk_stop", type=int, default=1000,help="index to stop processing data")
     parser.add_argument("--input_file", help="feature file to use for GxGxE analysis")
     parser.add_argument("--threshold",type=float, default=1.99,help="threshold to use for defining main env features and top GxE features")
     parser.add_argument("--epi_combo",default='sum',help='method to use for combining epi interactions (default: sum)')
@@ -349,10 +356,10 @@ if __name__ == '__main__':
     env_type = args.env_type or os.environ.get("ENV_TYPE")
     print(f"data type : {env_type}")
     
-    training_path = args.training_file or os.environ.get("TRAINING_PATH")
+    training_path = args.training_path or os.environ.get("TRAINING_PATH")
     print(f"training file : {training_path}")
     
-    test_path = args.test_file or os.environ.get("TEST_PATH")
+    test_path = args.test_path or os.environ.get("TEST_PATH")
     print(f"test file : {test_path}")
     
     results_path = args.results_path or os.environ.get("RESULTS_PATH")
@@ -361,10 +368,10 @@ if __name__ == '__main__':
     withdrawal_path = args.withdrawal_path or os.environ.get("WITHDRAWAL_PATH")
     print(f"reading withdrawals from file : {withdrawal_path}")
     
-    chunk_start = args.batch_start or os.environ.get("CHUNK_START")
+    chunk_start = args.chunk_start or os.environ.get("CHUNK_START")
     print(f"starting batch index at : {chunk_start}")
     
-    chunk_stop = args.batch_stop or os.environ.get("CHUNK_STOP")
+    chunk_stop = args.chunk_stop or os.environ.get("CHUNK_STOP")
     print(f"stopping batch index at : {chunk_stop}")
     
     input_file = args.input_file or os.environ.get("INPUT_FILE")
@@ -374,7 +381,7 @@ if __name__ == '__main__':
     threshold = float(threshold) if threshold else args.threshold
     print(f"analyzing top features based on shap z score : {threshold}")
     
-    epi_combo = args.epi_combo or os.environ.get("EPI_COMBO")
+    epi_combo = os.environ.get("EPI_COMBO") or args.epi_combo
     print(f"method to use for combining epi interactions : {epi_combo}")
     
 
@@ -414,11 +421,10 @@ if __name__ == '__main__':
     if not epi_combo:
         raise ValueError("You must provide a epi_combo via --epi_combo or set the EPI_COMBO environment variable.")
     
-    #run in batches if provided
-    if chunk_start:
-        main(pheno,withdrawal_path,env_type,pheno_data,training_path,test_path,results_path,input_file,threshold,epi_combo,int(chunk_start),int(chunk_stop))
-        
-    else: #use default
-        main(pheno,withdrawal_path,env_type,pheno_data,training_path,test_path,results_path,input_file,threshold,epi_combo)
+
+    main(pheno,withdrawal_path,env_type,pheno_data,training_path,test_path,results_path,input_file,threshold,epi_combo,int(chunk_start),int(chunk_stop))
+#       
+#   else: #use default
+#       main(pheno,withdrawal_path,env_type,pheno_data,training_path,test_path,results_path,input_file,threshold,epi_combo)
     
     

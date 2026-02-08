@@ -2415,11 +2415,11 @@ if __name__ == "__main__":
 	forest_data = prepare_forest_plot_data(
 		subtype_weighted['risk_contributions'],
 		subtype_weighted['protective_contributions'],
-		results['scores_df'],
+		results['risk_scores'],
 		cluster_mapping
 	)
 	
-	create_combined_visualization(subtype_weighted['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/combined_pie_forest_weighted_by_effect_size.png')
+	create_combined_visualization(subtype_weighted['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/clinicalFigures/combined_pie_forest_weighted_by_effect_size.riskOnly.png')
 	
 	
 #	create_forest_plot(
@@ -2427,7 +2427,7 @@ if __name__ == "__main__":
 #		f'{pheno_path}/figures/cohort_composition_forest_plot_combined_weighted_by_effect_size.png'
 #	)
 	
-	plot_weighted_subtype_pies(subtype_weighted, f'{pheno_path}/figures/pie_weighted_by_effect_size.png')
+	plot_weighted_subtype_pies(subtype_weighted, f'{pheno_path}/figures/clinicalFigures/pie_weighted_by_effect_size.png')
 
 	
 	# Method 2: Distinctiveness weighting
@@ -2440,11 +2440,11 @@ if __name__ == "__main__":
 	forest_data = prepare_forest_plot_data(
 		subtype_distinctive['risk_contributions'],
 		subtype_distinctive['protective_contributions'],
-		results['scores_df'],
+		results['risk_scores'],
 		cluster_mapping
 	)
 	
-	create_combined_visualization(subtype_distinctive['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/combined_pie_forest_weighted_by_distinctiveness.png')
+	create_combined_visualization(subtype_distinctive['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/clinicalFigures/combined_pie_forest_weighted_by_distinctiveness.riskOnly.png')
 	
 #	create_forest_plot(
 #		forest_data,
@@ -2452,7 +2452,7 @@ if __name__ == "__main__":
 #	)
 	
 	
-	plot_weighted_subtype_pies(subtype_distinctive, f'{pheno_path}/figures/pie_weighted_by_distinctiveness.png')
+	plot_weighted_subtype_pies(subtype_distinctive, f'{pheno_path}/figures/clinicalFigures/pie_weighted_by_distinctiveness.png')
 	
 	# Method 3: Normalized weighting
 	print("\n3. Normalized Score Weighting")
@@ -2465,22 +2465,23 @@ if __name__ == "__main__":
 	forest_data = prepare_forest_plot_data(
 		subtype_normalized['risk_contributions'],
 		subtype_normalized['protective_contributions'],
-		results['scores_df'],
+		results['risk_scores'],
 		cluster_mapping
 	)
 	
-	create_combined_visualization(subtype_normalized['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/combined_pie_forest_weighted_by_effect_size_normalized.png')
+	create_combined_visualization(subtype_normalized['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/clinicalFigures/combined_pie_forest_weighted_by_effect_size_normalized.riskOnly.png')
 	
 	#Method 4: Normalized weighting for subtype pie chart with effect_size weighting for the forest plot
 	
 	forest_data = prepare_forest_plot_data(
 		subtype_weighted['risk_contributions'],
 		subtype_weighted['protective_contributions'],
-		results['scores_df'],
+		results['risk_scores'],
 		cluster_mapping
 	)
 	
-	create_combined_visualization(subtype_normalized['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/combined_pie_forest_normalized_forest_weighted_by_effect_size.png')
+	create_combined_visualization(subtype_normalized['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/clinicalFigures/combined_pie_forest_normalized_forest_weighted_by_effect_size.riskOnly.png')	
+	
 	
 	
 #	create_forest_plot(
@@ -2489,7 +2490,7 @@ if __name__ == "__main__":
 #	)
 	
 	
-	plot_weighted_subtype_pies(subtype_normalized, f'{pheno_path}/figures/pie_weighted_by_normalized.png')
+	plot_weighted_subtype_pies(subtype_normalized, f'{pheno_path}/figures/clinicalFigures/pie_weighted_by_normalized.png')
 	
 	
 	# Create comparison

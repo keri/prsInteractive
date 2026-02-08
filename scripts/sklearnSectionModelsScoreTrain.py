@@ -160,6 +160,9 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,
     hloss = hamming_loss(y,yHat)
     f1score = f1_score(y,yHat)
     fields=['naive bayes',score,balanced_score,auc,mcc,logloss,jscore,hloss,f1score,data_type,i]
+    
+    if auc > .51:
+        rank_features = True
 
     with open(modelFile,mode='a') as f:
         writer = csv.writer(f)
@@ -167,17 +170,17 @@ def score_models(X,y,pheno,data_type,modelFile,i,imp_mean,clfNVB,clfHGB,figPath,
         f.close()
 
 
-    dfSnps = pd.DataFrame()
-    dfSnps['log_prob_no_pheno'] = clfNVB.feature_log_prob_[0, :]
-    dfSnps['log_prob_yes_pheno'] = clfNVB.feature_log_prob_[1, :]
-    dfSnps2 = convert_log_prob_to_odds(dfSnps)
-    dfSnps2['feature'] = clfNVB.feature_names_in_
-
     en = time.time()
     timenvb = (en-st)/60
     print('time if took to score models = ',timenvb,' minutes')
     
-    if rank_features or auc > .51:
+    if rank_features:
+        #collect all shap values for SNPs from model with auc > .51
+        dfSnps = pd.DataFrame()
+        dfSnps['log_prob_no_pheno'] = clfNVB.feature_log_prob_[0, :]
+        dfSnps['log_prob_yes_pheno'] = clfNVB.feature_log_prob_[1, :]
+        dfSnps2 = convert_log_prob_to_odds(dfSnps)
+        dfSnps2['feature'] = clfNVB.feature_names_in_
         topFeatures,featuresZscores = calculate_plot_shap_values(clfHGB,X,y,i,figPath,data_type,threshold)
         #get the featureZscores into a dataframe to merge with dfSnps2
         zscores = pd.DataFrame(data=featuresZscores).reset_index()
@@ -352,7 +355,7 @@ if __name__ == '__main__':
     parser.add_argument("--end", help="end job")
     parser.add_argument("--pheno", help="Phenotype to analyze")
     parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
-    parser.add_argument("--threshold",type=float,default=1.99, help="Z-score threshold for identifying important features (default: 2.0)")
+    parser.add_argument("--threshold",type=float,default=1, help="Z-score threshold for identifying important features (default: 2.0)")
     parser.add_argument("--epi_combo",default='sum',help='method to use for combining epi interactions (default: sum)')
 
     args = parser.parse_args()
