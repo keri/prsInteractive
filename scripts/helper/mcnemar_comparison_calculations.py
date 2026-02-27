@@ -1,7 +1,5 @@
 #!/usr/bin/env python3
 
-#!/usr/bin/env python3
-
 import pandas as pd
 import numpy as np
 from statsmodels.stats.contingency_tables import mcnemar
@@ -11,11 +9,37 @@ from statsmodels.stats.proportion import proportion_confint
 from typing import Tuple, Dict, List
 import warnings
 import argparse
+import os
 
 
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
+
+def detect_phenotype_coding(data: pd.DataFrame,
+                            phenotype_col: str = 'PHENOTYPE') -> tuple:
+    """
+    Detect whether PHENOTYPE is coded as (2=case, 1=control) or (1=case, 0=control)
+    and return (case_value, control_value) accordingly.
+
+    This script may run before run_clinical_analysis (original 1/2 coding) or
+    after it (recoded 0/1 by run_clinical_analysis).  Calling this guard at each
+    split point ensures downstream logic is correct in both contexts.
+
+    Raises ValueError if neither expected coding pattern is detected.
+    """
+    unique_vals = set(data[phenotype_col].dropna().unique())
+
+    if unique_vals <= {1, 2}:      # original UK Biobank coding
+        return 2, 1
+    elif unique_vals <= {0, 1}:    # recoded by run_clinical_analysis
+        return 1, 0
+    else:
+        raise ValueError(
+            f"Unexpected PHENOTYPE values in '{phenotype_col}': {sorted(unique_vals)}. "
+            f"Expected {{1, 2}} (pre-recoding) or {{0, 1}} (post-recoding)."
+        )
+
 
 def pearson_confidence_interval(corr: float, n: int, alpha: float = 0.05) -> Tuple[float, float]:
         """Calculate confidence interval for Pearson correlation using Fisher Z-transformation."""
@@ -51,7 +75,7 @@ def print_contingency_table(counts: Dict, prs1_name: str, prs2_name: str,
     
         print(f"\n{'='*70}")
         print(f"McNemar's Test: {prs1_name} vs {prs2_name}")
-        print(f"Threshold: bin > {threshold}")
+        print(f"Threshold: bin >= {threshold}")
         print(f"{'='*70}")
         print(f"\n2x2 Contingency Table:")
         print(f"                      {prs2_name} High  {prs2_name} Low     Total")
@@ -243,8 +267,8 @@ def pearson_correlation_test(data: pd.DataFrame, prs1_name: str,
     
         # Get high risk cases (either PRS is high)
         high_risk = data[
-                (data[f'bin_{prs1_name}'] > test_threshold) | 
-                (data[f'bin_{prs2_name}'] > test_threshold)
+                (data[f'bin_{prs1_name}'] >= test_threshold) | 
+                (data[f'bin_{prs2_name}'] >= test_threshold)
         ]
     
         corr, p_value = pearsonr(
@@ -279,8 +303,8 @@ def spearman_correlation_test(data: pd.DataFrame, prs1_name: str,
         print(f"{'='*70}")
     
         high_risk = data[
-                (data[f'bin_{prs1_name}'] > test_threshold) | 
-                (data[f'bin_{prs2_name}'] > test_threshold)
+                (data[f'bin_{prs1_name}'] >= test_threshold) | 
+                (data[f'bin_{prs2_name}'] >= test_threshold)
         ]
     
         corr, p_value = spearmanr(
@@ -307,8 +331,8 @@ def paired_ttest(data: pd.DataFrame, prs1_name: str, prs2_name: str,
         print(f"{'='*70}")
     
         high_risk = data[
-                (data[f'bin_{prs1_name}'] > test_threshold) | 
-                (data[f'bin_{prs2_name}'] > test_threshold)
+                (data[f'bin_{prs1_name}'] >= test_threshold) | 
+                (data[f'bin_{prs2_name}'] >= test_threshold)
         ]
     
         t_stat, p_value = ttest_rel(
@@ -421,59 +445,61 @@ def delong_test(y_true: np.ndarray, scores1: np.ndarray,
         }
         
 
-def net_reclassification_index(data: pd.DataFrame, prs1_name: str, 
-                                                                prs2_name: str, threshold: int, 
-                                                                phenotype_col: str = 'PHENOTYPE') -> Dict:
+def net_reclassification_index(data: pd.DataFrame, prs1_name: str,
+                               prs2_name: str, threshold: int,
+                               phenotype_col: str = 'PHENOTYPE') -> Dict:
         """
-        Calculate Net Reclassification Index (NRI) and Integrated Discrimination 
-        Improvement (IDI).
-        
-        NRI measures how well the new model (prs2) reclassifies individuals compared 
-        to the old model (prs1). Positive NRI means improvement.
+        Calculate Net Reclassification Index (NRI) and Integrated Discrimination
+        Improvement (IDI) with full statistics (SE, CI, p-value).
+
+        Supports both PHENOTYPE codings used in this pipeline:
+          - 2=case / 1=control  (original, before run_clinical_analysis)
+          - 1=case / 0=control  (after run_clinical_analysis recoding)
+        The correct split is detected automatically via detect_phenotype_coding().
         """
         print(f"\n{'='*70}")
         print("Net Reclassification Index (NRI)")
         print(f"{'='*70}")
-    
-        # Separate cases and controls (assuming PHENOTYPE: 2=case, 1=control)
-        cases = data[data[phenotype_col] == 2]
-        controls = data[data[phenotype_col] == 1]
-    
-        # Reclassification for cases (events)
-        prs1_high_cases = cases[f'bin_{prs1_name}'] > threshold
-        prs2_high_cases = cases[f'bin_{prs2_name}'] > threshold
-    
+
+        # Detect case/control values for whichever coding is in use
+        case_val, control_val = detect_phenotype_coding(data, phenotype_col)
+        cases    = data[data[phenotype_col] == case_val]
+        controls = data[data[phenotype_col] == control_val]
+
+        # >= threshold so the boundary bin is included as high-risk (consistent
+        # with all other threshold comparisons in this file)
+        prs1_high_cases    = cases[f'bin_{prs1_name}']    >= threshold
+        prs2_high_cases    = cases[f'bin_{prs2_name}']    >= threshold
+        prs1_high_controls = controls[f'bin_{prs1_name}'] >= threshold
+        prs2_high_controls = controls[f'bin_{prs2_name}'] >= threshold
+
         # Count reclassifications
-        up_cases = np.sum(~prs1_high_cases & prs2_high_cases)  # Low→High (good)
-        down_cases = np.sum(prs1_high_cases & ~prs2_high_cases)  # High→Low (bad)
-    
-        # Reclassification for controls (non-events)
-        prs1_high_controls = controls[f'bin_{prs1_name}'] > threshold
-        prs2_high_controls = controls[f'bin_{prs2_name}'] > threshold
-    
-        up_controls = np.sum(~prs1_high_controls & prs2_high_controls)  # Low→High (bad)
-        down_controls = np.sum(prs1_high_controls & ~prs2_high_controls)  # High→Low (good)
-    
-        # NRI calculation
-        n_cases = len(cases)
+        up_cases      = int(np.sum(~prs1_high_cases    &  prs2_high_cases))     # Low->High (good)
+        down_cases    = int(np.sum( prs1_high_cases    & ~prs2_high_cases))     # High->Low (bad)
+        up_controls   = int(np.sum(~prs1_high_controls &  prs2_high_controls))  # Low->High (bad)
+        down_controls = int(np.sum( prs1_high_controls & ~prs2_high_controls))  # High->Low (good)
+
+        n_cases    = len(cases)
         n_controls = len(controls)
-    
-        nri_events = (up_cases - down_cases) / n_cases
-        nri_non_events = (down_controls - up_controls) / n_controls
-        nri = nri_events + nri_non_events
-    
-        # Standard error and p-value
-        se_events = np.sqrt((up_cases + down_cases) / n_cases) / n_cases
-        se_non_events = np.sqrt((up_controls + down_controls) / n_controls) / n_controls
-        se_nri = np.sqrt(se_events**2 + se_non_events**2)
-    
-        z_stat = nri / se_nri if se_nri > 0 else np.nan
+
+        nri_events     = (up_cases      - down_cases)    / n_cases
+        nri_non_events = (down_controls - up_controls)   / n_controls
+        nri            = nri_events + nri_non_events
+
+        # Standard error: SE(NRI+) = sqrt((up + down) / n^2) = sqrt(up + down) / n
+        # (Pencina et al. 2008, Stat Med 27:157-172)
+        # Old code used sqrt((up+down)/n)/n = sqrt(up+down)/n^1.5, underestimating
+        # SE by sqrt(n) and inflating z-statistics.
+        se_events     = np.sqrt(up_cases    + down_cases)    / n_cases
+        se_non_events = np.sqrt(up_controls + down_controls) / n_controls
+        se_nri        = np.sqrt(se_events**2 + se_non_events**2)
+
+        z_stat  = nri / se_nri if se_nri > 0 else np.nan
         p_value = 2 * (1 - norm.cdf(abs(z_stat))) if not np.isnan(z_stat) else np.nan
-    
-        # 95% CI
-        ci_low = nri - 1.96 * se_nri
+
+        ci_low  = nri - 1.96 * se_nri
         ci_high = nri + 1.96 * se_nri
-    
+
         print(f"NRI (Events): {nri_events:.3f}")
         print(f"  Cases: {up_cases} moved up, {down_cases} moved down")
         print(f"NRI (Non-events): {nri_non_events:.3f}")
@@ -482,34 +508,32 @@ def net_reclassification_index(data: pd.DataFrame, prs1_name: str,
         print(f"95% CI: [{ci_low:.3f}, {ci_high:.3f}]")
         print(f"z-statistic: {z_stat:.3f}")
         print(f"P-value: {p_value:.4e}")
-    
+
         if p_value < 0.05:
                 if nri > 0:
-                        print(f"   → {prs2_name} provides significant improvement in reclassification")
+                        print(f"   -> {prs2_name} provides significant improvement in reclassification")
                 else:
-                        print(f"   → {prs1_name} provides better reclassification")
+                        print(f"   -> {prs1_name} provides better reclassification")
         else:
-                print(f"   → No significant difference in reclassification")
-            
-        # Calculate IDI (Integrated Discrimination Improvement)
-        # IDI = improvement in discrimination slope
-        mean_prs1_cases = cases[f'scaled_prs_{prs1_name}'].mean()
+                print(f"   -> No significant difference in reclassification")
+
+        # IDI: improvement in discrimination slope (Pencina 2008)
+        mean_prs1_cases    = cases[f'scaled_prs_{prs1_name}'].mean()
         mean_prs1_controls = controls[f'scaled_prs_{prs1_name}'].mean()
-        mean_prs2_cases = cases[f'scaled_prs_{prs2_name}'].mean()
+        mean_prs2_cases    = cases[f'scaled_prs_{prs2_name}'].mean()
         mean_prs2_controls = controls[f'scaled_prs_{prs2_name}'].mean()
-    
+
         idi = (mean_prs2_cases - mean_prs2_controls) - (mean_prs1_cases - mean_prs1_controls)
-    
         print(f"\nIDI (Integrated Discrimination Improvement): {idi:.4f}")
-    
+
         return {
-                'test': 'NRI',
-                'statistic': nri,
-                'pvalue': p_value,
-                'conf_int': (ci_low, ci_high),
-                'nri_events': nri_events,
+                'test':           'NRI',
+                'statistic':      nri,
+                'pvalue':         p_value,
+                'conf_int':       (ci_low, ci_high),
+                'nri_events':     nri_events,
                 'nri_non_events': nri_non_events,
-                'idi': idi
+                'idi':            idi,
         }
         
 
@@ -549,8 +573,8 @@ def run_prs_comparison(cases: pd.DataFrame, prs1_name: str, prs2_name: str,
         print(f"{'#'*70}\n")
     
         # Create high-risk indicators
-        prs1_high = cases[f'bin_{prs1_name}'] > test_threshold
-        prs2_high = cases[f'bin_{prs2_name}'] > test_threshold
+        prs1_high = cases[f'bin_{prs1_name}'] >= test_threshold
+        prs2_high = cases[f'bin_{prs2_name}'] >= test_threshold
     
         # Create contingency table (used by multiple tests)
         table, counts = create_contingency_table(prs1_high, prs2_high, cases)
@@ -575,7 +599,8 @@ def run_prs_comparison(cases: pd.DataFrame, prs1_name: str, prs2_name: str,
         if validation_data is not None:
                 # DeLong test
                 try:
-                        y_true = (validation_data[phenotype_col] == 2).astype(int)
+                        case_val, _ = detect_phenotype_coding(validation_data, phenotype_col)
+                        y_true = (validation_data[phenotype_col] == case_val).astype(int)
                         scores1 = validation_data[f'scaled_prs_{prs1_name}'].values
                         scores2 = validation_data[f'scaled_prs_{prs2_name}'].values
                         tests_to_run.append(('delong', lambda: delong_test(y_true, scores1, scores2)))
@@ -603,9 +628,10 @@ def run_prs_comparison(cases: pd.DataFrame, prs1_name: str, prs2_name: str,
         return pd.DataFrame(results)
 
 
-def calculate_mcnemar_test(validation_prs_file: str, scores_path: str):
+def calculate_mcnemar_test(validation_prs_file: str, scores_path: str, 
+                          models_to_compare: List[str] = None):
         """
-        Main function to run all PRS comparisons.
+        Main function to run all PRS comparisons with dynamic model discovery.
         
         Parameters:
         -----------
@@ -613,98 +639,122 @@ def calculate_mcnemar_test(validation_prs_file: str, scores_path: str):
                 Path to CSV with PRS scores and phenotypes
         scores_path : str
                 Path to save output results
+        models_to_compare : List[str], optional
+                Explicit list of models to compare. If None, discovers all bin_* columns.
+                Model names should be the suffix after 'bin_' (e.g., 'main', 'epi_product').
         """
         # Load data
         validation_prs = pd.read_csv(validation_prs_file)
-        cases = validation_prs[validation_prs['PHENOTYPE'] == 2]
-    
+        case_val, _ = detect_phenotype_coding(validation_prs)
+        cases = validation_prs[validation_prs['PHENOTYPE'] == case_val]
+        
         # Define test parameters
         test_threshold = 8
-    
-        # Define comparisons
-        prs_comparisons = [
-                ('main', 'epi'),
-                ('main', 'epi+main'),
-                ('epi', 'cardio'),
-                ('epi', 'epi+main'),
-                ('main', 'cardio'),
-                ('cardio', 'epi+main'),
-                ('all', 'combined')
-        ]
-    
+        
+        # ── Dynamically discover available PRS models ──────────────────────────
+        if models_to_compare is None:
+                # Find all bin_{model} columns, extract model names
+                bin_cols = [col for col in validation_prs.columns 
+                            if col.startswith('bin_') and col != 'bin_combined']
+                models_to_compare = [col.replace('bin_', '') for col in bin_cols]
+                print(f"\nDiscovered {len(models_to_compare)} PRS models: {models_to_compare}")
+        else:
+                print(f"\nUsing {len(models_to_compare)} specified models: {models_to_compare}")
+        
+        # Verify all models have required columns
+        missing_models = []
+        for model in models_to_compare:
+                if f'bin_{model}' not in validation_prs.columns:
+                        missing_models.append(model)
+        
+        if missing_models:
+                print(f"WARNING: Missing bin columns for: {missing_models}")
+                models_to_compare = [m for m in models_to_compare if m not in missing_models]
+        
+        # ── Generate all pairwise comparisons ──────────────────────────────────
+        prs_comparisons = []
+        
+        # Always compare main against others if main exists
+        if 'main' in models_to_compare:
+                for model in models_to_compare:
+                        if model != 'main':
+                                prs_comparisons.append(('main', model))
+        
+        # Compare product vs summed variants within same cohort
+        # e.g., cardio_product vs cardio_summed, epi_product vs epi_summed
+        cohorts = set()
+        for model in models_to_compare:
+                if '_product' in model:
+                        cohort = model.replace('_product', '')
+                        cohorts.add(cohort)
+                elif '_summed' in model:
+                        cohort = model.replace('_summed', '')
+                        cohorts.add(cohort)
+        
+        for cohort in cohorts:
+                product = f'{cohort}_product'
+                summed = f'{cohort}_summed'
+                if product in models_to_compare and summed in models_to_compare:
+                        prs_comparisons.append((product, summed))
+        
+        # Compare combined vs main if both exist
+        if 'combined' in models_to_compare and 'main' in models_to_compare:
+                prs_comparisons.append(('main', 'combined'))
+        
+        print(f"\nGenerated {len(prs_comparisons)} pairwise comparisons")
+        
         # Run comparisons
         all_results = []
-    
+        
         for prs1, prs2 in prs_comparisons:
-                # Handle special case for 'all' vs 'combined'
-                if 'all' in [prs1, prs2] or 'combined' in [prs1, prs2]:
-                        # Need special handling for combined PRS
-                        # (create combined high-risk indicator)
-                        if prs2 == 'combined':
-                                # Create combined indicator
-                                cases_copy = cases.copy()
-                                combined_high = (
-                                        (cases['bin_main'] > test_threshold) | 
-                                        (cases['bin_epi'] > test_threshold) |
-                                        (cases['bin_cardio'] > test_threshold) | 
-                                        (cases['bin_epi+main'] > test_threshold)
-                                )
-                                cases_copy['bin_combined'] = combined_high.astype(int) * 10
-                            
-                                # Use validation_prs for full dataset tests
-                                validation_prs_copy = validation_prs.copy()
-                                combined_high_full = (
-                                        (validation_prs['bin_main'] > test_threshold) | 
-                                        (validation_prs['bin_epi'] > test_threshold) |
-                                        (validation_prs['bin_cardio'] > test_threshold) | 
-                                        (validation_prs['bin_epi+main'] > test_threshold)
-                                )
-                                validation_prs_copy['bin_combined'] = combined_high_full.astype(int) * 10
-                                validation_prs_copy['scaled_prs_combined'] = validation_prs_copy['bin_combined']
-                            
-                                results = run_prs_comparison(
-                                        cases_copy, prs1, prs2, test_threshold, 
-                                        validation_data=validation_prs_copy
-                                )
-                        else:
-                                results = run_prs_comparison(
-                                        cases, prs1, prs2, test_threshold, 
-                                        validation_data=validation_prs
-                                )
-                else:
+                print(f"\n{'='*70}")
+                print(f"Comparing: {prs1} vs {prs2}")
+                print(f"{'='*70}")
+                
+                # Verify both models have bin columns
+                if f'bin_{prs1}' not in cases.columns:
+                        print(f"  Skipping: bin_{prs1} not found")
+                        continue
+                if f'bin_{prs2}' not in cases.columns:
+                        print(f"  Skipping: bin_{prs2} not found")
+                        continue
+                
+                try:
                         results = run_prs_comparison(
                                 cases, prs1, prs2, test_threshold, 
                                 validation_data=validation_prs
                         )
-                    
-                all_results.append(results)
-            
+                        all_results.append(results)
+                except Exception as e:
+                        print(f"  ERROR comparing {prs1} vs {prs2}: {e}")
+                        continue
+        
+        if not all_results:
+                print("\nWARNING: No comparisons completed successfully")
+                return None
+        
         # Combine all results
         final_results = pd.concat(all_results, ignore_index=True)
-    
+        
         # Reorder columns
         column_order = ['comparison', 'test', 'threshold', 'statistic', 
-                                        'pvalue', 'conf_int']
+                        'pvalue', 'conf_int']
         # Add any extra columns that might exist
         extra_cols = [c for c in final_results.columns if c not in column_order]
         final_results = final_results[column_order + extra_cols]
-    
+        
         # Save results
         output_file = f'{scores_path}/McNemarStatsTestsAcrossPRSCalculations_refactored.csv'
         final_results.to_csv(output_file, index=False)
-    
+        
         print(f"\n{'='*70}")
         print(f"Analysis complete!")
         print(f"Results saved to: {output_file}")
-        print(f"Comparisons analyzed: {final_results['comparison'].unique()}")
+        print(f"Comparisons analyzed: {len(final_results['comparison'].unique())}")
+        print(f"  {list(final_results['comparison'].unique())}")
         print(f"{'='*70}\n")
-    
+        
         return final_results
-
-
-# ============================================================================
-# EXAMPLE USAGE
-# ============================================================================
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="calculating performance metrics across PRS models....")
@@ -713,6 +763,7 @@ if __name__ == "__main__":
     
     
     # Prefer command-line input if provided; fallback to env var
+    args = parser.parse_args()
     pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
     print(f"[PYTHON] Reading from: {pheno_data}")
     

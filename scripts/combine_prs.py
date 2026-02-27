@@ -62,11 +62,11 @@ def combine_prs_files(allFiles):
 def calculate_prevalance(df):
 	dfCopy = df.copy()
 	dfCopy = dfCopy[dfCopy['PHENOTYPE'] == 2]
-	dfCases = dfCopy.groupby(['bin']).count().rename(columns={'model':'total_cases'})[['total_cases']]
+	dfCases = dfCopy.groupby(['bin'],observed=False).count().rename(columns={'model':'total_cases'})[['total_cases']]
 #	dfCases.rename(columns={'color':'total_cases'},inplace=True)[['total_cases']]
 #	prevalenceDf = dfCases[['total_cases']]
 	#get the count in each decile
-	dfTotal = df.groupby(['bin']).count().rename(columns={'model':'total'})[['total']]
+	dfTotal = df.groupby(['bin'],observed=False).count().rename(columns={'model':'total'})[['total']]
 #	dfTotal.rename(columns={'color':'total'},inplace=True)[['total']]
 	#get the prevalence in each decile
 	dfTotal['prevalence'] = round((dfCases['total_cases'] / dfTotal['total']),2)
@@ -159,7 +159,7 @@ def scale_holdout_data_manually(holdout_df, training_stats):
 	"""
 	
 	# Base PRS column names (what we expect in holdout data)
-	base_prs_columns = ['prs_main', 'prs_epi', 'prs_epi+main', 'prs_cardio', 'prs_all']
+	base_prs_columns = training_stats.keys()
 	
 	holdout_scaled = holdout_df.copy()
 	
@@ -207,7 +207,7 @@ def main(phenoPath):
 	
 		
 		#instantiate files to download
-	allFilesTemp = glob.glob(f'{scoresPath}/*mixed.prs.csv')
+	allFilesTemp = glob.glob(f'{scoresPath}/prsScores/*mixed.prs.csv')
 	
 	#cardioFile = [f for f in allFiles if 'Cardio' in f]
 	
@@ -220,8 +220,8 @@ def main(phenoPath):
 	
 	
 
-#	for holdout in [False,True]:
-	for holdout in [False]:
+	for holdout in [False,True]:
+#	for holdout in [True]:
 			
 		if holdout:
 			combinedPRSBinned = pd.DataFrame()
@@ -273,12 +273,12 @@ def main(phenoPath):
 			#calculate the raw PRS for each PRScr
 		
 			create_optimized_prevalence_plot(prevalenceDf,figPath,'validation')
-			create_qq_plot_groups(combinedDf,figPath)
+#			create_qq_plot_groups(combinedDf,figPath)
 			
 			percentileOR = calculate_odds_ratio_for_prs(combinedDf,'scaled_prs')
 			percentileOR.to_csv(outputOddsRatioFile,index=False)
 			
-			combinedDf.drop(columns=['size','alpha'],inplace=True)
+#			combinedDf.drop(columns=['size','alpha'],inplace=True)
 			
 			
 		combinedDf.reset_index().to_csv(outputPRSFile,index=False)
@@ -295,8 +295,8 @@ if __name__ == '__main__':
 	pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
 	print(f"[PYTHON] Reading from: {pheno_data}")
 
-	pheno = 'type2Diabetes'
-	pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/productEpi'
+#	pheno = 'celiacDisease'
+#	pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi'
 		
 	if not pheno_data:
 		raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")

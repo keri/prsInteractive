@@ -148,9 +148,12 @@ def main(phenoPath,features_filter_ld):
 	#refactored code includes a shap_zscore column not present in thesis results which means it will be the featureScoresReducedFinalModel created post glm modelling
 	file_root = features_filter_ld.split('.')[0]
 	output_file = f'{file_root}.filteredLD.csv'
+	
 	try:
 		file_root = features_filter_ld.split('.')[0]
 		output_file = f'{file_root}.filteredLD.csv'
+		if 'iteration' in features.columns:
+			features['shap_zscore'] = 2
 		#get the main and epi weigths separate as the separate epi+main model performed best
 		rank_feature = 'shap_zscore'
 		featuresMain = features[features['data_type'] == 'main'][['feature','shap_zscore']]

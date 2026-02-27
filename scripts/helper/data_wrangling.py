@@ -2,10 +2,32 @@
 
 import pandas as pd
 import numpy as np
+import os
 from sklearn.preprocessing import StandardScaler
 import statsmodels.stats.contingency_tables as ct
 import statsmodels.api as sm
 from scipy.stats import fisher_exact
+
+def assert_file_saved(filepath: str, min_bytes: int = 1) -> None:
+    """
+    Raise a RuntimeError if a file does not exist or is suspiciously small.
+    Call immediately after any .to_csv() / .to_parquet() / open() write.
+
+    Parameters
+    ----------
+    filepath  : full path to the file that should have been written
+    min_bytes : minimum acceptable file size in bytes (default 1)
+                set higher (e.g. 100) to catch empty/header-only writes
+    """
+    if not os.path.exists(filepath):
+        raise RuntimeError(
+            f'[SAVE ERROR] File was not written to disk:\n  {filepath}'
+        )
+    size = os.path.getsize(filepath)
+    if size < min_bytes:
+        raise RuntimeError(
+            f'[SAVE ERROR] File exists but is suspiciously small ({size} bytes):\n  {filepath}'
+        )
 
 #def create_epi_df(epiDf,pairList,combo="sum"):
 #   '''input : epiDf with snps as columns + PHENOTYPE

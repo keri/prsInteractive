@@ -15,7 +15,6 @@ from helper.download import *
 from helper.calculate_prs import *
 from helper.draw_plots import *
 from helper.data_wrangling import *
-#from helper.mcnemar_stats_tests import *
 
 
 
@@ -30,21 +29,26 @@ def create_prs_direction(df,featureScores,image_str,figurePath,prsPath):
             features = featureScoresTemp['feature'].tolist()
             #           featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
             print('# of features in protect PRS :',len(features))
-            meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,figurePath,prsPath,direction,features)
+            
+            meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,f'{figurePath}/protectRiskPlots',f'{prsPath}/protectRiskScores',direction,features)
         elif direction == 'risk':
             featureScoresTemp = featureScores[featureScores['coefs'] > 0]
             features = featureScoresTemp['feature'].tolist()
             print('# of features in risk PRS :',len(features))
             
-            #           featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
-            meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,figurePath,prsPath,direction,features)
+            # featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
+            os.makedirs(f'{figurePath}/protectRiskPlots', exist_ok=True)
+            os.makedirs(f'{prsPath}/protectRiskScores', exist_ok=True)
+            meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,f'{figurePath}/protectRiskPlots',f'{prsPath}/protectRiskScores',direction,features)
         else:
             featureScoresTemp = featureScores[featureScores['coefs'] != 0]
             #mixed for both main and epi
             features = featureScoresTemp['feature'].tolist()
             print('# of features in mixed PRS :',len(features))
             #sort featureScores
-            #           featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
+            # featureScoreDict = get_feature_coef_dictionaries(featureScoresTemp)
+            os.makedirs(f'{figurePath}/protectRiskPlots', exist_ok=True)
+            os.makedirs(f'{prsPath}/protectRiskScores', exist_ok=True)
             meanDiff = calculate_create_prs_plots(dfCopy,featureScoreDict,image_str,figurePath,prsPath,direction,features)
     featureScoresTemp = featureScores[featureScores['coefs'] != 0]
     #mixed for both main and epi
@@ -158,7 +162,7 @@ def create_saturation_plots(df,featureScores,data_type,figurePath,prsPath):
     
 
 
-def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,epi_combo):
+def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,test_combined_env_file,holdout_path,holdout_env_file,holdout_combined_env_file,covar_file,hla_file,feature_file,epi_combo):
 #   pheno = 'type2Diabetes'
 
         ##########################################
@@ -166,8 +170,11 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,holdout_path,h
         ##########################################
 
     
-    prsPath = f'{pheno_data}/scores'
-    figurePath = f'{pheno_data}/figures'
+    prsPath = f'{pheno_data}/scores/prsScores'
+    figurePath = f'{pheno_data}/figures/prsPlots'
+    
+    os.makedirs(f'{prsPath}', exist_ok=True)
+    os.makedirs(f'{figurePath}', exist_ok=True)
 
     ##############################################################################
     #                       DOWNLOAD COVARIATE DATA                              #
@@ -203,8 +210,9 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,holdout_path,h
 #   cardioMainPlusAll = filteredFeatures[filteredFeatures['model'] == 'all+main_cardio']
 #   
     #remove main clinical features from data
-    filteredFeatures = filteredFeatures[filteredFeatures['model'].isin(['main','epi','epi+main','cardio','all'])]
-#   filteredFeatures = filteredFeatures[filteredFeatures['model'] != 'all+main_cardio']
+#   filteredFeatures = filteredFeatures[filteredFeatures['model'].isin(['main','epi','epi+main','cardio','all'])]
+#   filteredFeatures = filteredFeatures[filteredFeatures['model'].isin(['cardio','all'])]
+    filteredFeatures = filteredFeatures[~filteredFeatures['model'].str.contains('main_cardio')]
 
     #get full columns to use for index of section columns
     full_columns = get_columns(test_path)
@@ -246,6 +254,13 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,holdout_path,h
     cardioEnvHoldout = pd.read_csv(holdout_env_file)
     cardioEnvHoldout.set_index('IID',inplace=True)
     
+    #cardioEnv data
+    combinedEnvTest = pd.read_csv(test_combined_env_file)
+    combinedEnvTest.set_index('IID',inplace=True)
+    
+    combinedEnvHoldout = pd.read_csv(holdout_combined_env_file)
+    combinedEnvHoldout.set_index('IID',inplace=True)
+    
     
 
     for holdout_str in ['','.holdout']:
@@ -253,10 +268,13 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,holdout_path,h
             
         if holdout_str == '':
             data_pathway = test_path
-            cardioEnvData = cardioEnvTest
+            cardioEnvData = cardioEnvTest.copy()
+            combinedEnvData = combinedEnvTest.copy()
         else:
             data_pathway = holdout_path
-            cardioEnvData = cardioEnvHoldout
+            cardioEnvData = cardioEnvHoldout.copy()
+            combinedEnvData = combinedEnvHoldout.copy()
+            
         
         ####################  DOWNLOAD THE DATASET WITH ALL GENO FEATURES ###################
         mainEpiDf = get_dataset(data_pathway,withdrawal_path,featuresToDownload,use_chunking=True)
@@ -284,6 +302,9 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,holdout_path,h
         mainEpiDf = mainEpiDf.merge(cardioEnvData,left_index=True,right_index=True)
         print('shape of main dataset after environment data concatenated = ',mainEpiDf.shape)
         
+        mainEpiDf = mainEpiDf.merge(combinedEnvData,left_index=True,right_index=True)
+        print('shape of main dataset after environment data concatenated = ',mainEpiDf.shape)
+        
         #use this to calculate PRS for covar features
         covarDf = phenotype.merge(covDf,left_index=True,right_index=True,how='left')
         print('covariate only df shape = ',covarDf.shape)
@@ -298,7 +319,7 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,holdout_path,h
         
         
         for model in filteredFeatures['model'].unique().tolist() + ['covariate']:
-#       for model in ['all']:
+#       for model in ['all','all+env_combined','env_combined']:
 #       for model in prs_models:
             if model == 'covariate':
                 prsFeatures = covarCoefs.copy()
@@ -345,6 +366,8 @@ if __name__ == '__main__':
     parser.add_argument("--hla_file", help="data file of hla data")
     parser.add_argument("--test_env_gen_file", help="test environmental data to use")
     parser.add_argument("--holdout_env_gen_file", help="holdout environmental data to use")
+    parser.add_argument("--holdout_combined_env_file", help="holdout combined environmental data to use")
+    parser.add_argument("--test_combined_env_file", help="test combined environmental data to use")
     parser.add_argument("--pheno", help="Phenotype to analyze")
     parser.add_argument("--feature_scores_file_filtered", help="data path to feature scores from association modelling")
     parser.add_argument("--withdrawal_path",help="Genetic withdrawal path for IDs")
@@ -374,6 +397,12 @@ if __name__ == '__main__':
     holdout_env_file = args.holdout_env_gen_file or os.environ.get("GENE_ENV_HOLDOUT")
     print(f"environmental holdout data : {holdout_env_file}")
     
+    test_combined_env_file = args.test_combined_env_file or os.environ.get("COMBINED_ENV_TEST")
+    print(f"combined environmental test data : {test_combined_env_file}")
+    
+    holdout_combined_env_file = args.holdout_combined_env_file or os.environ.get("COMBINED_ENV_HOLDOUT")
+    print(f"combined environmental holdout data : {holdout_combined_env_file}")
+    
     pheno = args.pheno or os.environ.get("PHENO")
     print(f"[PYTHON] Phenotype : {pheno}")
     
@@ -396,10 +425,12 @@ if __name__ == '__main__':
 #   holdout_env_file=f'{pheno_data}/geneEnvironmentHoldout.csv'
 #   test_path=f'{pheno_path}/testCombined.raw'
 #   holdout_path=f'{pheno_path}/holdoutCombined.raw'
-#   results_path='/Users/kerimulterer/prsInteractive/results'
+#   #   results_path='/Users/kerimulterer/prsInteractive/results'
+#   holdout_combined_env_file = f"{pheno_data}/allEnvironmentHoldout.csv"
+#   test_combined_env_file = f"{pheno_data}/allEnvironmentTest.csv"
 #   covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
 #   hla_file='/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-#   feature_file=f'{pheno_data}/scores/featureScoresReducedFinalModel.csv'
+#   feature_file=f'{pheno_data}/scores/featureScoresReducedFinalModel.filtered.csv'
 #   withdrawal_path = f'/Users/kerimulterer/prsInteractive/data/withdrawals.csv'
 
     
@@ -423,6 +454,12 @@ if __name__ == '__main__':
         
     if not holdout_env_file:
         raise ValueError("You must provide a holdout env data file via --holdout_env_file or set the GENE_ENV_HOLDOUT environment variable.")
+        
+    if not test_combined_env_file:
+        raise ValueError("You must provide a test combined env file via --test_combined_env_file or set the COMBINED_ENV_TEST environment variable.")
+        
+    if not holdout_combined_env_file:
+        raise ValueError("You must provide a holdout combined env data file via --holdout_combined_env_file or set the COMBINED_ENV_HOLDOUT environment variable.")
 
     if not pheno:
         raise ValueError("You must provide a phenotype via --pheno or set the PHENO environment variable.")
@@ -433,7 +470,7 @@ if __name__ == '__main__':
     if not withdrawal_path:
         raise ValueError("You must provide a path to withdrawals --withdrawal_path or set the WITHDRAWAL_PATH environment variable.")
             
-    main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,holdout_path,holdout_env_file,covar_file,hla_file,feature_file,epi_combo)
+    main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,test_combined_env_file,holdout_path,holdout_env_file,holdout_combined_env_file,covar_file,hla_file,feature_file,epi_combo)
 #   main(pheno,withdrawal_path,pheno_path,test_path,holdout_path,covar_file,hla_file,feature_file)
     
 

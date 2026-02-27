@@ -1,12 +1,12 @@
 #!/bin/bash
 
 
-#PHENO=$1
+PHENO=$1
 
-PHENO='type2Diabetes'
+#PHENO='type2Diabetes'
 
-#EPI_COMBO=${2:-"sum"}
-EPI_COMBO="prod"
+EPI_COMBO=${2:-"sum"}
+#EPI_COMBO="prod"
 
 # Source config with error handling
 if [ ! -f "../env.config" ]; then
@@ -107,42 +107,32 @@ required_files=(
     "${SCRIPTS_DIR}/calculate_prs_stats.py"
 )
 
-#for file in "${required_files[@]}"; do
-#   if [ ! -f "$file" ]; then
-#       echo "ERROR: Required file does not exist: $file"
-#       exit 1
-#   else
-#       echo "[DEBUG] Found: $file"
-#   fi
-#done
-#
-#echo "[DEBUG] All required files found. Starting Python scripts..."
-#
-##check if file exists post GxGxE filtering
-#for file in "$PHENO_DATA/scores/cardioMetabolicimportantFeaturesPostShapFilteredZscore.csv"; do
-#   if [[ -f "$file" ]]; then
-#       echo "✓ File exists: $file"
-#       
-#   else
-#       echo "✗ File missing: $file"
-#       export FEATURE_SCORES_FILE=$FEATURE_SCORES_FILE
-#       export CONFIG_FILE=$CONFIG_FILE
-#       python "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py"
-#   fi
-#done
-#
-#source "${CONFIG_FILE}"
-#
-##
-###### ENSURE CONFIG FILE IS UPDATED ##########
-##if [[ "$FEATURE_SCORES_FILE" == *"filtered"* ]]; then
-##   echo "✓ GxGxE features have been filtered for non-additive post modelling"
-##else
-##   #wait 10 mins for script to finish
-##   echo "Python script filtering non-additive GxGxE features finished with exit code: $?"
-##   echo "Continuing with original FEATURE SCORES file"
-##fi
-#
+for file in "${required_files[@]}"; do
+    if [ ! -f "$file" ]; then
+        echo "ERROR: Required file does not exist: $file"
+        exit 1
+    else
+        echo "[DEBUG] Found: $file"
+    fi
+done
+
+echo "[DEBUG] All required files found. Starting Python scripts..."
+
+
+source "${CONFIG_FILE}"
+
+#check to see if filtered file is present
+if [ ! -f "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" ]; then
+    echo "[G-E non-additive FILTERING] is not done"
+    echo "run filter_non_additive_gene_env_features.py"
+    #filter non-additive gene-env features
+    python "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py" \
+    --config_file "$PHENO_DATA/pheno.config" \
+    --feature_scores_file "$PHENO_DATA/scores/featureScoresReducedFinalModel.csv"
+else
+    echo "✓ GxGxE features have been filtered for non-additive post modelling"
+fi
+
 ##check to see if LD has been done previously before association
 #if [ ! -f "$PHENO_PATH/finalModel.ld" ];then
 #   bash "$SCRIPTS_DIR/run_plink_LD.sh" $PHENO
@@ -151,7 +141,7 @@ required_files=(
 ##necessary exports are done at top of script
 ##Run the Python script
 #
-#python "${SCRIPTS_DIR}/calculate_prs_post_modelling.py"
+python "${SCRIPTS_DIR}/calculate_prs_post_modelling.py"
 #
 #exit_code=$?
 #echo "[DEBUG] Python script calculating prs exited with code: $exit_code"
@@ -162,42 +152,33 @@ required_files=(
 #fi
 #
 ##export of PHENO_DATA done
-#python "${SCRIPTS_DIR}/combine_prs.py"
-#
-#exit_code=$?
-#echo "[DEBUG] Python combine_prs.py script exited with code: $exit_code"
-#
-#if [ $exit_code -ne 0 ]; then
-#   echo "ERROR: Python combine_prs.py script failed with exit code $exit_code"
-#   exit $exit_code
-#fi
+
+python "${SCRIPTS_DIR}/combine_prs.py"
+--pheno_data $PHENO_DATA
+
+exit_code=$?
+echo "[DEBUG] Python combine_prs.py script exited with code: $exit_code"
+
+if [ $exit_code -ne 0 ]; then
+    echo "ERROR: Python combine_prs.py script failed with exit code $exit_code"
+    exit $exit_code
+fi
 
 #calculate statstics: McNemar, ttest, pearson correlation, precision/recall improvement over G and exclusive cases 
-python "${SCRIPTS_DIR}/calculate_prs_stats.py"
+#calculate peformance of trained models and PRS calculations for main v other
+#need PHENO_DATA exported or added as an --pheno_data argument
+python "${SCRIPTS_DIR}/calculate_prs_stats.py" \
+--pheno_data $PHENO_DATA
 
-exit_code=$?
-echo "[DEBUG] Python calculate_prs_stats.py script exited with code: $exit_code"
-
-if [ $exit_code -ne 0 ]; then
-    echo "ERROR: Python calculate_prs_stats.py script failed with exit code $exit_code"
-    exit $exit_code
-fi
-
-#calculate AUC Delong statistics
-Rscript "$SCRIPTS_DIR/prsAUCDelongStats.R" \
---pheno_data "$PHENO_DATA" 
-
-exit_code=$?
-echo "[DEBUG] Rscript prsAUCDelongStats.R script exited with code: $exit_code"
-
-if [ $exit_code -ne 0 ]; then
-    echo "ERROR: Rscript prsAUCDelongStats.R script failed with exit code $exit_code"
-    exit $exit_code
-fi
+RScript "$SCRIPTS_DIR/prsAUCDelongStats.R" \
+--pheno_data $PHENO_DATA
 
 ########  CALCULATE TOP FEATURES IN STATISTICALLY DISTINCT COHORTS ##########
-export FEATURE_SCORES_FILE=$FEATURE_SCORES_FILE
-python "${SCRIPTS_DIR}/calculate_top_features_in_cohort.py" 
+
+python "${SCRIPTS_DIR}/calculate_top_features_in_cohort.py" \
+--pheno_data $PHENO_DATA \
+--feature_scores_file_filtered "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" \
+--threshold 1.99
 
 
 echo "[DEBUG] Script completed successfully"

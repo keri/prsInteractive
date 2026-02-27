@@ -2,6 +2,9 @@
 
 import pandas as pd
 import numpy as np
+import os
+import sys
+import argparse
 
 from helper.data_wrangling import *
 from helper.calculate_prs import *
@@ -56,7 +59,8 @@ def create_case_control_histogram(df,pheno_col,continous_col,figPath,figsize=(12
     
 
 
-def create_risk_bins(training_df, n_bins=1000, phenotype_col='PHENOTYPE',use_epi_main=False):
+def create_risk_bins(training_df, prs_columns, n_bins=1000, phenotype_col='PHENOTYPE'):
+#def create_risk_bins(training_df, n_bins=1000, phenotype_col='PHENOTYPE',use_epi_main=False):
     """
     Create risk bins for PRS scores and calculate bin statistics for cases and controls separately.
     
@@ -73,10 +77,10 @@ def create_risk_bins(training_df, n_bins=1000, phenotype_col='PHENOTYPE',use_epi
         training_df['phenotype'] = training_df['PHENOTYPE'] - 1
         phenotype_col = 'phenotype'
         
-    if use_epi_main:
-        prs_columns = ['scaled_prs_main', 'scaled_prs_epi','scaled_prs_cardio','scaled_prs_epi+main']
-    else:
-        prs_columns = ['scaled_prs_main', 'scaled_prs_epi','scaled_prs_cardio']
+#   if use_epi_main:
+#       prs_columns = ['scaled_prs_main', 'scaled_prs_epi','scaled_prs_cardio','scaled_prs_epi+main']
+#   else:
+#       prs_columns = ['scaled_prs_main', 'scaled_prs_epi','scaled_prs_cardio']
     
     bin_stats = {}
     
@@ -272,7 +276,7 @@ def assign_risk_thresholds(holdout_df, bin_stats, training_scalers=None, thresho
         
         # Create column names for this PRS type
         base_col = prs_col.replace("scaled_prs_","")
-        bin_col = f'{base_col}_centile_bin'
+        bin_col = f'bin_{base_col}'
         threshold_col = f'{base_col}_high_risk'
         case_bin_col = f'{base_col}_case_bin'
         
@@ -420,7 +424,7 @@ def assign_risk_thresholds(holdout_df, bin_stats, training_scalers=None, thresho
 #               combined_prs[idx] = holdout_processed.loc[holdout_processed.index[idx], prs_col_name.replace('scaled_','')]
                 
                 
-        holdout_processed['combined_centile_bin'] = combined_bin
+        holdout_processed['bin_combined'] = combined_bin
         holdout_processed['scaled_prs_combined'] = scaled_combined_prs
         holdout_processed['prs_combined'] = combined_prs
         
@@ -440,27 +444,6 @@ def assign_risk_thresholds(holdout_df, bin_stats, training_scalers=None, thresho
         print(f"Total individuals assigned MAX bin: {n_any_high_risk + n_prop_high} ({(n_any_high_risk + n_prop_high)/len(holdout_processed)*100:.1f}%)")
         print(f"Total individuals assigned MIN bin: {n_prop_low} ({n_prop_low/len(holdout_processed)*100:.1f}%)")
         print(f"\nCombined high-risk (bin >= {threshold_bin}): {combined_high_risk_count}/{len(holdout_processed)} ({combined_high_risk_count/len(holdout_processed)*100:.1f}%)")
-        
-        # Calculate combined PRS score (mean of PRS values for combined approach)
-#       prs_cols_for_combined = [col for col in bin_stats.keys() if col in holdout_processed.columns]
-#       if prs_cols_for_combined:
-#           holdout_processed['combined_prs'] = holdout_processed[prs_cols_for_combined].mean(axis=1)
-            
-#       # Assign combined high-risk (bin > threshold_bin)
-#       holdout_processed['combined_high_risk'] = (combined_bin >= threshold_bin).astype(int)
-#       
-#       # Statistics
-#       high_case_prop = (prop_case_bins > 0.6).sum()
-#       low_case_prop = (prop_case_bins <= 0.6).sum()
-#       combined_high_risk_count = holdout_processed['combined_high_risk'].sum()
-#       
-#       print(f"Individuals with >30% case bins (using MAX): {high_case_prop} ({high_case_prop/len(holdout_processed)*100:.1f}%)")
-#       print(f"Individuals with ≤30% case bins (using MIN): {low_case_prop} ({low_case_prop/len(holdout_processed)*100:.1f}%)")
-#       print(f"Combined high-risk (bin > {threshold_bin}): {combined_high_risk_count}/{len(holdout_processed)} ({combined_high_risk_count/len(holdout_processed)*100:.1f}%)")
-#       print(f"\nCase bin proportion statistics:")
-#       print(f"  Mean: {prop_case_bins.mean():.3f}")
-#       print(f"  Median: {prop_case_bins.median():.3f}")
-#       print(f"  Range: {prop_case_bins.min():.3f} - {prop_case_bins.max():.3f}")
         
     return holdout_processed
 
@@ -488,58 +471,83 @@ def save_bin_statistics(scoresPath,bin_stats, training_stats=None, filename_pref
         training_stats_df.to_csv(f'{scoresPath}/{training_stats_filename}')
         print(f"Training statistics saved to {training_stats_filename}")
         
-def load_bin_statistics(scoresPath,filename_prefix='training_prs_statistics'):
+def load_bin_statistics(scoresPath, filename_prefix='training_prs_statistics'):
     """
     Load bin statistics and training statistics from CSV files.
-    
-    Parameters:
-    filename_prefix: Prefix used when saving files
-    
-    Returns:
-    bin_stats: Dictionary of bin statistics
-    training_stats: Dictionary of training statistics
+
+    PRS column names are discovered dynamically by globbing for files matching
+    ``{scoresPath}/{filename_prefix}_scaled_prs_*_bins.csv`` so that the
+    function works with any set of models (including combined GxG + G+G models
+    with ``_product`` / ``_summed`` suffixes) without modification.
+
+    Parameters
+    ----------
+    scoresPath       : Directory that contains the bin-statistic CSV files.
+    filename_prefix  : Prefix used when the files were saved (default:
+                       ``'training_prs_statistics'``).
+
+    Returns
+    -------
+    bin_stats        : dict  — keyed by ``scaled_prs_*`` column name
+    training_stats   : dict or None
     """
-    
-    prs_columns = ['scaled_prs_main', 'scaled_prs_epi', 'scaled_prs_epi+main', 
-                   'scaled_prs_cardio', 'scaled_prs_all']
-    
+    import glob as _glob
+
     bin_stats = {}
-    
-    # Load bin statistics for each PRS type
-    for prs_col in prs_columns:
-        filename = f"{scoresPath}/{filename_prefix}_{prs_col}_bins.csv"
+
+    # ── Discover bin files dynamically ───────────────────────────────────
+    # File naming convention (from save_bin_statistics):
+    #   {filename_prefix}_{prs_col}_bins.csv
+    # where prs_col is e.g. scaled_prs_main, scaled_prs_epi_product, etc.
+    #
+    # We glob for the fixed sentinel 'scaled_prs' in the name so we don't
+    # accidentally pick up the training_stats file or other artefacts.
+    pattern = os.path.join(scoresPath, f"{filename_prefix}_scaled_prs_*_bins.csv")
+    bin_files = sorted(_glob.glob(pattern))
+
+    if not bin_files:
+        print(f"Warning: no bin-statistic files found matching: {pattern}")
+        return bin_stats, None
+
+    prefix_token = f"{filename_prefix}_"   # e.g. "training_prs_statistics_"
+    suffix_token = "_bins.csv"
+
+    for filepath in bin_files:
+        basename = os.path.basename(filepath)
+        # Extract prs_col: strip leading prefix and trailing _bins.csv
+        # e.g. "prs_statistics_scaled_prs_epi_product_bins.csv"
+        #   → "scaled_prs_epi_product"
+        prs_col = basename[len(prefix_token):-len(suffix_token)]
+
         try:
-            bin_df = pd.read_csv(filename)
-            # Reconstruct bin_stats structure
+            bin_df = pd.read_csv(filepath)
             bin_stats[prs_col] = {
                 'bin_dataframe': bin_df,
-                'total_bins': len(bin_df)
+                'total_bins': len(bin_df),
             }
-            print(f"Loaded bin statistics for {prs_col} from {filename}")
-        except FileNotFoundError:
-            print(f"Warning: {filename} not found, skipping {prs_col}")
-            
-    # Load training statistics
+            print(f"  Loaded bin statistics: {prs_col}  ({len(bin_df)} bins)")
+        except Exception as e:
+            print(f"  Warning: could not load {filepath} — {e}")
+
+    print(f"  Discovered {len(bin_stats)} PRS bin file(s) for prefix '{filename_prefix}'")
+
+    # ── Load training statistics ──────────────────────────────────────────
     training_stats = None
-    training_stats_filename = f"{scoresPath}/{filename_prefix}_training_stats.csv"
+    training_stats_filename = os.path.join(scoresPath, f"{filename_prefix}_training_stats.csv")
     try:
         training_stats_df = pd.read_csv(training_stats_filename, index_col=0)
         training_stats = training_stats_df.to_dict('index')
-        print(f"Loaded training statistics from {training_stats_filename}")
+        print(f"  Loaded training statistics from {training_stats_filename}")
     except FileNotFoundError:
-        print(f"Warning: {training_stats_filename} not found")
-        
+        print(f"  Warning: {training_stats_filename} not found")
+
     return bin_stats, training_stats
 
-
-# Example usage and main execution
-if __name__ == "__main__":
+def main(scoresPath,figPath):
     
-    pheno='type2Diabetes'
-    scoresPath = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi/scores'
-    figPath = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi/figures'
-    trainingPath = f'{scoresPath}/combinedPRSGroups.csv'
+    trainingPath = f'{scoresPath}/combinedPRSGroups.filtered.csv'
     holdoutPath = f'{scoresPath}/combinedPRSGroups.holdout.csv'
+    holdoutPathFiltered = f'{scoresPath}/combinedPRSGroups.holdout.filtered.csv'
 #   # Example: Create sample data for demonstration
 #   print("Creating sample data for demonstration...")
 #   np.random.seed(42)
@@ -576,29 +584,32 @@ if __name__ == "__main__":
     
     #download combinedPRS training Data
     trainingDf = pd.read_csv(trainingPath)
+    holdoutDf = pd.read_csv(holdoutPath)
     
-    #see if the analysis has been done so as not to overwrite raw file
-    try:
-        holdoutDf = pd.read_csv(f'{scoresPath}/combinedPRSGroups.holdoutRaw.csv')
-        holdoutDf.to_csv(holdoutPath,index=False)
-    except FileNotFoundError:
-        holdoutDf = pd.read_csv(holdoutPath)
-        
-        
     try:	
         trainingDf.set_index('IID',inplace=True)
     except ValueError: #the IID is an index so needs to be reindexed
         trainingDf.rename(columns={'Unnamed: 0':'IID'},inplace=True)
         trainingDf.set_index('IID',inplace=True)
-        
+    
     try:	
         holdoutDf.rename(columns={'Unnamed: 0':'IID'},inplace=True)
     except KeyError: #the IID is not an index
         pass
-
+    
+    # Prestep: get filtered PRS models
+    models_bins_to_use = [m for m in trainingDf.columns if 'bin_' in m]
+    prs_to_use = [m for m in trainingDf.columns if 'scaled_prs' in m]
+    
+    prs_columns = [m.replace('scaled_','') for m in prs_to_use]
+    
+    prs_models = [m.replace('bin_','') for m in models_bins_to_use]
+    print('models to use are : ',prs_models)
+    
+    holdoutDf = holdoutDf[['PHENOTYPE','IID'] + prs_to_use + prs_columns]
     
     # Step 1: Create risk bins from training data
-    bin_stats = create_risk_bins(trainingDf, n_bins=1000)
+    bin_stats = create_risk_bins(trainingDf, prs_to_use, n_bins=1000)
     
     # Step 2: Calculate training statistics for manual scaling
 #   training_stats = calculate_training_statistics(trainingDf)
@@ -612,27 +623,39 @@ if __name__ == "__main__":
     )
     
     # Step 4: Save results to CSV files
-    save_bin_statistics(scoresPath,bin_stats, filename_prefix='prs_statistics')
+    save_bin_statistics(f'{scoresPath}/prsScores',bin_stats, filename_prefix='prs_statistics')
     
-    holdoutDf.to_csv(f'{scoresPath}/combinedPRSGroups.holdoutRaw.csv',index=False)
-    holdout_processed.to_csv(holdoutPath)
-    
+    try:
+        holdout_processed.to_csv(holdoutPathFiltered,index=False)
+        assert_file_saved(holdoutPathFiltered, min_bytes=100)
+        print(f'[OK] Holdout file saved: {holdoutPathFiltered}')
+        
+    except RuntimeError as e:
+        print(e)
+        sys.exit(1)
+        
+    except OSError as e:
+        # Catches permission errors, disk full, bad path, etc.
+        print(f'[SAVE ERROR] OS-level write failure for:\n  {holdoutPathFiltered}')
+        print(f'  Reason: {e}')
+        sys.exit(1)
+        
     #get an odds ratio for each scaled_prs
     prs_cols = [col for col in holdout_processed.columns if 'scaled_prs' in col and 'threshold' not in col]
     percentileORPRS = calculate_odds_ratio_for_prs(holdout_processed[prs_cols+['PHENOTYPE',"IID"]],'scaled_prs')
-    percentileORBin = calculate_odds_ratio_for_prs(holdout_processed[['IID','combined_centile_bin','PHENOTYPE']],'centile_bin')
-    
-    
+    percentileORBin = calculate_odds_ratio_for_prs(holdout_processed[['IID','bin_combined','PHENOTYPE']],'bin')
+
+
     #match file names to validation set
-    outputORFile = f'{scoresPath}/combinedORPRSGroups.holdout.csv'
+    outputORFile = f'{scoresPath}/prsScores/combinedORPRSGroups.holdout.filtered.csv'
     
     percentileOR = pd.concat([percentileORPRS,percentileORBin],ignore_index=True)
     percentileOR.to_csv(outputORFile,index=False)
     
-    prsDf = holdout_processed[['IID','combined_centile_bin','PHENOTYPE']].rename(columns={'combined_centile_bin':'scaled_prs'})
-    create_prs_plots(prsDf,'combined',figPath,scoresPath,'mixed.holdout')
+    prsDf = holdout_processed[['IID','bin_combined','PHENOTYPE']].rename(columns={'bin_combined':'scaled_prs'})
+    create_prs_plots(prsDf,'combined',f'{figPath}/prsPlots',f'{scoresPath}/prsScores','mixed.holdout.filtered')
     
-    create_case_control_histogram(holdout_processed,'PHENOTYPE','combined_centile_bin',figPath,figsize=(12,6))
+    create_case_control_histogram(holdout_processed,'PHENOTYPE','bin_combined',f'{figPath}/prsPlots',figsize=(12,6))
     
     # Display sample results
     print("\n" + "="*60)
@@ -647,7 +670,7 @@ if __name__ == "__main__":
 #   if training_stats:
 #       for prs_type, stats in training_stats.items():
 #           print(f"  {prs_type}: mean={stats['mean']:.4f}, std={stats['std']:.4f}")
-            
+        
     print(f"\nHoldout data with risk assignments (first 10 rows):")
     display_cols = [col for col in holdout_processed.columns if 'high_risk' in col or 'threshold' in col][:5]
     print(holdout_processed[display_cols].head(10))
@@ -658,3 +681,35 @@ if __name__ == "__main__":
             count = holdout_processed[col].sum()
             pct = count / len(holdout_processed) * 100
             print(f"  {col}: {count}/{len(holdout_processed)} ({pct:.1f}%)")
+            
+            
+    
+
+
+# Example usage and main execution
+if __name__ == "__main__":
+    
+    parser = argparse.ArgumentParser(description="Calculating important features in statistically significant cohorts ....")
+    parser.add_argument("--pheno_data",help="path to pheno results directory")
+    
+    
+    args = parser.parse_args()
+    
+    pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
+    print(f"[PYTHON] Reading from: {pheno_data}")
+
+#   pheno='type2Diabetes'
+#   pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/productEpi'
+
+    
+    if not pheno_data:
+        raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")
+    
+    scoresPath = f'{pheno_data}/scores'
+    figPath = f'{pheno_data}/figures'
+    
+    main(scoresPath,figPath)
+    
+
+
+        

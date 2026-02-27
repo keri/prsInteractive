@@ -32,13 +32,131 @@ COLOR_SCHEME = {
         'name': 'case-control'
     }}
 
-def create_sankey_plot_clinical_data(df,figPath,use_epi_main=False):
+# Extended color scheme for product/summed variants
+COHORT_COLORS_EXTENDED = {
+    'main': '#E69F00',      # Orange
+    'epi': '#56B4E9',       # Sky blue
+    'epi+main': '#CC79A7',  # Pinkish purple
+    'cardio': '#009E73',    # Bluish green
+    'all': '#F0E442',       # Yellow
+    'combined': '#D55E00',  # Vermillion
+    # Product variants (same as base)
+    'epi_product': '#56B4E9',
+    'cardio_product': '#009E73',
+    'epi+main_product': '#CC79A7',
+    'all_product': '#F0E442',
+    'main_product': '#E69F00',
+    # Summed variants (darker shades)
+    'epi_summed': '#0073A8',      # Darker blue
+    'cardio_summed': '#006B52',   # Darker green
+    'epi+main_summed': '#9F5580', # Darker purple
+    'all_summed': '#C7B800',      # Darker yellow
+    'main_summed': '#C77D00',     # Darker orange
+}
+
+
+
+def extract_prs_models_from_data(df, exclude_combined=True):
+    """
+    Dynamically extract PRS model names from dataframe columns.
     
-    if use_epi_main:
-        prs_mathods = ['main','epi+main','epi','cardio']
-    else:
-        prs_methods = ['main', 'epi', 'cardio'] 
+    Looks for *_high_risk columns to identify available PRS models.
+    Returns base model names without suffixes (e.g., 'main', 'epi_product', 'cardio_summed').
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing PRS columns
+    exclude_combined : bool, default=True
+        Whether to exclude 'combined' from the list
         
+    Returns
+    -------
+    list
+        List of PRS model names found in the data
+    """
+    prs_models = []
+    
+    # Look for _high_risk columns
+    high_risk_cols = [col for col in df.columns if col.endswith('_high_risk')]
+    
+    for col in high_risk_cols:
+        model_name = col.replace('_high_risk', '')
+        # Exclude combined, any, and all models
+        if exclude_combined and 'combined' in model_name.lower():
+            continue
+        if model_name.lower() in ['any', 'all']:
+            continue
+        prs_models.append(model_name)
+    
+    # If no _high_risk columns found, try extracting from scaled_prs_ or bin_ columns
+    if not prs_models:
+        for col in df.columns:
+            if col.startswith('scaled_prs_'):
+                model_name = col.replace('scaled_prs_', '')
+                if 'threshold' not in model_name:
+                    if exclude_combined and 'combined' in model_name.lower():
+                        continue
+                    prs_models.append(model_name)
+            elif col.startswith('bin_'):
+                model_name = col.replace('bin_', '')
+                if exclude_combined and 'combined' in model_name.lower():
+                    continue
+                prs_models.append(model_name)
+    
+    # Remove duplicates and sort
+    prs_models = sorted(set(prs_models))
+    
+    return prs_models
+
+
+def extract_base_cohorts_from_models(prs_models):
+    """
+    Extract cohort names from PRS model names, keeping product/summed as separate cohorts.
+    
+    For stacked bars, we want each variant as its own cohort (e.g., 'epi_product' and 
+    'epi_summed' stay separate, not grouped under 'epi').
+    
+    Parameters
+    ----------
+    prs_models : list
+        List of PRS model names (e.g., ['main', 'epi_product', 'cardio_summed'])
+        
+    Returns
+    -------
+    dict
+        Dictionary with full model names as keys, empty lists as values
+        e.g., {'main': [], 'epi_product': [], 'epi_summed': [], 'cardio_product': [], 'cardio_summed': []}
+    """
+    cohorts = []
+    
+    for model in prs_models:
+        # Skip compound models with '+' 
+        if '+' in model:
+            continue
+        
+        # Keep the full model name (including _product/_summed suffixes)
+        cohorts.append(model)
+    
+    # Create dictionary with empty lists
+    return {cohort: [] for cohort in sorted(cohorts)}
+
+
+def create_sankey_plot_clinical_data(df, figPath, use_epi_main=False):
+    
+    # Dynamically extract PRS models from the data
+    prs_methods = extract_prs_models_from_data(df, exclude_combined=True)
+    
+    # Legacy parameter for backward compatibility
+    if not use_epi_main:
+        # Filter out models containing 'epi+main' or '+' compounds if use_epi_main is False
+        prs_methods = [m for m in prs_methods if '+' not in m]
+    
+    if not prs_methods:
+        print("WARNING: No PRS models found in data")
+        return
+    
+    print(f"Using PRS methods: {prs_methods}")
     print(f"Total holdout samples: {len(df)}")
     print(f"Cases in holdout: {df['PHENOTYPE'].sum()}")
     
@@ -139,13 +257,13 @@ def create_sankey_plot_clinical_data(df,figPath,use_epi_main=False):
                 
             # Set y position and color
             if 'CARDIO' in label:
-                node_colors.append(COHORT_COLORS['cardio'])
+                node_colors.append(COHORT_COLORS_EXTENDED['cardio'])
                 node_y.append(0.1)  # Top
             elif 'EPI' in label and 'main' not in label.lower():
-                node_colors.append(COHORT_COLORS['epi'])
+                node_colors.append(COHORT_COLORS_EXTENDED['epi'])
                 node_y.append(0.4)  # Middle
             elif 'MAIN' in label:
-                node_colors.append(COHORT_COLORS['main'])
+                node_colors.append(COHORT_COLORS_EXTENDED['main'])
                 node_y.append(0.7)  # Bottom
             elif 'Combined Low' in label:
                 node_colors.append('#999999')  # Gray for combined low risk
@@ -225,26 +343,26 @@ def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_lin
     Create NRI bar chart showing correct reclassification for cases and controls
     across multiple clinical variables.
     
-    Clinical measures: 1=Low Risk, 0=High Risk
-    PRS: 1=High Risk, 0=Low Risk
+    Clinical measures: 0=Low Risk, 1=High Risk
+    PRS: 0=Low Risk, 1=High Risk
     
     When prs_col contains 'combined', creates stacked bars showing the contribution
     of each cohort (main, epi, cardio) to NRI for cases and controls separately.
     
     For each clinical variable:
-    - Controls: Count those moved from high risk (0) to low risk (0) by PRS
-        (i.e., clinical says high risk [0], PRS correctly says low risk [0])
-    - Cases: Count those moved from low risk (1) to high risk (1) by PRS
-        (i.e., clinical says low risk [1], PRS correctly says high risk [1])
+    - Controls: Count those moved from clinical high risk (1) to PRS low risk (0)
+        (i.e., clinical says high risk [1], PRS correctly says low risk [0])
+    - Cases: Count those moved from clinical low risk (0) to PRS high risk (1)
+        (i.e., clinical says low risk [0], PRS correctly says high risk [1])
     
     Parameters:
     -----------
     df : pandas.DataFrame
-            DataFrame with 'PHENOTYPE' column (1=case, 0=control)
+            DataFrame with 'PHENOTYPE' column (1=case, 2=control)
     clinical_vars : list of clinical var str
-            list clinical risk category column names (1=low risk, 0=high risk)
+            list clinical risk category column names (0=low risk, 1=high risk)
     prs_col : str
-            Column name for PRS risk categories (1=high risk, 0=low risk)
+            Column name for PRS risk categories (0=low risk, 1=high risk)
     show_total_as_line : bool, default=False
             Ignored when prs_col contains 'combined'
             
@@ -272,7 +390,7 @@ def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_lin
         # =====================================================================
         reclass_controls = pd.crosstab(
             df.loc[controls, risk_cat1],  # Clinical risk (rows): 0=low, 1=high
-            df.loc[controls, prs_col],     # PRS risk (columns): 1=high, 0=low
+            df.loc[controls, prs_col],     # PRS risk (columns): 0=low, 1=high
             rownames=[risk_cat1],
             colnames=[prs_col]
         )
@@ -291,11 +409,11 @@ def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_lin
         nri_controls = controls_correct / len(df[controls]) if len(df[controls]) > 0 else 0
         
         # =====================================================================
-        # CASES: Clinical says LOW risk (1), want PRS to correctly say HIGH risk (1)
+        # CASES: Clinical says LOW risk (0), want PRS to correctly say HIGH risk (1)
         # =====================================================================
         reclass_cases = pd.crosstab(
-            df.loc[cases, risk_cat1],      # Clinical risk (rows): 1=low, 0=high
-            df.loc[cases, prs_col],         # PRS risk (columns): 1=high, 0=low
+            df.loc[cases, risk_cat1],      # Clinical risk (rows): 0=low, 1=high
+            df.loc[cases, prs_col],         # PRS risk (columns): 0=low, 1=high
             rownames=[risk_cat1],
             colnames=[prs_col]
         )
@@ -308,7 +426,7 @@ def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_lin
             cases_correct = 0
             
         # Total cases at low risk in clinical measure (clinical = 0)
-        total_cases_low = reclass_cases.loc[1].sum() if 0 in reclass_cases.index else 0
+        total_cases_low = reclass_cases.loc[0].sum() if 0 in reclass_cases.index else 0
         
         # NRI+ for cases (proportion correctly moved to high risk)
         nri_cases = cases_correct / len(df[cases]) if len(df[cases]) > 0 else 0
@@ -318,67 +436,93 @@ def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_lin
         # =====================================================================
         cohort_nri = {}
         if is_combined:
+            # ── Dynamically discover available PRS models - keep as separate cohorts ──
+            # Extract all available PRS models from the data
+            available_models = extract_prs_models_from_data(df, exclude_combined=True)
             
+            # Build cohort groups - each model is its own cohort now
+            base_groups = extract_base_cohorts_from_models(available_models)
             
-            # Derive individual PRS column names
-            main_col = prs_col.replace('combined', 'main')
-            epi_col = prs_col.replace('combined', 'epi')
-            cardio_col = prs_col.replace('combined', 'cardio')
-            
-            # For CASES: Clinical LOW (0) → PRS HIGH (1)
-            # Identify which cohort flagged each correctly reclassified case
-            cases_reclass_mask = (df[risk_cat1] == 0) & (df[prs_col] == 1) & cases
-            
-            # Priority: main > epi > cardio
-            cases_main = ((df[main_col] == 1) & cases_reclass_mask).sum()
-            cases_epi = ((df[epi_col] == 1) & cases_reclass_mask & (df[main_col] == 0)).sum()
-            cases_cardio = ((df[cardio_col] == 1) & cases_reclass_mask & 
-                           (df[main_col] == 0) & (df[epi_col] == 0)).sum()
-            
-            # For CONTROLS: Clinical HIGH (1) → PRS LOW (0)
-            # These controls are NOT flagged by any PRS (all PRSs agree = low risk)
-            # We'll distribute them proportionally based on overall cohort sizes
-            controls_reclass_mask = (df[risk_cat1] == 1) & (df[prs_col] == 0) & controls
-            controls_reclass_total = controls_reclass_mask.sum()
-            
-#           # Priority: main > epi > cardio
-#           controls_main = ((df[main_col] == 0) & controls_reclass_mask).sum()
-#           controls_epi = ((df[epi_col] == 0) & controls_reclass_mask & (df[main_col] == 1)).sum()
-#           controls_cardio = ((df[cardio_col] == 0) & controls_reclass_mask & 
-#                          (df[main_col] == 1) & (df[epi_col] == 1)).sum()
-            
-            
-            # Get overall cohort sizes for proportional attribution
-            total_main = (df[main_col] == 1).sum()
-            total_epi = (df[epi_col] == 1).sum()
-            total_cardio = (df[cardio_col] == 1).sum()
-            total_all = total_main + total_epi + total_cardio
-            
-            if total_all > 0:
-                controls_main = controls_reclass_total * (total_main / total_all)
-                controls_epi = controls_reclass_total * (total_epi / total_all)
-                controls_cardio = controls_reclass_total * (total_cardio / total_all)
-            else:
-                controls_main = controls_epi = controls_cardio = 0
+            # Populate groups with their corresponding _high_risk columns using EXACT matching
+            for col in df.columns:
+                if not col.endswith('_high_risk') or 'combined' in col:
+                    continue
+                model_name = col.replace('_high_risk', '')   # e.g. 'epi_product'
                 
-            # Calculate NRI components by cohort
-            n_cases = len(df[cases])
-            n_controls = len(df[controls])
+                # Exact match only (no prefix matching)
+                if model_name in base_groups:
+                    base_groups[model_name].append(col)
             
-            cohort_nri = {
-                'cases_main': cases_main / n_cases if n_cases > 0 else 0,
-                'cases_epi': cases_epi / n_cases if n_cases > 0 else 0,
-                'cases_cardio': cases_cardio / n_cases if n_cases > 0 else 0,
-                'cases_main_n': cases_main,
-                'cases_epi_n': cases_epi,
-                'cases_cardio_n': cases_cardio,
-                'controls_main': controls_main / n_controls if n_controls > 0 else 0,
-                'controls_epi': controls_epi / n_controls if n_controls > 0 else 0,
-                'controls_cardio': controls_cardio / n_controls if n_controls > 0 else 0,
-                'controls_main_n': int(controls_main),
-                'controls_epi_n': int(controls_epi),
-                'controls_cardio_n': int(controls_cardio)
-            }
+            # Define priority order for stacking (highest to lowest priority)
+            # Each case is counted only once, attributed to highest-priority cohort
+            priority_order = ['main', 'epi_product', 'epi_summed', 'cardio_product', 'cardio_summed']
+            
+            # Sort cohorts by priority (models not in priority_order go at the end alphabetically)
+            sorted_cohorts = []
+            for p in priority_order:
+                if p in base_groups:
+                    sorted_cohorts.append(p)
+            # Add any remaining cohorts not in priority list
+            for cohort in sorted(base_groups.keys()):
+                if cohort not in sorted_cohorts:
+                    sorted_cohorts.append(cohort)
+
+            def _any_high(group_cols):
+                if not group_cols:
+                    return pd.Series(False, index=df.index)
+                return df[group_cols].max(axis=1).astype(bool)
+
+            # Create cohort-specific high-risk masks using priority order
+            cohort_highs = {}
+            for cohort_name in sorted_cohorts:
+                cohort_highs[cohort_name] = _any_high(base_groups[cohort_name])
+
+            # For CASES: Clinical LOW (0) → PRS HIGH (1)
+            cases_reclass_mask = (df[risk_cat1] == 0) & (df[prs_col] == 1) & cases
+
+            # Apply priority: first cohort in priority order gets highest priority
+            # Build exclusion masks for priority-based attribution (ensures each case counted ONCE)
+            cases_by_cohort = {}
+            exclusion_mask = pd.Series(False, index=df.index)
+            
+            for cohort_name in sorted_cohorts:
+                cohort_high = cohort_highs[cohort_name]
+                cases_by_cohort[cohort_name] = (cohort_high & cases_reclass_mask & ~exclusion_mask).sum()
+                exclusion_mask = exclusion_mask | cohort_high
+
+            # For CONTROLS: proportional attribution by cohort size
+            controls_reclass_mask  = (df[risk_cat1] == 1) & (df[prs_col] == 0) & controls
+            controls_reclass_total = controls_reclass_mask.sum()
+
+            # Calculate total for each cohort (using priority order for consistency)
+            totals_by_cohort = {cohort: cohort_highs[cohort].sum() 
+                               for cohort in sorted_cohorts}
+            total_all = sum(totals_by_cohort.values())
+
+            # Proportional attribution for controls
+            controls_by_cohort = {}
+            if total_all > 0:
+                for cohort_name in sorted_cohorts:
+                    controls_by_cohort[cohort_name] = (
+                        controls_reclass_total * (totals_by_cohort[cohort_name] / total_all)
+                    )
+            else:
+                controls_by_cohort = {cohort: 0 for cohort in sorted_cohorts}
+
+            n_cases    = len(df[cases])
+            n_controls = len(df[controls])
+
+            # Build cohort_nri dynamically using priority order
+            cohort_nri = {}
+            for cohort_name in sorted_cohorts:
+                cohort_nri[f'cases_{cohort_name}'] = (
+                    cases_by_cohort[cohort_name] / n_cases if n_cases > 0 else 0
+                )
+                cohort_nri[f'cases_{cohort_name}_n'] = cases_by_cohort[cohort_name]
+                cohort_nri[f'controls_{cohort_name}'] = (
+                    controls_by_cohort[cohort_name] / n_controls if n_controls > 0 else 0
+                )
+                cohort_nri[f'controls_{cohort_name}_n'] = int(controls_by_cohort[cohort_name])
             
         # =====================================================================
         # Store results
@@ -418,118 +562,101 @@ def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_lin
     
     if is_combined:
         # =====================================================================
-        # STACKED BARS: Cases and Controls NRI by cohort
+        # STACKED BARS: Cases and Controls NRI by cohort (DYNAMIC)
         # =====================================================================
         width = 0.35
         
-#       cohort_colors = {
-#           'main': '#E74C3C',      # Red
-#           'epi': '#3498DB',       # Blue
-#           'cardio': '#F39C12'     # Orange
-#       }
+        # Detect which cohorts are in nri_summary and preserve priority order
+        cohort_cols = [col for col in nri_summary.columns if col.startswith('cases_') and not col.endswith('_n')]
+        all_cohorts = [col.replace('cases_', '') for col in cohort_cols]
         
-        # CASES STACKED BAR (left)
-        bars_cases_main = ax.bar(
-            x - width/2,
-            nri_summary['cases_main'],
-            width,
-            label=f'Main PRS',
-            color=COHORT_COLORS['main'],
-            alpha=0.85,
-            edgecolor='black',
-            linewidth=0.5
-        )
+        # Apply priority ordering to cohorts
+        priority_order = ['main', 'epi_product', 'epi_summed', 'cardio_product', 'cardio_summed']
+        cohorts = []
+        for p in priority_order:
+            if p in all_cohorts:
+                cohorts.append(p)
+        # Add any remaining cohorts not in priority list (alphabetically)
+        for c in sorted(all_cohorts):
+            if c not in cohorts:
+                cohorts.append(c)
         
-        bars_cases_epi = ax.bar(
-            x - width/2,
-            nri_summary['cases_epi'],
-            width,
-            bottom=nri_summary['cases_main'],
-            label=f'Epistatic PRS',
-            color=COHORT_COLORS['epi'],
-            alpha=0.85,
-            edgecolor='black',
-            linewidth=0.5
-        )
-        
-        bars_cases_cardio = ax.bar(
-            x - width/2,
-            nri_summary['cases_cardio'],
-            width,
-            bottom=nri_summary['cases_main'] + nri_summary['cases_epi'],
-            label=f'Cardio PRS',
-            color=COHORT_COLORS['cardio'],
-            alpha=0.85,
-            edgecolor='black',
-            linewidth=0.5
-        )
-        
-        # CONTROLS STACKED BAR (right)
-        bars_controls_main = ax.bar(
-            x + width/2,
-            nri_summary['controls_main'],
-            width,
-            color=COHORT_COLORS['main'],
-            alpha=0.85,
-            edgecolor='black',
-            linewidth=0.5
-        )
-        
-        bars_controls_epi = ax.bar(
-            x + width/2,
-            nri_summary['controls_epi'],
-            width,
-            bottom=nri_summary['controls_main'],
-            color=COHORT_COLORS['epi'],
-            alpha=0.85,
-            edgecolor='black',
-            linewidth=0.5
-        )
-        
-        
-        bars_controls_cardio = ax.bar(
-            x + width/2,
-            nri_summary['controls_cardio'],
-            width,
-            bottom=nri_summary['controls_main'] + nri_summary['controls_epi'],
-            color=COHORT_COLORS['cardio'],
-            alpha=0.85,
-            edgecolor='black',
-            linewidth=0.5
-        )
-        
-        # Add total NRI labels above each bar
-        for i in range(len(x)):
-            # Cases total
-            cases_total = nri_summary.iloc[i]['nri_cases']
-            ax.text(
-                x[i] - width/2, cases_total + 0.01,
-                f'NRI+: {cases_total:.3f}',
-                ha='center', va='bottom',
-                fontsize=9, fontweight='bold',
-                color=colors['cases']
-            )
+        if not cohorts:
+            print("WARNING: No cohort-specific data found for combined PRS")
+            # Fall back to non-stacked layout
+            is_combined = False
+        else:
+            print(f"Creating stacked bars for cohorts: {cohorts}")
             
-            # Controls total
-            controls_total = nri_summary.iloc[i]['nri_controls']
-            ax.text(
-                x[i] + width/2, controls_total + 0.01,
-                f'NRI-: {controls_total:.3f}',
-                ha='center', va='bottom',
-                fontsize=9, fontweight='bold',
-                color=colors['controls']
-            )
+            # CASES STACKED BAR (left) - build dynamically
+            cases_bars = {}
+            bottom_cases = pd.Series(0, index=nri_summary.index)
             
-        # Add "Cases" and "Controls" labels
-        y_pos = ax.get_ylim()[1] * 0.95
-#       ax.text(x[len(x)//2] - width/2, y_pos, 'Cases (Clinical Low→PRS High)',
-#              ha='center', va='top', fontsize=11, fontweight='bold',
-#              bbox=dict(boxstyle='round', facecolor=colors['cases'], alpha=0.3))
-#       ax.text(x[len(x)//2] + width/2, y_pos, 'Controls (Clinical High→PRS Low)',
-#              ha='center', va='top', fontsize=11, fontweight='bold',
-#              bbox=dict(boxstyle='round', facecolor=colors['controls'], alpha=0.3))
-        
-    else:
+            for cohort in cohorts:
+                cases_col = f'cases_{cohort}'
+                if cases_col in nri_summary.columns:
+                    # Get color for this cohort (fallback to gray if not found)
+                    color = COHORT_COLORS_EXTENDED.get(cohort, '#CCCCCC')
+                    
+                    bars = ax.bar(
+                        x - width/2,
+                        nri_summary[cases_col],
+                        width,
+                        bottom=bottom_cases,
+                        label=f'{cohort.capitalize()} PRS' if cohort == cohorts[0] else None,
+                        color=color,
+                        alpha=0.85,
+                        edgecolor='black',
+                        linewidth=0.5
+                    )
+                    cases_bars[cohort] = bars
+                    bottom_cases = bottom_cases + nri_summary[cases_col]
+            
+            # CONTROLS STACKED BAR (right) - build dynamically
+            controls_bars = {}
+            bottom_controls = pd.Series(0, index=nri_summary.index)
+            
+            for cohort in cohorts:
+                controls_col = f'controls_{cohort}'
+                if controls_col in nri_summary.columns:
+                    color = COHORT_COLORS_EXTENDED.get(cohort, '#CCCCCC')
+                    
+                    bars = ax.bar(
+                        x + width/2,
+                        nri_summary[controls_col],
+                        width,
+                        bottom=bottom_controls,
+                        color=color,
+                        alpha=0.85,
+                        edgecolor='black',
+                        linewidth=0.5
+                    )
+                    controls_bars[cohort] = bars
+                    bottom_controls = bottom_controls + nri_summary[controls_col]
+            
+            # Add total NRI labels above each bar
+            for i in range(len(x)):
+                # Cases total
+                cases_total = nri_summary.iloc[i]['nri_cases']
+                ax.text(
+                    x[i] - width/2, cases_total + 0.01,
+                    f'NRI+: {cases_total:.3f}',
+                    ha='center', va='bottom',
+                    fontsize=9, fontweight='bold',
+                    color=colors['cases']
+                )
+                
+                # Controls total
+                controls_total = nri_summary.iloc[i]['nri_controls']
+                ax.text(
+                    x[i] + width/2, controls_total + 0.01,
+                    f'NRI-: {controls_total:.3f}',
+                    ha='center', va='bottom',
+                    fontsize=9, fontweight='bold',
+                    color=colors['controls']
+                )
+    
+    if not is_combined:
         # =====================================================================
         # ORIGINAL NON-STACKED LAYOUT
         # =====================================================================
@@ -941,7 +1068,7 @@ def convert_to_binary(df, df_validation, clinical_measures, thresholds=None, hig
     return df_result, df_result_validation, used_thresholds, determined_directions
 
 
-def calculate_auc(dfFull, prs_method, clinical_measures):
+def calculate_auc(dfFull, prs_method, prs_binary, clinical_measures):
     """
     Calculate Area Under the ROC Curve (AUC) for different PRS methods against clinical measures.
     
@@ -984,14 +1111,15 @@ def calculate_auc(dfFull, prs_method, clinical_measures):
             resultsAllPRS.loc[prs_method, measure] = np.nan
             print(f"Error calculating AUC for {prs_method} vs low risk {measure}: {e}")
             
+#       try:
+#           if 'scaled_prs' in prs_method:
+#               threshold = df[prs_method].quantile(.80)
+#               df['high_prs'] = (df[prs_method] >= threshold).astype(int)
+#           else:
+#               df['high_prs'] = (df[prs_method] >= 800).astype(int)
+        dfHigh = df[df[prs_binary] == 1]
+        auc = roc_auc_score(dfHigh['PHENOTYPE'], dfHigh[prs_method])
         try:
-            if 'scaled_prs' in prs_method:
-                threshold = df[prs_method].quantile(.80)
-                df['high_prs'] = (df[prs_method] >= threshold).astype(int)
-            else:
-                df['high_prs'] = (df[prs_method] >= 800).astype(int)
-            dfHigh = df[df['high_prs'] == 1]
-            auc = roc_auc_score(dfHigh['PHENOTYPE'], dfHigh[prs_method])
             resultsTop20PRS.loc[prs_method, measure] = auc
             
         except Exception as e:
@@ -1001,70 +1129,201 @@ def calculate_auc(dfFull, prs_method, clinical_measures):
     return resultsAllPRS, resultsTop20PRS
 
 
-def calculate_nri(df, prs_method1, prs_method2,clinical=True):
+def _count_reclassifications(old_risk: pd.Series, new_risk: pd.Series,
+                             is_case: pd.Series) -> dict:
     """
-    Calculate Net Reclassification Improvement (NRI) comparing two PRS methods.
-    
-    Parameters:
-    -----------
-    df : pandas.DataFrame
-        DataFrame containing PRS scores and clinical outcome measures
+    Core reclassification counter shared by calculate_nri and
+    net_reclassification_index.
+
+    Both caller functions resolve their inputs to binary (0/1 or bool) series
+    before calling this helper, keeping counting logic in one place.
+
+    Parameters
+    ----------
+    old_risk : pd.Series
+        Binary (0/1 or bool) high-risk classification under the reference model.
+    new_risk : pd.Series
+        Binary (0/1 or bool) high-risk classification under the new model.
+        Must share the same index as old_risk.
+    is_case : pd.Series
+        Boolean mask; True for cases (events), False for controls (non-events).
+        Must share the same index as old_risk.
+
+    Returns
+    -------
+    dict with keys:
+        up_cases, down_cases       - raw counts for events
+        up_controls, down_controls - raw counts for non-events
+        n_cases, n_controls        - group sizes
+    """
+    is_control = ~is_case
+
+    # Events: moving to high risk is good (cases should be flagged)
+    up_cases   = int(np.sum(~old_risk[is_case]  &  new_risk[is_case]))   # Low->High (good)
+    down_cases = int(np.sum( old_risk[is_case]  & ~new_risk[is_case]))   # High->Low (bad)
+
+    # Non-events: moving to low risk is good (controls should not be flagged)
+    up_controls   = int(np.sum(~old_risk[is_control] &  new_risk[is_control]))  # Low->High (bad)
+    down_controls = int(np.sum( old_risk[is_control] & ~new_risk[is_control]))  # High->Low (good)
+
+    return {
+        'up_cases':      up_cases,
+        'down_cases':    down_cases,
+        'up_controls':   up_controls,
+        'down_controls': down_controls,
+        'n_cases':       int(is_case.sum()),
+        'n_controls':    int(is_control.sum()),
+    }
+
+
+def calculate_nri(df, prs_method1, prs_method2, clinical=True):
+    """
+    Calculate Net Reclassification Improvement (NRI) comparing two binary risk
+    classifications.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain 'PHENOTYPE' (1=case, 0=control) and both method columns.
     prs_method1 : str
-        Column name for the first PRS method (reference)
+        Column name for the reference classification (binary 0/1).
     prs_method2 : str
-        Column name for the second PRS method (new)
-    clinical_measure : str
-        Column name for the clinical outcome measure (binary, 0/1)
+        Column name for the new classification (binary 0/1).
     clinical : bool
-        True is clinical measure is compared to PRS
-        
-    Returns:
-    --------
-    tuple
-        (NRI, NRI for events, NRI for non-events)
+        When True, validates that prs_method1 is binary before proceeding.
+
+    Returns
+    -------
+    tuple : (nri, nri_events, nri_non_events)
     """
-    # Categorize: Top 20% as "High Risk", others as "Low Risk"
-    # if using centile_bin, high risk column already created
-
-    # Extract events and non-events
-    events = df['PHENOTYPE'] == 1
-    non_events = df['PHENOTYPE'] == 0
-    
     if clinical:
-        # Ensure the clinical measure is binary
-        if not set(df[prs_method1].unique()).issubset({0, 1}):
-            raise ValueError(f"Clinical measure {clinical_measure} must be binary (0/1)")
+        if not set(df[prs_method1].dropna().unique()).issubset({0, 1}):
+            raise ValueError(
+                f"Column '{prs_method1}' must be binary (0/1) when clinical=True. "
+                f"Found values: {sorted(df[prs_method1].dropna().unique())}"
+            )
 
-#           
-#       # Extract events and non-events
-#       events = df[prs_method1] == 1
-#       non_events = df[prs_method1] == 0
-#       
-#   else:
-#       # Calculate NRI for all pairs of PRS methods
-        
-    risk_cat1 = df[prs_method1]
-    risk_cat2 = df[prs_method2]
-    
+    counts = _count_reclassifications(
+        old_risk=df[prs_method1].astype(bool),
+        new_risk=df[prs_method2].astype(bool),
+        is_case=df['PHENOTYPE'] == 1,
+    )
 
-    
-    # Calculate proportions of up-classifications and down-classifications
-    
-    #cases going from low risk clinical to high risk prs (low risk clinical = 0, high risk prs = 1)
-    up_events = np.mean(risk_cat2[events] > risk_cat1[events])
-    #cases going from high_risk prs to low-risk clinical measure
-    down_events = np.mean(risk_cat2[events] < risk_cat1[events])
-    
-    #controls going from high risk clinical to low risk prs (low risk clinical = 0, high risk prs = 1)
-    up_non_events = np.mean(risk_cat2[non_events] > risk_cat1[non_events])
-    down_non_events = np.mean(risk_cat2[non_events] < risk_cat1[non_events])
-    
-    # Calculate NRI components
-    nri_events = up_events - down_events
-    nri_non_events = down_non_events - up_non_events
-    nri = nri_events + nri_non_events
-        
+    n_cases    = counts['n_cases']
+    n_controls = counts['n_controls']
+
+    # NRI components expressed as proportions (Pencina 2008)
+    nri_events     = (counts['up_cases']      - counts['down_cases'])    / n_cases
+    nri_non_events = (counts['down_controls'] - counts['up_controls'])   / n_controls
+    nri            = nri_events + nri_non_events
+
     return nri, nri_events, nri_non_events
+
+def net_reclassification_index(data: pd.DataFrame, prs1_name: str,
+                               prs2_name: str, threshold: int,
+                               phenotype_col: str = 'PHENOTYPE') -> dict:
+    """
+    Calculate Net Reclassification Index (NRI) and Integrated Discrimination
+    Improvement (IDI) with full statistics (SE, CI, p-value).
+
+    Delegates reclassification counting to _count_reclassifications(), the same
+    helper used by calculate_nri(), so both functions are guaranteed to apply
+    identical counting logic.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Must contain '{phenotype_col}' (1=case, 0=control), 'bin_{prs1_name}',
+        'bin_{prs2_name}', 'scaled_prs_{prs1_name}', 'scaled_prs_{prs2_name}'.
+    prs1_name : str
+        Base name of the reference PRS model (e.g. 'main').
+    prs2_name : str
+        Base name of the new PRS model to evaluate.
+    threshold : int
+        Inclusive lower bound for high-risk classification on the bin_ columns.
+        Individuals with bin >= threshold are classed as high risk.
+    phenotype_col : str
+        Column name for the outcome; expected coding is 1=case, 0=control.
+
+    Returns
+    -------
+    dict with keys: test, statistic, pvalue, conf_int, nri_events,
+                    nri_non_events, idi
+    """
+    print(f"\n{'='*70}")
+    print("Net Reclassification Index (NRI)")
+    print(f"{'='*70}")
+
+    is_case = data[phenotype_col] == 1
+
+    # Resolve bin_ columns to boolean high-risk flags using inclusive >= threshold.
+    # Using >= ensures the boundary bin is not silently dropped into the low-risk
+    # group (old code used strict >, which excluded the boundary value).
+    old_risk = (data[f'bin_{prs1_name}'] >= threshold)
+    new_risk = (data[f'bin_{prs2_name}'] >= threshold)
+
+    counts = _count_reclassifications(old_risk, new_risk, is_case)
+
+    up_cases      = counts['up_cases']
+    down_cases    = counts['down_cases']
+    up_controls   = counts['up_controls']
+    down_controls = counts['down_controls']
+    n_cases       = counts['n_cases']
+    n_controls    = counts['n_controls']
+
+    # NRI components (Pencina et al. 2008, Stat Med 27:157-172)
+    nri_events     = (up_cases      - down_cases)    / n_cases
+    nri_non_events = (down_controls - up_controls)   / n_controls
+    nri            = nri_events + nri_non_events
+
+    # Standard error: SE(NRI+) = sqrt((up + down) / n^2) = sqrt(up + down) / n
+    se_events     = np.sqrt(up_cases    + down_cases)    / n_cases
+    se_non_events = np.sqrt(up_controls + down_controls) / n_controls
+    se_nri        = np.sqrt(se_events**2 + se_non_events**2)
+
+    z_stat  = nri / se_nri if se_nri > 0 else np.nan
+    p_value = 2 * (1 - norm.cdf(abs(z_stat))) if not np.isnan(z_stat) else np.nan
+
+    ci_low  = nri - 1.96 * se_nri
+    ci_high = nri + 1.96 * se_nri
+
+    print(f"NRI (Events): {nri_events:.3f}")
+    print(f"  Cases: {up_cases} moved up, {down_cases} moved down")
+    print(f"NRI (Non-events): {nri_non_events:.3f}")
+    print(f"  Controls: {down_controls} moved down, {up_controls} moved up")
+    print(f"\nTotal NRI: {nri:.3f}")
+    print(f"95% CI: [{ci_low:.3f}, {ci_high:.3f}]")
+    print(f"z-statistic: {z_stat:.3f}")
+    print(f"P-value: {p_value:.4e}")
+
+    if p_value < 0.05:
+        if nri > 0:
+            print(f"   -> {prs2_name} provides significant improvement in reclassification")
+        else:
+            print(f"   -> {prs1_name} provides better reclassification")
+    else:
+        print(f"   -> No significant difference in reclassification")
+
+    # IDI: improvement in discrimination slope (Pencina 2008)
+    # IDI = (mean_cases_new - mean_controls_new) - (mean_cases_old - mean_controls_old)
+    mean_prs1_cases    = data.loc[is_case,  f'scaled_prs_{prs1_name}'].mean()
+    mean_prs1_controls = data.loc[~is_case, f'scaled_prs_{prs1_name}'].mean()
+    mean_prs2_cases    = data.loc[is_case,  f'scaled_prs_{prs2_name}'].mean()
+    mean_prs2_controls = data.loc[~is_case, f'scaled_prs_{prs2_name}'].mean()
+
+    idi = (mean_prs2_cases - mean_prs2_controls) - (mean_prs1_cases - mean_prs1_controls)
+    print(f"\nIDI (Integrated Discrimination Improvement): {idi:.4f}")
+
+    return {
+        'test':           'NRI',
+        'statistic':      nri,
+        'pvalue':         p_value,
+        'conf_int':       (ci_low, ci_high),
+        'nri_events':     nri_events,
+        'nri_non_events': nri_non_events,
+        'idi':            idi,
+    }
+
 
 def calculate_calibration_comparing_prs(df,prs_method1,prs_method2,n_bins=10):
     """
@@ -1468,10 +1727,14 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, prs_method
     results['nri'] = {}
     for i, prs1 in enumerate(prs_methods):
         if 'scaled_prs' in prs1:
-            df_copy[f'{prs1}_binary'] = df[prs1].quantile(0.8).astype(int)
+            threshold = df_copy[prs1].quantile(0.80)
+            df_copy[f'{prs1}_binary'] = (df_copy[prs1] >= threshold).astype(int)
             prs_col1 = f'{prs1}_binary'
         else:
-            base_prs1 = prs1.replace('_centile_bin','')
+            if prs1.startswith('bin_'):
+                base_prs1 = prs1[4:]                       # 'bin_main' → 'main'
+            else:
+                base_prs1 = prs1.replace('_centile_bin', '')  # old naming, backward compat
             prs_col1 = f'{base_prs1}_high_risk'
         
         results['nri'][prs1] = {}
@@ -1520,48 +1783,37 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, prs_method
             
             
         
-#       if prs1 == 'combined_centile_bin':
-        fig,nri_summary = plot_nri_from_reclassification(df_copy,binary_measures,prs_col1)
-        plt.savefig(f'{figPath}/nri_comparison_clinical_vars_bar_chart.{prs1}.png', dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        
+    #       if prs1 == 'combined_centile_bin':
+            fig,nri_summary = plot_nri_from_reclassification(df_copy,binary_measures,prs_col1)
+            plt.savefig(f'{figPath}/nri_comparison_clinical_vars_bar_chart.{prs1}.png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+            
         # Calculate AUC for all methods and binary measures
-        resultsLowClinicalTemp, resultsLowClinicalHighPRSTemp = calculate_auc(df_copy, prs1, binary_measures)
+        resultsLowClinicalTemp, resultsLowClinicalHighPRSTemp = calculate_auc(df_copy, prs1, prs_col1, binary_measures)
         
         resultsLowClinical = pd.concat([resultsLowClinical,resultsLowClinicalTemp],ignore_index=False)
         resultsLowClinicalHighPRS = pd.concat([resultsLowClinicalHighPRS,resultsLowClinicalHighPRSTemp],ignore_index=False)
         
+        
+        results['auc_low_clinical'] = resultsLowClinical
+        results['auc_low_clinical_high_prs'] = resultsLowClinicalHighPRS 
+        
         for j, prs2 in enumerate(prs_methods):
-
             if i >= j:  # Skip self-comparisons and repeated comparisons
                 continue
-            
-            if 'scaled_prs' in prs2:
-                df_copy[f'{prs2}_binary'] = df[prs2].quantile(0.8).astype(int)
-                prs_col2 = f'{prs2}_binary'
-            else:
-                base_prs2 = prs2.replace('_centile_bin','')
-                prs_col2 = f'{base_prs2}_high_risk'
-    
-            key = f"{prs1}_vs_{prs2}"
-            results['nri'][key] = {}
-    
-    
-            #get the calibration key in for comparing prs calculations
-#                   results['calibration'][key] = {}
-    
             try:
                 if 'scaled_prs' in prs2:
-                    df_copy[f'{prs1}_binary'] = df[prs1].quantile(0.8).astype(int)
-                    df_copy[f'{prs2}_binary'] = df[prs2].quantile(0.8).astype(int)
-                    prs_col1 = f'{prs1}_binary'
-                    prs_col2 = f'{prs2}_binary'
-                    
+                    threshold = df_copy[prs2].quantile(0.80)
+                    df_copy[f'{prs2}_binary'] = (df_copy[prs2] >= threshold).astype(int)
+                    prs_col1 = f'{prs2}_binary'
+
                 else:
-                    base_prs1 = prs1.replace('_centile_bin','')
-                    prs_col1 = f'{base_prs1}_high_risk'
                     base_prs2 = prs2.replace('_centile_bin','')
                     prs_col2 = f'{base_prs2}_high_risk'
+        
+                key = f"{prs1}_vs_{prs2}"
+                results['nri'][key] = {}
+    
 
                 nri, nri_events, nri_non_events = calculate_nri(
                     df_copy, prs_col1, prs_col2, False
@@ -1578,10 +1830,6 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, prs_method
 
             except Exception as e:
                 results['nri'][key][f'{measure}_low'] = {'error': str(e)}
-        
-    results['auc_low_clinical'] = resultsLowClinical
-    results['auc_low_clinical_high_prs'] = resultsLowClinicalHighPRS    
-    
     
     return results
 
@@ -1958,8 +2206,24 @@ def visualize_idi(p_clinical, p_combined, y_validation,idi_results,clinical_mark
 
     
     
-def main(pheno,pheno_data,results_path):
-    """Run an example using simulated data to demonstrate the function"""
+def run_clinical_analysis(pheno, pheno_data, results_path, clinical_source_path=None):
+    """
+    Run clinical-measure performance analysis on the combined holdout PRS set.
+
+    Parameters
+    ----------
+    pheno : str
+        Phenotype name (e.g. 'type2Diabetes').
+    pheno_data : str
+        Root of the combinedAnalysis directory (contains scores/, figures/).
+    results_path : str
+        Broader results directory containing participant_environment.csv.
+    clinical_source_path : str, optional
+        Directory that contains clinicalEnvironmentHoldout.csv.  When None
+        (default) the function searches for the file in the sibling
+        productEpi/ and summedEpi/ sub-directories of the parent of
+        pheno_data, since combinedAnalysis does not have its own copy.
+    """
     # Generate simulated data
     figPath = f'{pheno_data}/figures/clinicalFigures'
     scoresPath = f'{pheno_data}/scores/clinicalMeasures'
@@ -1969,16 +2233,19 @@ def main(pheno,pheno_data,results_path):
     
     os.makedirs(f'{scoresPath}', exist_ok=True)
     
-    df = pd.read_csv(f'{pheno_data}/scores/combinedPRSGroups.csv')
+    df = pd.read_csv(f'{pheno_data}/scores/combinedPRSGroups.filtered.csv')
+    
+    #get the filtered models to use in analysis
+#   prs_columns = [m for m in df.columns if 'bin' in m]
 
-    validation_df = pd.read_csv(f'{pheno_data}/scores/combinedPRSGroups.holdout.csv')
+    validation_df = pd.read_csv(f'{pheno_data}/scores/combinedPRSGroups.holdout.filtered.csv')
     
     #prs columns to use in analysis
 #   prs_columns = [col for col in df.columns if 'scaled_prs' in col]
     #prs_columns = [col for col in prs_columns if 'scaled' not in col]
     
     if pheno == 'type2Diabetes':
-        clinical_columns = ['Glycated haemoglobin (HbA1c)','Body mass index (BMI)','Glucose']
+#       clinical_columns = ['Glycated haemoglobin (HbA1c)','Body mass index (BMI)','Glucose']
         # Specify custom thresholds for some measures (optional)
         clinical_thresholds = {
             'Glycated haemoglobin (HbA1c)': 41,
@@ -1987,9 +2254,28 @@ def main(pheno,pheno_data,results_path):
         }
         
     else:
-        clinical_columns = ['Basal metabolic rate','Urea','Haemoglobin concentration']
+#       clinical_columns = ['Basal metabolic rate','Urea','Haemoglobin concentration']
         clinical_thresholds = None
-        
+    
+    # Resolve the clinical column source file.
+    # combinedAnalysis does not contain clinicalEnvironmentHoldout.csv;
+    # it is identical across productEpi and summedEpi, so we locate it
+    # in one of those sibling directories when not supplied explicitly.
+    if clinical_source_path is None:
+        parent = os.path.dirname(os.path.abspath(pheno_data))
+        for candidate in ('productEpi', 'summedEpi'):
+            candidate_file = os.path.join(parent, candidate, 'clinicalEnvironmentHoldout.csv')
+            if os.path.exists(candidate_file):
+                clinical_source_path = candidate_file
+                print(f'  [clinical] Using clinicalEnvironmentHoldout.csv from {candidate}/')
+                break
+        if clinical_source_path is None:
+            raise FileNotFoundError(
+                'clinicalEnvironmentHoldout.csv not found in productEpi/ or summedEpi/ '
+                f'siblings of {pheno_data}.  Pass clinical_source_path= explicitly.'
+            )
+    clinical_columns = pd.read_csv(clinical_source_path, nrows=1)
+    clinical_columns = clinical_columns.set_index('IID').columns.tolist()
         
     clinical_data = pd.read_csv(f'{results_path}/participant_environment.csv',usecols=['Participant ID']+clinical_columns)
     clinical_data.rename(columns={'Participant ID':'IID'},inplace=True)
@@ -1997,7 +2283,8 @@ def main(pheno,pheno_data,results_path):
     #combine clinical data with PHENOTYPE for imputation methods
     data = df[['IID','PHENOTYPE']].merge(clinical_data, on=['IID'],how='left')
     validation_data = validation_df[['IID','PHENOTYPE']].merge(clinical_data, on=['IID'],how='left')
-        
+    
+    
     train_imputed, test_imputed = impute_clinical_data(data, validation_data, clinical_columns, 'PHENOTYPE', method='mean', visualize=False)
     
     #merge with clinical train_imputed 
@@ -2020,121 +2307,134 @@ def main(pheno,pheno_data,results_path):
     
     
 #   for item_tuple in [(df_binary_validation,'holdout'),(df_binary_test,'')]:
-    for item_tuple in [(df_binary_validation,'holdout')]:
+#   for item_tuple in [(df_binary_validation,'holdout')]:
             
         
     # Print thresholds and risk directions used
-        df_binary = item_tuple[0].copy()
-        file_ext = item_tuple[1]
-        
-        create_sankey_plot_clinical_data(df_binary,figPath,use_epi_main=False)
-        
-        for eval_type in ['centile_bin','scaled_prs']:   
-            prs_methods = [col for col in df_binary if eval_type in col]
-        
-            # Run comprehensive comparison with direction-aware threshold conversion
-            results = compare_prs_performance(
-                df_binary, clinical_columns, figPath, file_ext, prs_methods,
-                risk_thresholds=used_thresholds,
-                outcome_column='PHENOTYPE'  # Use this to help determine risk direction
-            )
-            
-
-            results['thresholds_used'] = used_thresholds
-            results['risk_directions'] = determined_directions
-            
-            print("Thresholds used for binarization:")
-            print(f'\nthresholds: {used_thresholds}')
-            
-            
-            # Print AUC results
-            print(f"\n Clinical measures for {file_ext} results")
-            print("\nAUC Results low clinical all prs:")
-            print(results['auc_low_clinical'])
-            auc_low_clinical = results['auc_low_clinical']
-    #       results['auc_low_clinical'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossPRSLowClinicalMeasure{file_ext}.csv')
-            
-            # Print AUC results
-            print("\nAUC Results low clinical high prs")
-            print(results['auc_low_clinical_high_prs'])
-            auc_low_clinical_high_prs = results['auc_low_clinical_high_prs']
-    #       results['auc_low_clinical_high_prs'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossHighPRSLowClinicalMeasure{file_ext}.csv')
-            
-            #put the auc results into a combined dataframe to save
-            clinical_auc = pd.DataFrame()
-            auc_list = [x for x in results.keys() if 'auc' in x]
-            for k in auc_list:
-                auc_df = results[k]
-                auc_df['threshold_used'] = k
-                clinical_auc = pd.concat([clinical_auc,auc_df],ignore_index=False)
-                del results[k]
-                
-            clinical_auc.reset_index(inplace=True)
-            clinical_auc.columns = ['prs_type'] + list(clinical_auc.columns[1:])
-            
-            #clinical_auc.to_csv(f"{scoresPath}/prsAUC.wrt.clinicalMeasures{file_ext}.csv",index=False)
-            
-
-            
-            
-            for measure in clinical_columns:
-                direction = "Higher values → higher risk" if results['risk_directions'][measure] else "Lower values → higher risk"
-                print(f"  {measure}: threshold = {results['thresholds_used'][measure]}, {direction}")
-                
-                # Plot risk distribution for clinical measures
-                fig = plot_risk_distribution(
-                    df_binary, 
-                    measure, 
-                    f'{measure}_binary',
-                    results['thresholds_used'][measure],
-                    higher_is_riskier=results['risk_directions'][measure]
-                )
-                plt.title(f"Distribution of {measure}")
-                fig.savefig(f'{figPath}/riskDistribution.{measure}{file_ext}.png')
-                plt.close(fig)
-            
-            
-            #put nri data into a csv
-            df_nri = pd.DataFrame()
-            for prs in results['nri'].keys():
-                prs_nri = pd.DataFrame(results['nri'][prs]).T
-                prs_nri['prs_calc'] = prs
-                prs_nri.reset_index(inplace=True)
-                prs_nri.columns = ['clinical_measure'] + list(prs_nri.columns[1:])
-                df_nri = pd.concat([df_nri,prs_nri],ignore_index=True)
-                #df_nri.to_csv(f"{scoresPath}/nri.wrt.clinicalMeasures{file_ext}.csv",index=False)
+    df_binary = df_binary_validation.copy()
+    file_ext = 'holdout'
     
+    #create_sankey_plot_clinical_data(df_binary,figPath,use_epi_main=False)
+    
+    for eval_type in ['bin', 'scaled_prs']:
+        if eval_type == 'bin':
+            # Use startswith — 'bin' substring would also match _binary clinical columns
+            prs_methods = [
+                col for col in df_binary
+                if col.startswith('bin_') or col.endswith('_centile_bin')
+            ]
+        else:
+            prs_methods = [
+                col for col in df_binary
+                if 'scaled_prs' in col and 'threshold_value' not in col and 'any' not in col
+            ]
+    
+        # Run comprehensive comparison with direction-aware threshold conversion
+        results = compare_prs_performance(
+            df_binary, clinical_columns, figPath, file_ext, prs_methods,
+            risk_thresholds=used_thresholds,
+            outcome_column='PHENOTYPE'  # Use this to help determine risk direction
+        )
+        
+
+        results['thresholds_used'] = used_thresholds
+        results['risk_directions'] = determined_directions
+        
+        print("Thresholds used for binarization:")
+        print(f'\nthresholds: {used_thresholds}')
+        
+        
+        # Print AUC results
+        print(f"\n Clinical measures for {file_ext} results")
+        print("\nAUC Results low clinical all prs:")
+        print(results['auc_low_clinical'])
+        auc_low_clinical = results['auc_low_clinical']
+#       results['auc_low_clinical'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossPRSLowClinicalMeasure{file_ext}.csv')
+        
+        # Print AUC results
+        print("\nAUC Results low clinical high prs")
+        print(results['auc_low_clinical_high_prs'])
+        auc_low_clinical_high_prs = results['auc_low_clinical_high_prs']
+#       results['auc_low_clinical_high_prs'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossHighPRSLowClinicalMeasure{file_ext}.csv')
+        
+        #put the auc results into a combined dataframe to save
+        clinical_auc = pd.DataFrame()
+        auc_list = [x for x in results.keys() if 'auc' in x]
+        for k in auc_list:
+            auc_df = results[k]
+            auc_df['threshold_used'] = k
+            clinical_auc = pd.concat([clinical_auc,auc_df],ignore_index=False)
+            del results[k]
             
-            
-            for k in ['risk_directions','thresholds_used']:
-                try:
-                    thresholds_risk[k] = pd.DataFrame(results[k],index=[k]).T
-                except UnboundLocalError:
-                    thresholds_risk = pd.DataFrame(results[k],index=[k]).T
-                    
-            thresholds_risk.reset_index(inplace=True)
-            thresholds_risk.columns = ['clinical_measure'] + list(thresholds_risk.columns[1:])
-            
-            #thresholds_risk.to_csv(f"{scoresPath}/thresholdsRiskDirection.wrt.clinicalMeasures{file_ext}.csv",index=False)
-            
-            # Export results to Excel with multiple sheets
-            with pd.ExcelWriter(f'{scoresPath}/clinicalMeasurePerformanceResults{file_ext}.{eval_type}.xlsx') as writer:
-                thresholds_risk.to_excel(writer, sheet_name='thresholds RiskDirection')
-                df_nri.to_excel(writer, sheet_name='nri')
-                clinical_auc.to_excel(writer, sheet_name='auc ')
-                auc_low_clinical_high_prs.to_excel(writer, sheet_name='auc low clinical high prs')
-                auc_low_clinical.to_excel(writer, sheet_name='auc low clinical')
+        clinical_auc.reset_index(inplace=True)
+        clinical_auc.columns = ['prs_type'] + list(clinical_auc.columns[1:])
+        
+        #clinical_auc.to_csv(f"{scoresPath}/prsAUC.wrt.clinicalMeasures{file_ext}.csv",index=False)
+        
+
+        
+        #put nri data into a csv
+        df_nri = pd.DataFrame()
+        for prs in results['nri'].keys():
+            prs_nri = pd.DataFrame(results['nri'][prs]).T
+            prs_nri['prs_calc'] = prs
+            prs_nri.reset_index(inplace=True)
+            prs_nri.columns = ['clinical_measure'] + list(prs_nri.columns[1:])
+            df_nri = pd.concat([df_nri,prs_nri],ignore_index=True)
+            #df_nri.to_csv(f"{scoresPath}/nri.wrt.clinicalMeasures{file_ext}.csv",index=False)
+
+        
+        
+        for k in ['risk_directions','thresholds_used']:
+            try:
+                thresholds_risk[k] = pd.DataFrame(results[k],index=[k]).T
+            except UnboundLocalError:
+                thresholds_risk = pd.DataFrame(results[k],index=[k]).T
                 
-            print(f"\nResults exported to 'clinicalMeasurePerformanceResults{file_ext}.{eval_type}.xlsx'")
+        thresholds_risk.reset_index(inplace=True)
+        thresholds_risk.columns = ['clinical_measure'] + list(thresholds_risk.columns[1:])
+        
+        #thresholds_risk.to_csv(f"{scoresPath}/thresholdsRiskDirection.wrt.clinicalMeasures{file_ext}.csv",index=False)
+        
+    # Export results to Excel with multiple sheets
+        with pd.ExcelWriter(f'{scoresPath}/clinicalMeasurePerformanceResults{file_ext}.{eval_type}.xlsx') as writer:
+            thresholds_risk.to_excel(writer, sheet_name='thresholds RiskDirection')
+            df_nri.to_excel(writer, sheet_name='nri')
+            clinical_auc.to_excel(writer, sheet_name='auc ')
+            auc_low_clinical_high_prs.to_excel(writer, sheet_name='auc low clinical high prs')
+            auc_low_clinical.to_excel(writer, sheet_name='auc low clinical')
             
-        #save binary file with prs calculation and clinical marker data
-        df_binary.to_csv(f"{scoresPath}/combinedPRS.holdout.ClinicalMeasures.csv",index=False)
+        print(f"\nResults exported to 'clinicalMeasurePerformanceResults{file_ext}.{eval_type}.xlsx'")
+        
+    for measure in clinical_columns:
+        direction = "Higher values → higher risk" if results['risk_directions'][measure] else "Lower values → higher risk"
+        print(f"  {measure}: threshold = {results['thresholds_used'][measure]}, {direction}")
+        
+        # Plot risk distribution for clinical measures
+        fig = plot_risk_distribution(
+            df_binary, 
+            measure, 
+            f'{measure}_binary',
+            results['thresholds_used'][measure],
+            higher_is_riskier=results['risk_directions'][measure]
+        )
+        plt.title(f"Distribution of {measure}")
+        fig.savefig(f'{figPath}/riskDistribution.{measure}{file_ext}.png')
+        plt.close(fig)
+        
+    
+    #save binary file with prs calculation and clinical marker data
+    df_binary.to_csv(f"{scoresPath}/combinedPRS.holdout.ClinicalMeasures.csv",index=False)
         
         
         
         
         
-        
+
+# Backward-compatible alias so existing callers using `main` still work
+main = run_clinical_analysis
+
+
 if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description="Calculating clinical performance measures against prs ....")
@@ -2153,9 +2453,9 @@ if __name__ == '__main__':
     results_path = args.results_path or os.environ.get("RESULTS_PATH")
     print(f"[PYTHON] Reading from: {results_path}")
     
-    pheno = "type2Diabetes"    
-    pheno_data = "/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi"
-    results_path = "/Users/kerimulterer/prsInteractive/results"
+#   pheno = "type2Diabetes"    
+#   pheno_data = "/Users/kerimulterer/prsInteractive/results/type2Diabetes/combinedAnalysis"
+#   results_path = "/Users/kerimulterer/prsInteractive/results"
     
     
     if not pheno_data:
@@ -2167,15 +2467,4 @@ if __name__ == '__main__':
     if not results_path:
         raise ValueError("You must provide a results path via --results_path or set the RESULTS_PATH environment variable.")
         
-    main(pheno,pheno_data,results_path)
-    
-
-    
-    
-    
-
-    
-
-    
-    
-    
+    run_clinical_analysis(pheno, pheno_data, results_path)

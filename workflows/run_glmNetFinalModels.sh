@@ -2,11 +2,11 @@
 
 
 platform=${3:-"local"} 
-#pheno=$1
-PHENO='type2Diabetes'
+PHENO=$1
+#PHENO='type2Diabetes'
 threshold=${2:-1.99}
-#EPI_COMBO=${4:-"sum"}
-EPI_COMBO=${4:-"prod"}
+EPI_COMBO=${4:-"sum"}
+#EPI_COMBO=${4:-"prod"}
 
 # Source config with error handling
 if [ ! -f "../env.config" ]; then
@@ -104,51 +104,52 @@ for file in "${required_files[@]}"; do
 done
     
 export PHENO_PATH=$PHENO_PATH
-#export FEATURES_TO_FILTER_LD="$PHENO_DATA/scores/importantFeaturesPostShap.csv"
+export FEATURES_TO_FILTER_LD="$PHENO_DATA/scores/importantFeaturesPostShap.csv"
+
 #check to see if LD has been done previously before association
 if [ ! -f "$PHENO_DATA/scores/importantFeaturesPostShap.filteredLD.csv" ]; then
-    echo "[LD FILTERING] LD is being done before modelling .."
+echo "[LD FILTERING] LD is being done before modelling .."
+
+# Check for the actual PLINK output files
+if [ -f "$PHENO_PATH/finalModel.prune.in" ] || [ -f "$PHENO_PATH/finalModel.tags.list" ]; then
+    echo "[LD FILTERING] Using existing LD files..."
+    python "$SCRIPTS_DIR/filter_features_LD.py"
+else
+    echo "[LD FILTERING] Creating new LD files..."
+    python "$SCRIPTS_DIR/helper/create_LD_SnpList.py"
+    wait 
     
-    # Check for the actual PLINK output files
-    if [ -f "$PHENO_PATH/finalModel.prune.in" ] || [ -f "$PHENO_PATH/finalModel.tags.list" ]; then
-        echo "[LD FILTERING] Using existing LD files..."
-        python "$SCRIPTS_DIR/filter_features_LD.py"
-    else
-        echo "[LD FILTERING] Creating new LD files..."
-        python "$SCRIPTS_DIR/helper/create_LD_SnpList.py"
-        wait 
-        
-        plink --bfile "$PHENO_PATH/merged_allChromosomes" \
-        --extract "$PHENO_PATH/finalModelLDSnps.txt" \
-        --indep-pairwise 100kb 1 .6 \
-        --r2 --show-tags all \
-        --out "$PHENO_PATH/finalModel"
-        
-        python "$SCRIPTS_DIR/filter_features_LD.py"
-    fi
+    plink --bfile "$PHENO_PATH/merged_allChromosomes" \
+    --extract "$PHENO_PATH/finalModelLDSnps.txt" \
+    --indep-pairwise 100kb 1 .6 \
+    --r2 --show-tags all \
+    --out "$PHENO_PATH/finalModel"
     
-    #check to see that reduced file script ran 
-    if [ -f "$PHENO_DATA/scores/importantFeaturesPostShap.filteredLD.csv" ];then
-        # Add entries
-        {
-            echo "REDUCED_FEATURE_FILE=$PHENO_DATA/scores/importantFeaturesPostShap.filteredLD.csv"
-            
-        } >> "${PHENO_DATA}/pheno.config"
-        REDUCED_FEATURE_FILE="$PHENO_DATA/scores/importantFeaturesPostShap.filteredLD.csv"
+    python "$SCRIPTS_DIR/filter_features_LD.py"
+fi
+
+#check to see that reduced file script ran 
+if [ -f "$PHENO_DATA/scores/importantFeaturesPostShap.filteredLD.csv" ];then
+    # Add entries
+    {
+        echo "REDUCED_FEATURE_FILE=$PHENO_DATA/scores/importantFeaturesPostShap.filteredLD.csv"
         
-    else
-        echo "[DEBUG] LD filtering didn't produce correct file"
-        REDUCED_FEATURE_FILE="$PHENO_DATA/scores/importantFeaturesPostShap.csv"
-    fi
+    } >> "${PHENO_DATA}/pheno.config"
+    REDUCED_FEATURE_FILE="$PHENO_DATA/scores/importantFeaturesPostShap.filteredLD.csv"
+    
+else
+    echo "[DEBUG] LD filtering didn't produce correct file"
+    REDUCED_FEATURE_FILE="$PHENO_DATA/scores/importantFeaturesPostShap.csv"
+fi
 fi
 
 
 
 
 REDUCED_FEATURE_FILE="$PHENO_DATA/scores/importantFeaturesPostShap.filteredLD.csv"
-### CHECK TO SEE IF LD HAS BEEN DONE
+## CHECK TO SEE IF LD HAS BEEN DONE
 
-# Pass to R script
+#Pass to R script
 Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
 --results_path "$RESULTS_PATH" \
 --data_path "$DATA_PATH" \
@@ -175,8 +176,9 @@ Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
     echo "FINAL_MODEL_SCORES=$PHENO_DATA/scores/modelScoresReducedFinalModel.csv"
     echo "FINAL_MODEL_PROBABILITIES=$PHENO_DATA/scores/predictProbsReducedFinalModel.csv"
 } >> "${PHENO_DATA}/pheno.config"
-    
+
 filter non-additive gene-env features
+
 python "$SCRIPTS_DIR/filter_non_additive_gen_env_features.py" \
 --config_file "$PHENO_DATA/pheno.config" \
 --feature_scores_file "$PHENO_DATA/scores/featureScoresReducedFinalModel.csv"
@@ -197,13 +199,14 @@ python "$SCRIPTS_DIR/calculate_prs_post_modelling.py" \
 --hla_file $HLA_FILE \
 --test_env_gen_file $GENE_ENV_TEST \
 --holdout_env_gen_file $GENE_ENV_HOLDOUT \
+--holdout_combined_env_file $ALL_ENV_HOLDOUT \
+--test_combined_env_file $ALL_ENV_TEST \
 --pheno $PHENO \
 --feature_scores_file_filtered "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" \
 --withdrawal_path $WITHDRAWAL_PATH \
 --epi_combo $EPI_COMBO
-bash run_prs_calculations.sh $PHENO $EPI_COMBO
 
-python "$SCRIPTS_DIR/combine_prs" \
+python "$SCRIPTS_DIR/combine_prs.py" \
 --pheno_data $PHENO_DATA
 
 #calculate peformance of trained models and PRS calculations for main v other
@@ -211,7 +214,25 @@ python "$SCRIPTS_DIR/combine_prs" \
 python "${SCRIPTS_DIR}/calculate_prs_stats.py" \
 --pheno_data $PHENO_DATA
 
-RScript "$SCRIPTS_DIR/prsAUCDelongStats.R" \
+python "${SCRIPTS_DIR}/filter_statistically_distinct_models.py" \
+--pheno_data $PHENO_DATA
+
+python "${SCRIPTS_DIR}/run_cohort_analysis_pipeline.py" \
+--feature_scores_file_filtered "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" \
+--pheno_data $PHENO_DATA \
+--raw_features_file "$RESULTS_PATH/participant_environment.csv"
+
+#python "${SCRIPTS_DIR}/calculate_top_features_in_cohort.py" \
+#--pheno_data $PHENO_DATA \
+#--feature_scores_file_filtered "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" \
+#--threshold 1.99
+
+python "${SCRIPTS_DIR}/run_cohort_analysis_pipeline.py" \
+--pheno_data $PHENO_DATA \
+--feature_scores_file "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" \
+--raw_features_file $ENV_FILE
+
+RScript "$SCRIPTS_DIR/prsNagelkerkeIncremental.R" \
 --pheno_data $PHENO_DATA
 
 

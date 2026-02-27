@@ -24,83 +24,122 @@ def compare_gene_env_to_genetic(inputFile,config_file):
     """
     df = pd.read_csv(inputFile)
     
-    # Count original GxGxE features
-    n_cardio = len(df[(df['model'] == 'cardio') & (df['coefs'] != 0) & (df['feature'].str.contains(','))])
+    #get all cardio features to be used in separate model filter
+    cardio_features = df[(df['model'] == 'cardio') & (df['feature'].str.contains(','))]['feature'].tolist()
+    main_env_features = df[(df['model'] == 'all+env_combined')]['feature'].tolist()
+    mainDf = df[df['model'] == 'all+env_combined'] 
+#   main_env_features = df[(df['model'] == 'all+env_main')]['feature'].tolist()
+#   mainDf = df[df['model'] == 'all+env_main'] 
     
-    # Get non-zero GxGxE features (cardio model with interactions)
-    gene_env = df[(df['model'] == 'cardio') & (df['coefs'] != 0) & (df['feature'].str.contains(','))]
-    
-    filterList = []
-    kept_more_extreme = []
-    
-    print(f"\nAnalyzing {len(gene_env)} GxGxE features...")
-    
-    for feature in gene_env['feature']:
-        # Extract genetic component (everything after first element)
-        # E.g., "BMI,rs123,rs456" -> "rs123,rs456"
-        g = ','.join(feature.split(',')[1:])
+    for model in ['cardio','all']:
         
-        # Get GxGxE coefficient
-        eDf = gene_env[gene_env['feature'] == feature]
-        eValue = eDf['coefs'].values[0]
+        # Count original GxGxE features
+        n_cardio = len(df[(df['model'] == model) & (df['coefs'] != 0) & (df['feature'].isin(cardio_features))])
         
-        # Find corresponding GxG feature in epi or main models
-        gDf = df[(df['feature'] == g) & (df['model'].isin(['epi', 'main','epi+main']))]
+        # Get non-zero GxGxE features (cardio model with interactions)
+        gene_env = df[(df['model'] == model) & (df['coefs'] != 0) & (df['feature'].isin(cardio_features))]
         
-        if gDf.empty:
-            # No corresponding GxG feature found - keep GxGxE
-            continue
-        else:
-
-            # Filter logic: Keep only if GxGxE is MORE extreme than GxG
+        filterList = []
+        kept_more_extreme = []
+        
+        print(f"\nAnalyzing {len(gene_env)} GxGxE features...")
+        
+        for feature in gene_env['feature']:
+            # Extract genetic component (everything after first element)
+            # E.g., "BMI,rs123,rs456" -> "rs123,rs456"
+            g = ','.join(feature.split(',')[1:])
+            e = feature.split(',')[0]
+            
+            # Get GxGxE coefficient
+            eDf = mainDf[mainDf['feature'] == feature]
+            eValue = eDf['coefs'].values[0]
+            
+            mDf = mainDf[mainDf['feature'] == e]
+            
+            gDf = mainDf[mainDf['feature'] == g]
+            
+#           if model == 'cardio':
+#               # Find corresponding GxG feature in epi or main models
+#               gDf = df[(df['feature'] == g) & (df['model'].isin(['epi', 'main','epi+main']))]
+#           else:
+#               gDf = df[(df['feature'] == g) & (df['model'].isin(['all']))]
+                
+            if gDf.empty:
+                # No corresponding GxG feature found - keep GxGxE
+                print('no corresponding genetic feature found : ',g)
+                gValue = 0
+                
+            else:
+                gValue = gDf['coefs'].values[0]
+                
+            if mDf.empty:
+                print(f'evironmental feature {e} was not identified as main in in GxGxE discovery and not modelled ..')
+                print(f'setting {e} value to 0')
+                mValue = 0
+            else:
+                mValue = mDf['coefs'].values[0]
+    
+                # Filter logic: Keep only if GxGxE is MORE extreme than GxG
             if eValue > 0:  # GxGxE is risk-increasing
                 # Get the strongest GxG coefficient if multiple models have it
-                gValue = gDf.sort_values(['coefs'], ascending=False).head(1)['coefs'].values[0]
-                if gValue > 0: #ensure the coefs are in the same direction
+#                   gValue = gDf.sort_values(['coefs'], ascending=False).head(1)['coefs'].values[0]
+#                   if gValue > 0: #ensure the coefs are in the same direction
                     # Keep only if GxGxE is MORE positive (more risky)
-                    if eValue <= gValue:
-                        filterList.append(feature)
-                        # print(f"  Filter: {feature[:50]}... | GxG={gValue:.4f}, GxGxE={eValue:.4f} (less risky)")
-                    else:
-                        kept_more_extreme.append(feature)
+                if (eValue >= gValue) & (eValue >= mValue):
+                    kept_more_extreme.append(feature)
+                    print('kept GxGxE feature : ',feature)
+                    print(f'which is more extreme than {g} : {gValue}')
+                    print(f'and more extreme than {e} : {mValue}')
+
                 else:
                     filterList.append(feature)
                     
             else:  # GxG is protective (negative)
                 # Get the strongest GxG coefficient if multiple models have it
-                gValue = gDf.sort_values(['coefs'], ascending=True).head(1)['coefs'].values[0]
+#                   gValue = gDf.sort_values(['coefs'], ascending=True).head(1)['coefs'].values[0]
                 if gValue < 0: #ensure the coefs are in the same direction
-                    # Keep only if GxGxE is MORE negative (more protective)
-                    if eValue >= gValue:
-                        filterList.append(feature)
-                        # print(f"  Filter: {feature[:50]}... | GxG={gValue:.4f}, GxGxE={eValue:.4f} (less protective)")
-                    else:
+                    if (eValue <= gValue) & (eValue <= mValue):
                         kept_more_extreme.append(feature)
-                else:
-                    filterList.append(feature)
-                    
-    # Filter out non-additive features
-    dfFiltered = df[~df['feature'].isin(filterList)]
+                        print('kept GxGxE feature : ',feature)
+                        print(f'which is more extreme than {g} : {gValue}')
+                        print(f'and more extreme than {e} : {mValue}')
+                        
+                    else:
+                        filterList.append(feature)
+                    # Keep only if GxGxE is MORE negative (more protective)
+#                       if eValue >= gValue:
+#                           filterList.append(feature)
+#                           # print(f"  Filter: {feature[:50]}... | GxG={gValue:.4f}, GxGxE={eValue:.4f} (less protective)")
+#                       else:
+#                           kept_more_extreme.append(feature)
+#                   else:
+#                       filterList.append(feature)
+                        
+        # Filter out non-additive features
+        dfFiltered = df[((~df['feature'].isin(filterList)) & (df['model'] == model)) | (df['model'] != model)]
+        
+        # Count filtered GxGxE features
+        n_filtered = len(dfFiltered[(dfFiltered['model'] == model) & 
+                                    (dfFiltered['coefs'] != 0) & 
+                                    (dfFiltered['feature'].str.contains(','))])
     
-    # Count filtered GxGxE features
-    n_filtered = len(dfFiltered[(dfFiltered['model'] == 'cardio') & 
-                                 (dfFiltered['coefs'] != 0) & 
-                                 (dfFiltered['feature'].str.contains(','))])
+
     
+        # Print summary
+        print(f'\n{"="*70}')
+        print('Filtered non-additive GxGxE features:')
+        print(f'  Input file had:  {n_cardio} GxGxE features')
+        print(f'  Filtered out:    {len(filterList)} features (not more extreme than GxG)')
+        print(f'  Kept extreme:    {len(kept_more_extreme)} features (more extreme than GxG)')
+        print(f'  Output file has: {n_filtered} GxGxE features')
+        print(f'{"="*70}\n')
+        
     # Save filtered file
     inputFilePrefix = inputFile.rsplit('.', 1)[0]  # Handle multiple dots in filename
     filteredFile = f'{inputFilePrefix}.filtered.csv'
     dfFiltered.to_csv(filteredFile, index=False)
-    
-    # Print summary
-    print(f'\n{"="*70}')
-    print('Filtered non-additive GxGxE features:')
-    print(f'  Input file had:  {n_cardio} GxGxE features')
-    print(f'  Filtered out:    {len(filterList)} features (not more extreme than GxG)')
-    print(f'  Kept extreme:    {len(kept_more_extreme)} features (more extreme than GxG)')
-    print(f'  Output file has: {n_filtered} GxGxE features')
     print(f'  Filtered file saved to: {filteredFile}')
-    print(f'{"="*70}\n')
+    
     
     # Update config file
     try:
@@ -113,13 +152,14 @@ def compare_gene_env_to_genetic(inputFile,config_file):
         
         for line in lines:
             if line.strip().startswith('FEATURE_SCORES_FILE_FILTERED='):
-                updated_lines.append(f'FEATURE_SCORES_FILE_FILTERED="{filteredFile}"\n')
-                config_updated = True
+                print('replacing previous feature scores file filtered ...')
             else:
                 updated_lines.append(line)
-                
+        updated_lines.append(f'FEATURE_SCORES_FILE_FILTERED="{filteredFile}"\n')
+        
         with open(config_file, 'w') as f:
             f.writelines(updated_lines)
+            config_updated=True
             
         if config_updated:
             print(f'Config file updated: {config_file}')
@@ -147,7 +187,7 @@ if __name__ == '__main__':
     feature_scores_file = args.feature_scores_file or os.environ.get('FEATURE_SCORES_FILE')
     config_file = args.config_file or os.environ.get('CONFIG_FILE')
     
-#   feature_scores_file = '/Users/kerimulterer/prsInteractive/results/celiacDisease/summedEpi/scores/featureScoresReducedFinalModel.csv'
-#   config_file = '/Users/kerimulterer/prsInteractive/results/celiacDisease/summedEpi/pheno.config'
+#   feature_scores_file = '/Users/kerimulterer/prsInteractive/results/celiacDisease/productEpi/scores/featureScoresReducedFinalModel.csv'
+#   config_file = '/Users/kerimulterer/prsInteractive/results/celiacDisease/productEpi/pheno.config'
         
     compare_gene_env_to_genetic(feature_scores_file,config_file)

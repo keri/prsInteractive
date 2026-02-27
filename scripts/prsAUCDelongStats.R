@@ -572,10 +572,10 @@ scores_path = paste0(pheno_data,'/scores')
 
 # Define filepaths
 data_file = paste0(scores_path,'/combinedPRSGroups.csv')
-cov_file = paste0(scores_path,'/covariate.12.mixed.prs.csv')
+cov_file = paste0(scores_path,'/prsScores/covariate.12.mixed.prs.csv')
 
 #output files
-outputAUCFile = paste0(scores_path,"/prs_delong_auc_statistics.csv")
+outputAUCFile = paste0(scores_path,"/prs_nagelkerke_auc_statistics.csv")
 outputPairwiseFile = paste0(scores_path,"/prs_pairwise_comparisons.csv")
 
 # Load data
@@ -587,9 +587,34 @@ data <- left_join(data,
                   cov_data %>% select(IID, scaled_prs_covariate = scaled_prs), 
                   by = "IID")
 
+# ============================================================================
+# CREATE COMBINED PRS (sum of raw PRS, then scale)
+# ============================================================================
+# Check if raw PRS columns exist
+raw_prs_cols <- c("prs_main", "prs_epi", "prs_epi+main", "prs_cardio")
+
+if (all(raw_prs_cols %in% names(data))) {
+  cat("Creating prs_combined from raw PRS columns...\n")
+  
+  # Sum raw PRS scores
+  data$prs_combined <- rowSums(data[, raw_prs_cols], na.rm = TRUE)
+  
+  # Scale the combined PRS
+  data$scaled_prs_combined <- scale(data$prs_combined)[,1]
+  
+  cat(sprintf("Created scaled_prs_combined (mean=%.4f, sd=%.4f)\n", 
+              mean(data$scaled_prs_combined, na.rm=TRUE), 
+              sd(data$scaled_prs_combined, na.rm=TRUE)))
+  
+} else {
+  # Fallback: if raw columns don't exist, warn user
+  cat("WARNING: Raw PRS columns not found. Cannot create scaled_prs_combined.\n")
+  cat("Available columns: ", paste(names(data), collapse=", "), "\n")
+}
+
 # Define PRS columns
 prs_cols <- c("scaled_prs_main", "scaled_prs_epi", "scaled_prs_cardio",
-              "scaled_prs_epi+main","scaled_prs_all")
+              "scaled_prs_epi+main","scaled_prs_all", "scaled_prs_combined")
 
 # Define covariates
 covariate_cols <- c("scaled_prs_covariate")
@@ -604,7 +629,12 @@ comparisons <- list(
   c("scaled_prs_main", "scaled_prs_all"),           # main vs all
   c("scaled_prs_epi", "scaled_prs_all"),            # epi vs all
   c("scaled_prs_cardio", "scaled_prs_all"),         # cardio vs all
-  c("scaled_prs_epi+main", "scaled_prs_all")        # epi+main vs all
+  c("scaled_prs_epi+main", "scaled_prs_all"),       # epi+main vs all
+  c("scaled_prs_all", "scaled_prs_combined"),       # all vs combined
+  c("scaled_prs_main", "scaled_prs_combined"),      # main vs combined
+  c("scaled_prs_epi", "scaled_prs_combined"),       # epi vs combined
+  c("scaled_prs_cardio", "scaled_prs_combined"),    # cardio vs combined
+  c("scaled_prs_epi+main", "scaled_prs_combined")   # epi+main vs combined
 )
 
 # Run analysis

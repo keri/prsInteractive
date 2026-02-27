@@ -6,6 +6,7 @@ import argparse
 import sys
 from datetime import datetime
 from helper.mcnemar_comparison_calculations import *
+from filter_statistically_distinct_models import *
 
 def add_iid_simple(long_df, phenotype_df):
     
@@ -212,9 +213,25 @@ def calculate_percent_improvement(extra_cases, baseline_cases):
     return (extra_cases / baseline_cases) * 100
 
 
-def calculate_precision_recall_improvement(scoresPath,model_type='prs',include_all=False,include_epi_main=True):
+def calculate_prs_stats(pheno_data, model_type='prs', include_all=False, models_to_keep=None):
+    """
+    Calculate PRS statistics for models in the combined dataset.
+    
+    Parameters
+    ----------
+    pheno_data : str
+        Path to phenotype data directory
+    model_type : str
+        Type of model ('prs' or 'penalized_model')
+    include_all : bool
+        Whether to include 'all' model
+    models_to_keep : list, optional
+        Explicit list of models to analyze. If None, discovers all scaled_prs_* columns.
+        Model names should match column suffixes (e.g., 'main', 'epi_product').
+    """
 
-
+    scoresPath = f'{pheno_data}/scores'
+    
     # Auto-generate log filename with timestamp
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     if include_all:
@@ -237,28 +254,75 @@ def calculate_precision_recall_improvement(scoresPath,model_type='prs',include_a
             else:
                 filePath = f'{scoresPath}/CombinedPRSGroups.holdout.csv'
             df = pd.read_csv(filePath)
+            print('downloaded combinedPRS data from : ',filePath)
             
-            #calculate McNemar test
-            calculate_mcnemar_test(filePath,scoresPath)
+            # Dynamically discover all scaled_prs_{model} columns
+            all_cohorts = [
+                col for col in df.columns
+                if col.startswith('scaled_prs_')
+                and 'threshold' not in col
+                and col != 'scaled_prs_main'
+            ]
             
-            cohorts = [col for col in df.columns if 'scaled_prs' in col]
-            if not include_all:
-                cohorts = [col for col in cohorts if 'all' not in col]
+            print('cohorts used in analysis : ',all_cohorts)
+            # Add main first (reference model)
+            
+            if 'scaled_prs_main' in df.columns:
+                all_cohorts = ['scaled_prs_main'] + all_cohorts
                 
-            if not include_epi_main:
-                cohorts = [col for col in cohorts if 'epi+main' not in col]
+            print('cohorts used in analysis after addition of main : ',all_cohorts)
+            
+            # Filter by models_to_keep if provided
+            if models_to_keep is not None:
+                cohorts = [
+                    f'scaled_prs_{m}' for m in models_to_keep
+                    if f'scaled_prs_{m}' in all_cohorts
+                ]
+                
+                if 'scaled_prs_main' not in cohorts:
+                    cohorts.append('scaled_prs_main')
+                print(f"\nFiltered to models_to_keep ({len(cohorts)}): {cohorts}")
+            else:
+                cohorts = all_cohorts
+                # Exclude 'all' model unless explicitly requested
+                if not include_all:
+                    cohorts = [col for col in cohorts if 'all' not in col]
+                print(f"\nDiscovered PRS models ({len(cohorts)}): {cohorts}")
+            
+            # Extract model names for McNemar test (remove 'scaled_prs_' prefix)
+            mcnemar_models = [col.replace('scaled_prs_', '') for col in cohorts]
+            
+            #calculate McNemar test with discovered models
+            calculate_mcnemar_test(filePath, scoresPath, models_to_compare=mcnemar_models)
             
             #get the case value based on PHENOTYPE column
             if 0 in df['PHENOTYPE'].unique():
                 case_value = 1
             else:
                 case_value = 2
+                
+            cols_for_analysis = list(set(cohorts))
+            
+            # Ensure 'PHENOTYPE' is not duplicated in column list
+            if 'PHENOTYPE' not in cols_for_analysis:
+                cols_for_analysis.append('PHENOTYPE')
 
             print('case value is set to :',case_value)
             
+            print('columns used in analysis: ',cols_for_analysis)
+            
             for cohort in cohorts:
-                fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(df[cohorts+['PHENOTYPE']],cohort)
-                performance_values = calculate_cases_exclusive(df[cohorts+['PHENOTYPE']], cohort, threshold_percentile=80, case_value=case_value,main_col='scaled_prs_main')
+                fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(
+                    df[cols_for_analysis], cohort
+                )
+                
+#               fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(df[cohorts+['PHENOTYPE']],cohort)
+                # Use first cohort (should be scaled_prs_main) as reference
+                main_col = cohorts[0] if cohorts else 'scaled_prs_main'
+                performance_values = calculate_cases_exclusive(
+                    df[cols_for_analysis], cohort,
+                    threshold_percentile=80, case_value=case_value, main_col=main_col
+                )
                 tempDf = pd.DataFrame(fp_fn_dict | performance_values,index=[0])
                 tempDf['data_type'] = 'prs'
                 tempDf['data_subset'] = h
@@ -267,8 +331,9 @@ def calculate_precision_recall_improvement(scoresPath,model_type='prs',include_a
                 
     else: #calculate stats for trained models
         filePath = f'{scoresPath}/predictProbsReducedFinalModel.csv'
-        phenotype = pd.read_csv(f'{scorePath}/combinedPRSGroups.csv',usecols=['IID','PHENOTYPE'])
+        phenotype = pd.read_csv(filePath,usecols=['IID','PHENOTYPE'])
         df = pd.read_csv(filePath)
+        df.drop_duplicates(subset=['IID','model'],keep='last',inplace=True)
         
         #get the case value in phenotype file
         if 0 in df['PHENOTYPE'].unique():
@@ -296,16 +361,24 @@ def calculate_precision_recall_improvement(scoresPath,model_type='prs',include_a
         #cohorts in the model column
         cohorts = df['model'].unique()
         
-
+        # Ensure 'PHENOTYPE' is not duplicated in column list
+        cols_for_analysis = list(cohorts)
+        if 'PHENOTYPE' not in cols_for_analysis:
+            cols_for_analysis.append('PHENOTYPE')
         
         for cohort in cohorts:
-            fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(df_wide[cohorts.tolist()+['PHENOTYPE']],cohort)
+
+            fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(
+                df[cols_for_analysis], cohort
+            )
+#           fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(df_wide[cohorts.tolist()+['PHENOTYPE']],cohort)
 #           missed_list = calculate_cases_exclusive(df_wide[cohorts.tolist()+['PHENOTYPE']],cohort)
-            performance_values = calculate_cases_exclusive(df_wide[cohorts+['PHENOTYPE']], cohort, threshold_percentile=80, case_value=case_value)
+            performance_values = calculate_cases_exclusive(df_wide[cols_for_analysis], cohort, threshold_percentile=80, case_value=case_value)
             tempDf = pd.DataFrame(fp_fn_dict | performance_values,index=[0])
             tempDf['data_type'] = 'penalized_model'
             tempDf['data_subset'] = 'validation'
             add_row_efficient(outputPath, tempDf)
+            
     
     # Always restore stdout and close log file
     sys.stdout = original_stdout
@@ -334,7 +407,9 @@ if __name__ == '__main__':
     if not pheno_data:
         raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")
         
-    scores_path = f'{pheno_data}/scores'
+    
     
     for t in ['prs']:
-        calculate_precision_recall_improvement(scores_path,model_type=t)
+        calculate_prs_stats(pheno_data,model_type=t)
+        
+        models_to_keep, filtered_data = filter_statistically_distinct_models(pheno_data, use_all=None)

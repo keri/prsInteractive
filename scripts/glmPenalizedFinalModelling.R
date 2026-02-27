@@ -920,11 +920,17 @@ test_env_clinical_file <- args$test_env_clinical_file
 #hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
 #training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/trainingCombined.raw'
 #test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/testCombined.raw'
-# training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/geneEnvironmentTraining.csv'
-# test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/geneEnvironmentTest.csv'
 #covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
-#feature_model_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/scores/importantFeaturesPostShap.csv'
+#feature_model_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/scores/importantFeaturesPostShap.filtered.csv'
 #participant_env_file='/Users/kerimulterer/prsInteractive/results/participant_environment.csv'
+#epi_combo <- 'sum'
+#threshold <- 1.99
+#training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/geneEnvironmentTraining.csv'
+#test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/geneEnvironmentTest.csv'
+#test_env_clinical_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/clinicalEnvironmentTest.csv'
+#training_env_clinical_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/clinicalEnvironmentTraining.csv'
+#test_env_main_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/mainEnvironmentTest.csv'
+#training_env_main_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/mainEnvironmentTraining.csv'
 
 scores_path = paste0(pheno_data,'/scores')
 #covar_pathway = paste0(results_path,'/covar.txt')
@@ -1049,17 +1055,16 @@ clinicalEnvTraining[, IID := as.integer(IID)]
 clinicalEnvTest = fread(test_env_clinical_file, sep=",")
 clinicalEnvTest[, IID := as.integer(IID)]
 
+allEnvironmentTest = fread(paste0(pheno_data,"/allEnvironmentTest.csv"), sep=",")
+allEnvironmentTest[, IID := as.integer(IID)]
+  
+# Load alternative environment file
+allEnvironmentTraining = fread(paste0(pheno_data,"/allEnvironmentTraining.csv"), sep=",")
+allEnvironmentTraining[, IID := as.integer(IID)]
+
 # Check if mainEnvTest has only IID column
 if (ncol(mainEnvTest) == 1) {
   message("mainEnvTest contains only IID column. Loading alternative file: allEnvironmentTest.csv")
-  
-  # Load alternative environment file
-  allEnvironmentTest = fread(paste0(pheno_data,"/allEnvironmentTest.csv"), sep=",")
-  allEnvironmentTest[, IID := as.integer(IID)]
-  
-  # Load alternative environment file
-  allEnvironmentTraining = fread(paste0(pheno_data,"/allEnvironmentTraining.csv"), sep=",")
-  allEnvironmentTraining[, IID := as.integer(IID)]
   
   # Find features in allEnvironmentTest that are NOT in clinicalEnvTest
   diff_features = setdiff(names(allEnvironmentTest), names(clinicalEnvTest))
@@ -1124,10 +1129,13 @@ trainingDf = merge(trainingDf,hlaData, by = "IID", all.x = TRUE)
 trainingDf = merge(trainingDf,envTraining, by = "IID", all.x = TRUE)
 
 #merge with cardio main features
-trainingDf = merge(trainingDf,mainEnvTraining, by= "IID", all.x = TRUE)
+#trainingDf = merge(trainingDf,mainEnvTraining, by= "IID", all.x = TRUE)
 
 #merge with cardio clinical features
-trainingDf = merge(trainingDf,clinicalEnvTraining, by= "IID", all.x = TRUE)
+#trainingDf = merge(trainingDf,clinicalEnvTraining, by= "IID", all.x = TRUE)
+  
+#merge with cardio clinical features
+trainingDf = merge(trainingDf,allEnvironmentTraining, by= "IID", all.x = TRUE)
 
 ################# TEST data #####################
 testDf = get_geno_read_table_fixed(test_file,data_path,columns_to_get)
@@ -1147,10 +1155,13 @@ testDf = merge(testDf,hlaData, by = "IID", all.x = TRUE)
 testDf = merge(testDf,envTest, by = "IID", all.x = TRUE)
 
 #merge with cardio main features
-testDf = merge(testDf,mainEnvTest, by= "IID", all.x = TRUE)
+#testDf = merge(testDf,mainEnvTest, by= "IID", all.x = TRUE)
+
+#merge with all env features features
+testDf = merge(testDf,allEnvironmentTest, by= "IID", all.x = TRUE)
 
 #merge with cardio clinical features
-testDf = merge(testDf,clinicalEnvTest, by= "IID", all.x = TRUE)
+#testDf = merge(testDf,clinicalEnvTest, by= "IID", all.x = TRUE)
 cat("Sample columns:", paste(head(clinicalEnvTest, 5), collapse = ", "), "\n")
 
 #####################################################################################
@@ -1249,6 +1260,7 @@ all_features = setdiff(names(trainingDf),'IID')
 env_genetic_features = setdiff(names(envTraining), "IID")
 env_main_features = setdiff(names(mainEnvTraining), "IID")
 env_clinical_features = setdiff(names(clinicalEnvTraining), "IID")
+all_env_features = setdiff(names(allEnvironmentTraining), "IID")
 
 dataset_list = list(
   list('clinical_main',c(env_clinical_features,covariate_columns)),
@@ -1260,6 +1272,8 @@ dataset_list = list(
   list('env_main',c(env_main_features,covariate_columns)),
   list('all+env_main',c(env_genetic_features,epi_main_features,env_main_features,hla_columns,covariate_columns)),
   list('all+env_main+clinical_main',c(env_genetic_features,epi_main_features,hla_columns,env_main_features,env_clinical_features,covariate_columns)),
+  list('env_combined',c(all_env_features,covariate_columns)),
+  list('all+env_combined',c(env_genetic_features,epi_main_features,hla_columns,all_env_features,covariate_columns)),
   list('covariate',c(covariate_columns))
   
 )

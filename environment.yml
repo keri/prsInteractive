@@ -27,6 +27,9 @@ dependencies:
     - r-desctools
     - r-stringr
     - r-argparse
+    - r-tidyr
+    - r-boot
+    - r-DescTools
     - pip:
         - fasttreeshap
         - ipython
