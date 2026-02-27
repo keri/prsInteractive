@@ -494,7 +494,7 @@ if __name__ == '__main__':
     threshold = float(threshold) if threshold else args.threshold
     
 #   pheno = 'type2Diabetes'
-#   pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi'
+#   pheno_data = f'/your/directory/prsInteractive/results/{pheno}/summedEpi'
 #   feature_scores_file = f'{pheno_data}/scores/featureScoresReducedFinalModel.filtered.csv'
 #   threshold = 1.99
     

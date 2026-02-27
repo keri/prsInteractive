@@ -296,7 +296,7 @@ if __name__ == '__main__':
 	print(f"[PYTHON] Reading from: {pheno_data}")
 
 #	pheno = 'celiacDisease'
-#	pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi'
+#	pheno_data = f'/your/directory/prsInteractive/results/{pheno}/summedEpi'
 		
 	if not pheno_data:
 		raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")

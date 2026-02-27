@@ -292,8 +292,8 @@ if __name__ == '__main__':
     print(f"[PYTHON] Reading covariate data from: {covar_file}")
     
     pheno = 'celiacDisease'
-    pheno_data = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi'
-    covar_file = '/Users/kerimulterer/prsInteractive/results/covar.csv'
+    pheno_data = f'/your/directory/prsInteractive/results/{pheno}/summedEpi'
+    covar_file = '/your/directory/prsInteractive/results/covar.csv'
     
     if not pheno_data:
         raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")

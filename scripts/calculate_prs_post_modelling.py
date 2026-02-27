@@ -419,19 +419,19 @@ if __name__ == '__main__':
     
 #   pheno='type2Diabetes'
 #   epi_combo='prod'
-#   pheno_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}'
+#   pheno_path=f'/your/directory/prsInteractive/results/{pheno}'
 #   pheno_data=f'{pheno_path}/productEpi'
 #   test_env_file=f'{pheno_data}/geneEnvironmentTest.csv'
 #   holdout_env_file=f'{pheno_data}/geneEnvironmentHoldout.csv'
 #   test_path=f'{pheno_path}/testCombined.raw'
 #   holdout_path=f'{pheno_path}/holdoutCombined.raw'
-#   #   results_path='/Users/kerimulterer/prsInteractive/results'
+#   #   results_path='/your/directory/prsInteractive/results'
 #   holdout_combined_env_file = f"{pheno_data}/allEnvironmentHoldout.csv"
 #   test_combined_env_file = f"{pheno_data}/allEnvironmentTest.csv"
-#   covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
-#   hla_file='/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
+#   covar_file='/your/directory/prsInteractive/results/covar.csv'
+#   hla_file='/your/directoryr/prsInteractive/results/participant_hla.csv'
 #   feature_file=f'{pheno_data}/scores/featureScoresReducedFinalModel.filtered.csv'
-#   withdrawal_path = f'/Users/kerimulterer/prsInteractive/data/withdrawals.csv'
+#   withdrawal_path = f'/your/directory/prsInteractive/data/withdrawals.csv'
 
     
     if not pheno_data:

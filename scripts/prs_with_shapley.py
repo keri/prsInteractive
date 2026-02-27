@@ -386,16 +386,16 @@ if __name__ == '__main__':
 
     
 #   pheno='myocardialInfarction'
-#   pheno_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}'
-#   test_env_file=f'/Users/kerimulterer/prsInteractive/results/{pheno}/geneEnvironmentTest.csv'
-#   holdout_env_file=f'/Users/kerimulterer/prsInteractive/results/{pheno}/geneEnvironmentHoldout.csv'
-#   test_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
-#   holdout_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/holdoutCombined.raw'
-#   results_path='/Users/kerimulterer/prsInteractive/results'
-#   covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
-#   hla_file='/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-#   feature_file=f'/Users/kerimulterer/prsInteractive/results/{pheno}/scores/featureScoresFinalShap.csv'
-#   withdrawal_path = f'/Users/kerimulterer/prsInteractive/data/withdrawals.csv'
+#   pheno_path=f'/your/directory/prsInteractive/results/{pheno}'
+#   test_env_file=f'/your/directory/prsInteractive/results/{pheno}/geneEnvironmentTest.csv'
+#   holdout_env_file=f'/your/directory/prsInteractive/results/{pheno}/geneEnvironmentHoldout.csv'
+#   test_path=f'/your/directory/prsInteractive/results/{pheno}/testCombined.raw'
+#   holdout_path=f'/your/directory/prsInteractive/results/{pheno}/holdoutCombined.raw'
+#   results_path='/your/directory/prsInteractive/results'
+#   covar_file='/your/directory/prsInteractive/results/covar.csv'
+#   hla_file='/your/directory/prsInteractive/results/participant_hla.csv'
+#   feature_file=f'/your/directory/prsInteractive/results/{pheno}/scores/featureScoresFinalShap.csv'
+#   withdrawal_path = f'/your/directory/prsInteractive/data/withdrawals.csv'
     
     
     if not pheno_path:

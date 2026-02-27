@@ -4,9 +4,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 pheno = 'type2Diabetes'
-scoresPath = f'/Users/kerimulterer/prsInteractive/results/{pheno}/scores'
+scoresPath = f'/your/directory/prsInteractive/results/{pheno}/scores'
 featureFile = f'{scoresPath}/featureScoresReducedFinalModel.filtered.csv'
-hlaFile = '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
+hlaFile = '/your/directory/prsInteractive/results/participant_hla.csv'
 
 def get_hla_columns(hlaFile):
     df = pd.read_csv(hlaFile,nrows=1)

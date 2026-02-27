@@ -2092,8 +2092,8 @@ if __name__ == '__main__':
     
 #   pheno = sys.argv[1]
 #   pheno = 'type2Diabetes'
-#   scoresPath = f'/Users/kerimulterer/prsInteractive/results/{pheno}/productEpi/scores' 
-#   figPath = f'/Users/kerimulterer/prsInteractive/results/{pheno}/productEpi/figures'
+#   scoresPath = f'/your/results/{pheno}/productEpi/scores' 
+#   figPath = f'/your/results/{pheno}/productEpi/figures'
 #   combinedPRSFile = f'{scoresPath}/combinedPRSGroups.csv'
 #   combinedPRS = pd.read_csv(combinedPRSFile)
     create_qq_plot_groups(combinedPRS,figPath,use_epi_main=True)

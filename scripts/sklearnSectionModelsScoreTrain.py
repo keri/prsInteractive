@@ -364,11 +364,11 @@ if __name__ == '__main__':
     #########   FOR DEBUGGING ######
 #   data_type = 'epi'
 #   pheno = 'type2Diabetes_test'
-#   pheno_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}'
-#   training_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
-#   test_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
-#   epi_file = f'/Users/kerimulterer/prsInteractive/results/{pheno}/epiFiles/trainingCombinedEpi.epi.cc.summary.filtered'
-#   withdrawal_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/withdrawals.csv'
+#   pheno_path = f'/your/directory/prsInteractive/results/{pheno}'
+#   training_path = f'/your/directory/prsInteractive/results/{pheno}/trainingCombined.raw'
+#   test_path = f'/your/directory/prsInteractive/results/{pheno}/testCombined.raw'
+#   epi_file = f'/your/directory/prsInteractive/results/{pheno}/epiFiles/trainingCombinedEpi.epi.cc.summary.filtered'
+#   withdrawal_path=f'/your/directory/prsInteractive/results/{pheno}/withdrawals.csv'
 #   start = 1
 #   end = 1
     

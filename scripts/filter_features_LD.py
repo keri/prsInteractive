@@ -132,7 +132,7 @@ def filter_main_in_ld(ld2,featuresMain,rank_feature):
 def main(phenoPath,features_filter_ld):
 	'''run the LD command separately which generates the plink.ld'''
 	
-#	filePath = f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet'
+#	filePath = f'/your/directory/ukbiobank/{pheno}/tanigawaSet'
 	ld = pd.read_csv(f'{phenoPath}/finalModel.ld',sep='\s+')
 	ld2 = ld[ld['R2'] > .6]
 #	features = pd.read_csv(f'{phenoPath}/scores/importantFeaturesPostShap.csv')
