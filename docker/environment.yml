@@ -1,0 +1,19 @@
+name: ukb_env
+channels:
+    - conda-forge
+    - bioconda
+    - defaults
+dependencies:
+    - python=3.9
+    - matplotlib
+    - pandas
+    - plink
+    - numpy=1.26
+    - scikit-learn
+    - shap
+    - pip
+    - pip:
+        - fasttreeshap
+        - ipython
+    
+
