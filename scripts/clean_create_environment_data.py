@@ -322,14 +322,14 @@ if __name__ == '__main__':
 #   
     ###########  TEST VARIABLES ##########
 #   pheno = 'type2Diabetes'
-#   pheno_data = f"/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi"
-#   env_file = "/Users/kerimulterer/prsInteractive/results/participant_environment.csv"
-#   hla_file = "/Users/kerimulterer/prsInteractive/results/participant_hla.csv"
-#   training_file = f"/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw"
-#   test_file = f"/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw"
-#   holdout_file = f"/Users/kerimulterer/prsInteractive/results/{pheno}/holdoutCombined.raw"
-#   gene_env_file=f"{pheno_data}/scores/cardioMetabolicimportantFeaturesPostShap.csv"
-#   withdrawal_path = '/Users/kerimulterer/prsInteractive/data/withdrawals.csv'
+#   pheno_data = f"/path/to/prsInteractive/results/{pheno}/summedEpi"
+#   env_file = "/path/to/prsInteractive/results/participant_environment.csv"
+#   hla_file = "/path/to/prsInteractive/results/participant_hla.csv"
+#   training_file = f"/path/to/prsInteractive/results/{pheno}/trainingCombined.raw"
+#   test_file = f"/path/to/prsInteractive/results/{pheno}/testCombined.raw"
+#   holdout_file = f"/path/to/prsInteractive/results/{pheno}/holdoutCombined.raw"
+#   gene_env_file=f"{pheno_data}/scores/cardioMetabolicimportantFeaturesPostShapFilteredZscore.csv"
+#   withdrawal_path = '/path/to/prsInteractive/data/withdrawals.csv'
 #   epi_combo = 'sum'
 #   threshold=1.99
     

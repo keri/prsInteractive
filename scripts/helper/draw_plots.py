@@ -98,23 +98,18 @@ MARKER_SIZES = {
 CONTROL_COLOR = '#BEBEBE'  # Gray
 LOW_RISK_COLOR = '#333333' #black
 
-#COHORT_COLORS = {
-#   'main': '#E69F00',      # Orange
-#   'epi': '#56B4E9',    # Sky blue
-#   'epi+main': '#CC79A7',    # Pinkish purple
-#   'cardio': '#009E73',   # Bluish green
-#   'all': '#F0E442',  # Bluish green
-#   'combined': '#D55E00'
-#   
-#}
-#
-#COHORT_MARKERS = {
-#   'main': 'o',      # Circle
-#   'epi': 's',    # Square
-#   'epi+main' : 'p', # Plus
-#   'cardio': '^' ,  # Triangle
-#   'all': 'x' # X
-#}
+# ── Draw order: background → foreground ───────────────────────────────
+# main always foreground; then epi variants; then cardio variants behind
+DRAW_PRIORITY = [
+    'cardio_product',
+    'cardio_summed',
+    'epi_product',
+    'epi_summed',
+    'main',
+]
+
+# ── Pre-assign display colour by model priority (main = highest) ───────
+COLOUR_PRIORITY = ['main', 'epi_summed', 'epi_product', 'cardio_summed', 'cardio_product']
 
 
 # =============================================================================
@@ -145,6 +140,21 @@ def get_model_color_extended(model: str) -> str:
 def get_model_marker_extended(model: str) -> str:
     """Get marker for a model, with fallback."""
     return COHORT_MARKERS_EXTENDED.get(model, 'o')
+
+def _draw_rank(model: str) -> int:
+    """Lower rank = drawn first (background). Higher rank = drawn last (foreground)."""
+    for i, pattern in enumerate(DRAW_PRIORITY):
+        if model == pattern:
+            return i
+    # Any model not explicitly listed goes behind cardio (rank -1)
+    return -1
+
+def _assign_display_color(row):
+    """Return the colour of the highest-priority model that flags this case."""
+    for model in COLOUR_PRIORITY:
+        if model in row.index and row[model]:
+            return get_model_color(model)
+    return LOW_RISK_COLOR
 
 
 
@@ -1024,17 +1034,18 @@ def plot_all_high_risk_cases(
         # ── Build model_order ─────────────────────────────────────────────────
         if model_order is None:
                 model_order = models_to_keep.copy()
-        else:
-                model_order = [m for m in model_order if m in models_to_keep]
-                for m in models_to_keep:
-                        if m not in model_order:
-                                model_order.append(m)
+#       else:
+        draw_order = sorted(
+            [m for m in model_order if m in models_to_keep],
+            key=_draw_rank   # ascending: background first, foreground last
+        )
+    
                             
-        if include_all_model and 'all' not in model_order:
-                model_order = ['all'] + model_order
+        if include_all_model and 'all' not in draw_order:
+                draw_order = ['all'] + draw_order
             
         if verbose:
-                print(f"  Plot order (background→foreground): {' → '.join(model_order)}")
+                print(f"  Plot order (background→foreground): {' → '.join(draw_order)}")
             
         # ── Cases / controls ──────────────────────────────────────────────────
         cases    = combined_prs[combined_prs['PHENOTYPE'] == 2].copy()
@@ -1047,7 +1058,7 @@ def plot_all_high_risk_cases(
                     
         # ── High-risk membership per model ────────────────────────────────────
         high_risk_by_model = {}
-        for model in model_order:
+        for model in draw_order:
                 bin_col = f'bin_{model}'
                 if bin_col in cases.columns:
                         high_risk_by_model[model] = cases[bin_col] > threshold
@@ -1070,6 +1081,10 @@ def plot_all_high_risk_cases(
                 f'prs_{x_model}': cases[f'scaled_prs_{x_model}'].values,
                 f'prs_{y_model}': cases[f'scaled_prs_{y_model}'].values,
         }, index=cases.index)
+    
+        # hr_df rows = cases, cols = model bool flags
+        display_colors = hr_df.apply(_assign_display_color, axis=1)
+        
     
         # ── Figure ────────────────────────────────────────────────────────────
         fig, ax = plt.subplots(figsize=figsize)
@@ -1094,54 +1109,63 @@ def plot_all_high_risk_cases(
                                 rasterized=True
                         )
                     
-        # ── One scatter layer per model, background → foreground ──────────────
-        legend_model_handles = []
+                    
+        # ── Single scatter pass for all high-risk cases ────────────────────────
+        high_risk_any_idx = n_flagged[n_flagged >= 1].index
+        exclusive_idx     = n_flagged[n_flagged == 1].index
+        shared_idx        = n_flagged[n_flagged >= 2].index
+        
+        # ── Priority color assignment (main > epi > cardio) ───────────────────
+        # Iterate draw_order low→high priority so the highest (main) overwrites last.
+        point_color = pd.Series('', index=high_risk_any_idx, dtype=object)
+        for model in draw_order:          # cardio → epi → main
+            if model not in high_risk_by_model:
+                continue
+            is_high  = high_risk_by_model[model]
+            flagged  = is_high[is_high].index.intersection(high_risk_any_idx)
+            point_color.loc[flagged] = get_model_color(model)
     
-        for z_order, model in enumerate(model_order, start=2):
-                if model not in high_risk_by_model:
-                        continue
+        # ── Two scatter passes: shape encodes exclusivity, color encodes priority ──
+        if len(exclusive_idx):
+            ax.scatter(
+                cases.loc[exclusive_idx, f'scaled_prs_{x_model}'],
+                cases.loc[exclusive_idx, f'scaled_prs_{y_model}'],
+                c=point_color.loc[exclusive_idx].tolist(),
+                s=55, alpha=0.85, marker='*',
+                zorder=5, edgecolors='none', rasterized=True
+            )
             
-                color  = get_model_color(model)
-                alpha  = _alpha(model)
-                marker_shape = get_model_marker(model)
+        if len(shared_idx):
+            ax.scatter(
+                cases.loc[shared_idx, f'scaled_prs_{x_model}'],
+                cases.loc[shared_idx, f'scaled_prs_{y_model}'],
+                c=point_color.loc[shared_idx].tolist(),
+                s=45, alpha=0.85, marker='P',
+                zorder=5, edgecolors='none', rasterized=True
+            )
             
-                is_high = high_risk_by_model[model]               # bool Series for this model
-                exclusive_idx = is_high[is_high & (n_flagged == 1)].index
-                shared_idx    = is_high[is_high & (n_flagged >= 2)].index
-            
-                n_excl   = len(exclusive_idx)
-                n_shared = len(shared_idx)
-                n_total  = n_excl + n_shared
-            
-                if verbose:
-                        print(f"  {model}: {n_total} high-risk  "
-                                    f"(exclusive={n_excl}, shared={n_shared})")
-                    
-                if n_excl:
-                        ax.scatter(
-                                cases.loc[exclusive_idx, f'scaled_prs_{x_model}'],
-                                cases.loc[exclusive_idx, f'scaled_prs_{y_model}'],
-                                c=color, s=55, alpha=alpha,
-                                marker='*', zorder=z_order,
-                                edgecolors='none', rasterized=True
-                        )
-                    
-                if n_shared:
-                        ax.scatter(
-                                cases.loc[shared_idx, f'scaled_prs_{x_model}'],
-                                cases.loc[shared_idx, f'scaled_prs_{y_model}'],
-                                c=color, s=45, alpha=alpha,
-                                marker='P', zorder=z_order,
-                                edgecolors='none', rasterized=True
-                        )
-                    
-                # One legend entry per model (color swatch only)
-                if n_total:
-                        legend_model_handles.append(
-                                plt.scatter([], [], c=color, alpha=alpha,
-                                                        s=50, marker='s',
-                                                        label=f'{model.upper()}  (n={n_total})')
-                        )
+        # ── Legend: highest priority first, counts = total flagged by each model ──
+        legend_model_handles = []
+        for model in reversed(draw_order):      # main → epi → cardio in legend
+            if model not in high_risk_by_model:
+                continue
+            is_high  = high_risk_by_model[model]
+            n_excl   = int(is_high[is_high & (n_flagged == 1)].sum())
+            n_shared = int(is_high[is_high & (n_flagged >= 2)].sum())
+            n_total  = n_excl + n_shared
+            n_shown  = int((point_color == get_model_color(model)).sum())
+            if verbose:
+                print(f"  {model}: {n_total} high-risk  "
+                        f"(exclusive={n_excl}, shared={n_shared}, shown in colour={n_shown})")
+            if n_total:
+                color = get_model_color(model)
+                legend_model_handles.append(
+                    plt.scatter([], [], c=color, alpha=0.85,
+                                s=50, marker='s',
+                                label=f'{model.upper()}  (n={n_total})')
+                )
+        
+
                     
         # ── Compact legend ────────────────────────────────────────────────────
         # Model colors
@@ -1432,11 +1456,11 @@ def create_all_prs_plots(
     if create_comprehensive:
         if comprehensive_axes is None:
             # Default: create main vs epi if both are in models
-#           if 'main' in models_to_keep and 'epi' in models_to_keep:
-#               comprehensive_axes = [('epi', 'main')]
-#           else:
-#               # Use first two models
-            if len(models_to_keep) >= 2:
+            if 'main' in models_to_keep and 'epi_product' in models_to_keep:
+                comprehensive_axes = [('epi_product', 'main')]
+            elif 'main' in models_to_keep and 'epi_summed' in models_to_keep:
+                comprehensive_axes = [('epi_summed', 'main')]
+            elif len(models_to_keep) >= 2:
                 comprehensive_axes = [(models_to_keep[-2], models_to_keep[-1])]
             else:
                 comprehensive_axes = []

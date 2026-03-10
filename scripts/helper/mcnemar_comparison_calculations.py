@@ -628,7 +628,7 @@ def run_prs_comparison(cases: pd.DataFrame, prs1_name: str, prs2_name: str,
         return pd.DataFrame(results)
 
 
-def calculate_mcnemar_test(validation_prs_file: str, scores_path: str, 
+def calculate_stat_tests(validation_prs_file: str, scores_path: str, 
                           models_to_compare: List[str] = None):
         """
         Main function to run all PRS comparisons with dynamic model discovery.
@@ -773,8 +773,31 @@ if __name__ == "__main__":
     prs_file = args.prs_file or os.environ.get("COMBINED_PRS_FILE")
     print(f"combined prs file : {prs_file}")
     
-#   prs_file = '/path/to/your/combinedPRSGroups.csv'
-#   scores_path = '/path/to/output/directory'
+    pheno='celiacDisease'
+    prs_file = f'/Users/kerimulterer/prsInteractive/results/{pheno}/combinedAnalysis/scores/combinedPRSGroups.filtered.csv'
+    scores_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/combinedAnalysis/scores'
     
-    results = calculate_mcnemar_test(prs_file, scores_path)
+    #results = calculate_stat_tests(prs_file, scores_path)
     
+    df = pd.read_csv(prs_file)
+    prs1_name = 'main'
+    prs2_name = 'epi_product'
+    
+    corr, p_value = spearmanr(
+            df[f'bin_{prs1_name}'],
+            df[f'bin_{prs2_name}']
+    )
+    
+    print('spearman r = ',corr)
+    print('p-value = ',p_value)
+
+    
+    corr, p_value = pearsonr(
+            df[f'bin_{prs1_name}'],
+            df[f'bin_{prs2_name}']
+    )
+    
+    print('pearson r = ',corr)
+    print('p-value = ',p_value)
+    
+    print('completed analysis for : ',pheno)

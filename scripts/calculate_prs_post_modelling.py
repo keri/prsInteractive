@@ -318,8 +318,8 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,test_combined_
         filteredFeatures = filteredFeatures[filteredFeatures['coefs'] != 0]
         
         
-        for model in filteredFeatures['model'].unique().tolist() + ['covariate']:
-#       for model in ['all','all+env_combined','env_combined']:
+#       for model in filteredFeatures['model'].unique().tolist() + ['covariate']:
+        for model in ['all','cardio']:
 #       for model in prs_models:
             if model == 'covariate':
                 prsFeatures = covarCoefs.copy()

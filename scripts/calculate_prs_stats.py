@@ -293,7 +293,7 @@ def calculate_prs_stats(pheno_data, model_type='prs', include_all=False, models_
             mcnemar_models = [col.replace('scaled_prs_', '') for col in cohorts]
             
             #calculate McNemar test with discovered models
-            calculate_mcnemar_test(filePath, scoresPath, models_to_compare=mcnemar_models)
+            calculate_stat_tests(filePath, scoresPath, models_to_compare=mcnemar_models)
             
             #get the case value based on PHENOTYPE column
             if 0 in df['PHENOTYPE'].unique():

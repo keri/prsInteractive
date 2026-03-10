@@ -151,35 +151,35 @@ get_main_cardio_features <- function(feature_file_path, participant_env_file) {
 
 
 
-calculate_nagelkerke_rsquared <- function(yTest,yProba) {
-
-  # Fit the null model (intercept only)
-  null_model <- glm(yTest ~ 1, family = binomial)
-
-  # Extract log-likelihood of the null model
-  # logLik_null <- logLik(null_model)
-  logLik_null <- as.numeric(logLik(null_model))
-
-
-  # Manually calculate the log-likelihood of the fitted model
-  epsilon <- 1e-15
-  yProba <- pmax(pmin(yProba, 1 - epsilon), epsilon)
-  logLik_fit <- sum(yTest * log(yProba) + (1 - yTest) * log(1 - yProba))
-
-
-  # Calculate Cox-Snell's R^2
-  R2_cox_snell <- 1 - exp((2 * (logLik_null - logLik_fit)) / length(yTest))
-  print('cox snell R squared =')
-  print(R2_cox_snell)
-
-  # Calculate Nagelkerke's R^2
-  R2_nagelkerke <- R2_cox_snell / (1 - exp(2 * logLik_null / length(yTest)))
-  print('Nagelkerke r squared = ')
-  print(R2_nagelkerke)
-
-  return(R2_nagelkerke)
-
-}
+#calculate_nagelkerke_rsquared <- function(yTest,yProba) {
+#
+# # Fit the null model (intercept only)
+# null_model <- glm(yTest ~ 1, family = binomial)
+#
+# # Extract log-likelihood of the null model
+# # logLik_null <- logLik(null_model)
+# logLik_null <- as.numeric(logLik(null_model))
+#
+#
+# # Manually calculate the log-likelihood of the fitted model
+# epsilon <- 1e-15
+# yProba <- pmax(pmin(yProba, 1 - epsilon), epsilon)
+# logLik_fit <- sum(yTest * log(yProba) + (1 - yTest) * log(1 - yProba))
+#
+#
+# # Calculate Cox-Snell's R^2
+# R2_cox_snell <- 1 - exp((2 * (logLik_null - logLik_fit)) / length(yTest))
+# print('cox snell R squared =')
+# print(R2_cox_snell)
+#
+# # Calculate Nagelkerke's R^2
+# R2_nagelkerke <- R2_cox_snell / (1 - exp(2 * logLik_null / length(yTest)))
+# print('Nagelkerke r squared = ')
+# print(R2_nagelkerke)
+#
+# return(R2_nagelkerke)
+#
+#}
 
 # Fixed version of download_covariate_data to ensure consistent data types
 
@@ -617,7 +617,6 @@ check_column_names <- function(original_names, loaded_data_names) {
   }
 }
 
-# Fixed version that handles column name changes
 get_geno_read_table_fixed <- function(data_file, data_path, columns_to_get, test_mode = FALSE, test_rows = 1000) {
   
   start_time <- Sys.time()
@@ -658,17 +657,25 @@ get_geno_read_table_fixed <- function(data_file, data_path, columns_to_get, test
   col_classes <- rep("NULL", length(original_header_cols))
   col_classes[col_positions[1]] <- "integer"  # IID
   col_classes[col_positions[2]] <- "integer"  # PHENOTYPE
+  # ↑ stray } was here — removed
   
   # Add requested columns
   if (length(columns_to_get) > 0) {
     requested_positions <- match(columns_to_get, original_header_cols)
+    
     if (any(is.na(requested_positions))) {
       missing <- columns_to_get[is.na(requested_positions)]
-      stop("Requested columns not found: ", paste(missing, collapse = ", "))
+      warning("Requested columns not found and will be skipped: ", paste(missing, collapse = ", "))
     }
     
-    if (test_mode) {
-      test_snp_cols <- columns_to_get[1:min(5, length(columns_to_get))]
+    found_mask          <- !is.na(requested_positions)
+    columns_to_get      <- columns_to_get[found_mask]
+    requested_positions <- requested_positions[found_mask]
+    
+    if (length(columns_to_get) == 0) {
+      warning("None of the requested columns were found. Reading IID and PHENOTYPE only.")
+    } else if (test_mode) {
+      test_snp_cols  <- columns_to_get[1:min(5, length(columns_to_get))]
       test_positions <- match(test_snp_cols, original_header_cols)
       col_classes[test_positions] <- "numeric"
       print(paste("TEST MODE: Will read", length(test_snp_cols), "SNP columns"))
@@ -676,22 +683,21 @@ get_geno_read_table_fixed <- function(data_file, data_path, columns_to_get, test
       col_classes[requested_positions] <- "numeric"
       print(paste("PRODUCTION MODE: Will read", length(columns_to_get), "SNP columns"))
     }
-  }
+  } # ↑ closing } for if(length(columns_to_get)) was missing
   
   # Read using read.table with column name preservation
   main_data <- read.table(data_file, 
-                         header = TRUE,
-                         sep = " ",
-                         colClasses = col_classes,
-                         nrows = if (test_mode) test_rows else -1,
-                         stringsAsFactors = FALSE,
-                         comment.char = "",
-                         quote = "",
-                         check.names = FALSE)  # Preserve original names
+                          header = TRUE,
+                          sep = " ",
+                          colClasses = col_classes,
+                          nrows = if (test_mode) test_rows else -1,
+                          stringsAsFactors = FALSE,
+                          comment.char = "",
+                          quote = "",
+                          check.names = FALSE)
   
   print(paste("Successfully loaded:", nrow(main_data), "x", ncol(main_data)))
   
-  # Check if column names were preserved
   loaded_col_names <- names(main_data)
   expected_cols <- if (test_mode) {
     c(base_cols, columns_to_get[1:min(5, length(columns_to_get))])
@@ -699,10 +705,8 @@ get_geno_read_table_fixed <- function(data_file, data_path, columns_to_get, test
     c(base_cols, columns_to_get)
   }
   
-  # Validate column names
   name_changes <- check_column_names(expected_cols, loaded_col_names)
   
-  # Fix any column name changes
   if (!is.null(name_changes)) {
     for (orig_name in names(name_changes)) {
       changed_name <- name_changes[[orig_name]]
@@ -713,19 +717,15 @@ get_geno_read_table_fixed <- function(data_file, data_path, columns_to_get, test
     }
   }
   
-  # Convert to data.table
   main_data <- as.data.table(main_data)
   
-  # Final column name check
   print("Final column names:")
   print(names(main_data)[1:10])
   
-  # Filter withdrawals
   original_rows <- nrow(main_data)
   main_data <- main_data[!IID %in% withdrawn_set]
   print(paste("After withdrawal filtering:", nrow(main_data), "rows kept"))
   
-  # Modify phenotype
   main_data[PHENOTYPE == 1, PHENOTYPE := 0L]
   main_data[PHENOTYPE == 2, PHENOTYPE := 1L]
   
@@ -738,7 +738,6 @@ get_geno_read_table_fixed <- function(data_file, data_path, columns_to_get, test
   
   return(main_data)
 }
-
 
 # TEST WRAPPERS - Limited rows for validation
 test_read_table <- function(data_file, data_path, columns_to_get) {
@@ -787,45 +786,53 @@ get_epi_snps <- function(epiFeatures) {
   return(epiSnps)
 }
 
-
-get_important_features <- function(feature_file,threshold){
+get_important_features <- function(feature_file, cardio_feature_file, threshold) {
   
   print("=== LOADING AND CLEANING FEATURE LIST ===")
   
-  # Load feature file
-  features_df = read.csv(feature_file)
-  # Filter features with |shap_zscore| > threshold
+  # --- Primary feature file ---
+  features_df      <- read.csv(feature_file)
   important_features <- features_df[abs(features_df$shap_zscore) > threshold, ]
   
-  print(paste("Original features loaded:", nrow(important_features)))
+  print(paste("Primary features loaded:", nrow(important_features)))
   
-  # Check for duplicates before processing
+  # Check for and remove duplicates
   duplicate_features <- important_features$feature[duplicated(important_features$feature)]
   if (length(duplicate_features) > 0) {
     print(paste("Found", length(duplicate_features), "duplicate features"))
     cat("First few duplicates:", paste(head(duplicate_features, 10), collapse = ", "), "\n")
-    
-    # Remove duplicates - keep first occurrence
     important_features <- important_features[!duplicated(important_features$feature), ]
     print(paste("After removing duplicates:", nrow(important_features), "unique features"))
   } else {
     print("No duplicates found")
   }
   
-  # Create the feature lists with unique values
-  epi_main_features = unique(important_features$feature)  # All unique features
+  main_features <- unique(important_features$feature[important_features$data_type == "main"])
+  epi_features  <- unique(important_features$feature[important_features$data_type == "epi"])
   
-  main_features = unique(important_features$feature[important_features$data_type == "main"])
+  # --- Secondary file: GxGxE genetic features ---
+  print("=== LOADING CARDIOMETABOLIC GxGxE FEATURE LIST ===")
   
-  epi_features = unique(important_features$feature[important_features$data_type == "epi"])
+  cardio_df       <- read.csv(cardio_feature_file)
+  
+  # Filter: |shap_zscore| > threshold AND epistatic == 1
+  gxgxe_df        <- cardio_df[abs(cardio_df$shap_zscore) > threshold & cardio_df$epistatic == 1, ]
+  gxgxe_features  <- unique(gxgxe_df$geneticFeature)
+  
+  print(paste("GxGxE features after filtering:", length(gxgxe_features)))
+  
+  # --- Union of all unique genetic features for download_data ---
+  # main (G) + epi (GxG) + GxGxE genetic components
+  all_genetic_features <- unique(c(main_features, epi_features, gxgxe_features))
   
   # Print summary
-  cat("Feature summary:\n")
-  cat("- Total unique features:", length(epi_main_features), "\n")
-  cat("- Main features:", length(main_features), "\n")
-  cat("- Epi features:", length(epi_features), "\n")
+  cat("\nFeature summary:\n")
+  cat("- Main (G) features:            ", length(main_features), "\n")
+  cat("- Epi (GxG) features:           ", length(epi_features), "\n")
+  cat("- GxGxE genetic features:       ", length(gxgxe_features), "\n")
+  cat("- Total unique for download:    ", length(all_genetic_features), "\n")
   
-  # Verify no overlaps if you expect them to be mutually exclusive
+  # Warn on unexpected overlaps between main and epi
   overlap <- intersect(main_features, epi_features)
   if (length(overlap) > 0) {
     print(paste("WARNING: Found", length(overlap), "features in both main and epi"))
@@ -833,11 +840,13 @@ get_important_features <- function(feature_file,threshold){
   }
   
   return(list(
-    epi_main_features = epi_main_features,
-    main_features = main_features,
-    epi_features = epi_features
+    all_genetic_features = all_genetic_features,  # full list → download_data
+    main_features        = main_features,          # G
+    epi_features         = epi_features,           # GxG
+    cardio_features      = gxgxe_features          # GxGxE genetic components
   ))
 }
+
 
 # Also add this function to check data types before merging:
 check_merge_compatibility <- function(df1, df2, merge_col = "IID") {
@@ -882,6 +891,7 @@ parser$add_argument("--pheno_data", required = TRUE)
 parser$add_argument("--training_file", required = TRUE)
 parser$add_argument("--test_file", required = TRUE)
 parser$add_argument("--reduced_feature_file" ,required = TRUE)
+parser$add_argument("--cardio_feature_file" ,required = TRUE)
 parser$add_argument("--epi_combo", required=TRUE)
 parser$add_argument("--threshold", required=TRUE)
 parser$add_argument("--training_env_gen_file", required = TRUE)
@@ -903,6 +913,7 @@ training_file <- args$training_file
 test_file <- args$test_file
 covar_file <- args$covar_file
 feature_model_file <- args$reduced_feature_file
+cardio_feature_file <- args$cardio_feature_file
 participant_env_file <- file.path(results_path, "participant_environment.csv")
 epi_combo <- args$epi_combo
 threshold <- args$threshold
@@ -939,9 +950,9 @@ scores_path = paste0(pheno_data,'/scores')
 ############################### FEATURES TO BE USED IN EACH MODEL ###############
 
 #combined epi and main snps after filtering for FDR
-all_features = get_important_features(feature_model_file,threshold)
+all_features = get_important_features(feature_model_file,cardio_feature_file, threshold)
 
-epi_main_features = all_features$epi_main_features
+epi_main_features = all_features$all_genetic_features
 main_features = all_features$main_features
 epi_features = all_features$epi_features
 columns_to_get = get_epi_snps(epi_main_features)
@@ -975,7 +986,7 @@ if (!file.exists(model_scores_file)) {
 ###### PREDICTION FILE ##########
 
 predictions_file = paste0(scores_path,'/predictProbsReducedFinalModel.csv')
-predictions_colnames = c("IID","yProba","model")
+predictions_colnames = c("IID","model","yProba")
 
 # Check if the file exists
 if (!file.exists(predictions_file)) {
@@ -1027,19 +1038,6 @@ if (!file.exists(feature_scores_file)) {
 
 ######################### MAIN ENV & CLINICAL ENV DATA  ##################
 
-#mainEnvTraining = fread(training_env_main_file,sep=",")
-#mainEnvTraining[, IID := as.integer(IID)]
-#
-#mainEnvTest = fread(test_env_main_file,sep=",")
-#mainEnvTest[, IID := as.integer(IID)]
-#
-#
-#clinicalEnvTraining = fread(training_env_clinical_file,sep=",")
-#clinicalEnvTraining[, IID := as.integer(IID)]
-#
-#clinicalEnvTest = fread(test_env_clinical_file,sep=",")
-#clinicalEnvTest[, IID := as.integer(IID)]
-
 # Load main environment training data
 mainEnvTraining = fread(training_env_main_file, sep=",")
 mainEnvTraining[, IID := as.integer(IID)]
@@ -1062,6 +1060,12 @@ allEnvironmentTest[, IID := as.integer(IID)]
 allEnvironmentTraining = fread(paste0(pheno_data,"/allEnvironmentTraining.csv"), sep=",")
 allEnvironmentTraining[, IID := as.integer(IID)]
 
+envTraining = fread(training_env_gen_file, sep=",")
+envTraining[, IID := as.integer(IID)]
+
+envTest = fread(test_env_gen_file, sep=",")
+envTest[, IID := as.integer(IID)]
+
 # Check if mainEnvTest has only IID column
 if (ncol(mainEnvTest) == 1) {
   message("mainEnvTest contains only IID column. Loading alternative file: allEnvironmentTest.csv")
@@ -1078,6 +1082,12 @@ if (ncol(mainEnvTest) == 1) {
   message(paste("mainEnvTest loaded successfully with", ncol(mainEnvTest)-1, "features"))
 }
 
+# Find features in clinicalEnvTest that are NOT in allEnvironmentTest columns so as not duplicate on merge
+diff_clinical_features = setdiff(names(clinicalEnvTraining), names(allEnvironmentTraining))
+
+clinicalEnvTraining = clinicalEnvTraining[, c("IID", diff_clinical_features), with=FALSE]
+clinicalEnvTest = clinicalEnvTest[, c("IID", diff_clinical_features), with=FALSE]
+
 ################### COVARIATE DATA ######################
 #covariate data with IID + first 10 PCs, SEX, and AGE
 covariate_data = download_covariate_data(covar_file)
@@ -1085,60 +1095,76 @@ covariate_data = download_covariate_data(covar_file)
 ################### HLA DATA ######################
 
 
-# hlaData = fread(paste0(machine_path,'/ukbiobank/tanigawaData/HLAImputationCleaned_participant.csv'),sep=",")
-hlaData = fread(hla_file,sep=",")
+hlaData = fread(hla_file, sep = ",")
 setnames(hlaData, "Participant ID", "IID")
-
-# CRITICAL: Ensure IID is integer type
 hlaData[, IID := as.integer(IID)]
 cat("HLA IID column set to integer type\n")
 
 hla_columns = setdiff(names(hlaData), "IID")
 
-############### COMBINED GENO CARDIO DATASETS  ##############
+# Split HLA columns: those in epi_main_features go in BEFORE create_epi_df()
+# so they participate in epistatic interactions; the rest go in AFTER
+hla_in_epi  <- intersect(hla_columns, epi_main_features)
+hla_not_epi <- setdiff(hla_columns, epi_main_features)
 
-envTraining = fread(training_env_gen_file,sep=",")
-envTraining[, IID := as.integer(IID)]
-
-envTest = fread(test_env_gen_file,sep=",")
-envTest[, IID := as.integer(IID)]
+message(paste(length(hla_in_epi),  "HLA columns present in epi_main_features (fed to create_epi_df)"))
+message(paste(length(hla_not_epi), "HLA columns NOT in epi_main_features (merged after)"))
 
 ################# TRAINING data #####################
-# trainingDf = get_geno_dataset(paste0(training_path,'/data/',training_file),machine_path,columns_to_get)
-trainingDf = get_geno_read_table_fixed(training_file,data_path,columns_to_get)
+trainingDf = get_geno_read_table_fixed(training_file, data_path, columns_to_get)
 
-#phenotype
+# Merge only the HLA columns that create_epi_df needs
+if (length(hla_in_epi) > 0) {
+  trainingDf = merge(trainingDf, hlaData[, c("IID", hla_in_epi), with = FALSE],
+                     by = "IID", all.x = TRUE)
+}
+
 yTraining = trainingDf$PHENOTYPE
 
-#combined main SNPs and epi pairs in which haplotypes are added for snp1 and snp2 of pair
-trainingDf = create_epi_df(trainingDf,epi_main_features,combo=epi_combo)
+# create_epi_df sees only HLA columns that belong in epi_main_features
+trainingDf = create_epi_df(trainingDf, epi_main_features, combo = epi_combo)
 
-#merge covariate data to geno data
-# Before merging with covariate data:
-# check_merge_compatibility(trainingDf, covariate_data)
-trainingDf = merge(trainingDf,covariate_data, by = "IID", all.x = TRUE)
+# Merge covariate data
+trainingDf = merge(trainingDf, covariate_data, by = "IID", all.x = TRUE)
 
-#merge HLA data to geno data
-# Before merging with covariate data:
-# check_merge_compatibility(trainingDf, hla_data)
-trainingDf = merge(trainingDf,hlaData, by = "IID", all.x = TRUE)
+# Now merge HLA columns that were NOT part of epi interactions
+if (length(hla_not_epi) > 0) {
+  # Safety check: exclude any that somehow already exist
+  already_present <- intersect(hla_not_epi, names(trainingDf))
+  if (length(already_present) > 0) {
+    warning(paste("These HLA columns already present, skipping:",
+                  paste(already_present, collapse = ", ")))
+    hla_not_epi <- setdiff(hla_not_epi, already_present)
+  }
+  
+  if (length(hla_not_epi) > 0) {
+    trainingDf = merge(trainingDf, hlaData[, c("IID", hla_not_epi), with = FALSE],
+                       by = "IID", all.x = TRUE)
+    message(paste(length(hla_not_epi), "additional HLA columns merged after create_epi_df"))
+  }
+}
 
 #combine cardio and geno features and scale data after combined
 #shape will be length(epi geno features to combine list X # people in test)
 
 trainingDf = merge(trainingDf,envTraining, by = "IID", all.x = TRUE)
-
-#merge with cardio main features
-#trainingDf = merge(trainingDf,mainEnvTraining, by= "IID", all.x = TRUE)
-
-#merge with cardio clinical features
-#trainingDf = merge(trainingDf,clinicalEnvTraining, by= "IID", all.x = TRUE)
   
 #merge with cardio clinical features
 trainingDf = merge(trainingDf,allEnvironmentTraining, by= "IID", all.x = TRUE)
 
+#merge with clinicalEnvFeatures as they are not present in allEnvFeatures
+trainingDf = merge(trainingDf,clinicalEnvTraining, by= "IID", all.x = TRUE)
+
+
 ################# TEST data #####################
 testDf = get_geno_read_table_fixed(test_file,data_path,columns_to_get)
+
+# Merge only the HLA columns that create_epi_df needs
+if (length(hla_in_epi) > 0) {
+  testDf = merge(testDf, hlaData[, c("IID", hla_in_epi), with = FALSE],
+                     by = "IID", all.x = TRUE)
+}
+
 
 #phenotype
 yTest = testDf$PHENOTYPE
@@ -1149,20 +1175,33 @@ testDf = create_epi_df(testDf,epi_main_features,combo=epi_combo)
 #merge covariate data to geno data
 testDf = merge(testDf,covariate_data, by = "IID", all.x = TRUE)
 
-#merge HLA data to geno data
-testDf = merge(testDf,hlaData, by = "IID", all.x = TRUE)
+# Now merge HLA columns that were NOT part of epi interactions
+if (length(hla_not_epi) > 0) {
+  # Safety check: exclude any that somehow already exist
+  already_present <- intersect(hla_not_epi, names(testDf))
+  if (length(already_present) > 0) {
+    warning(paste("These HLA columns already present in test, skipping:",
+                  paste(already_present, collapse = ", ")))
+    hla_not_epi <- setdiff(hla_not_epi, already_present)
+  }
+  
+  if (length(hla_not_epi) > 0) {
+    testDf = merge(testDf, hlaData[, c("IID", hla_not_epi), with = FALSE],
+                       by = "IID", all.x = TRUE)
+    message(paste(length(hla_not_epi), "additional HLA columns merged with test after create_epi_df"))
+  }
+}
 
 testDf = merge(testDf,envTest, by = "IID", all.x = TRUE)
 
-#merge with cardio main features
-#testDf = merge(testDf,mainEnvTest, by= "IID", all.x = TRUE)
 
 #merge with all env features features
 testDf = merge(testDf,allEnvironmentTest, by= "IID", all.x = TRUE)
 
 #merge with cardio clinical features
-#testDf = merge(testDf,clinicalEnvTest, by= "IID", all.x = TRUE)
-cat("Sample columns:", paste(head(clinicalEnvTest, 5), collapse = ", "), "\n")
+testDf = merge(testDf,clinicalEnvTest, by= "IID", all.x = TRUE)
+cat("Sample data (first 5 rows, first 3 columns):\n")
+print(head(as.data.frame(clinicalEnvTest)[, 1:min(3, ncol(clinicalEnvTest))], 5))
 
 #####################################################################################
 #                        PROCESS DATA FOR MODELLING                                 #
@@ -1263,18 +1302,18 @@ env_clinical_features = setdiff(names(clinicalEnvTraining), "IID")
 all_env_features = setdiff(names(allEnvironmentTraining), "IID")
 
 dataset_list = list(
-  list('clinical_main',c(env_clinical_features,covariate_columns)),
-  list('main',c(main_features,covariate_columns,hla_columns)),
-  list('epi',c(epi_features,covariate_columns,hla_columns)),
-  list('epi+main',c(epi_main_features,covariate_columns,hla_columns)),
+# list('clinical_main',c(env_clinical_features,covariate_columns)),
+# list('main',c(main_features,covariate_columns,hla_columns)),
+# list('epi',c(epi_features,covariate_columns,hla_columns)),
+# list('epi+main',c(main_features,epi_features,covariate_columns,hla_columns)),
   list('cardio',c(env_genetic_features,covariate_columns)),
-  list('all',c(env_genetic_features,epi_main_features,hla_columns,covariate_columns)),
-  list('env_main',c(env_main_features,covariate_columns)),
-  list('all+env_main',c(env_genetic_features,epi_main_features,env_main_features,hla_columns,covariate_columns)),
-  list('all+env_main+clinical_main',c(env_genetic_features,epi_main_features,hla_columns,env_main_features,env_clinical_features,covariate_columns)),
-  list('env_combined',c(all_env_features,covariate_columns)),
-  list('all+env_combined',c(env_genetic_features,epi_main_features,hla_columns,all_env_features,covariate_columns)),
-  list('covariate',c(covariate_columns))
+# list('all',c(env_genetic_features,main_features,epi_features,hla_columns,covariate_columns)),
+# list('env_main',c(env_main_features,covariate_columns)),
+# list('all+env_main',c(env_genetic_features,main_features,epi_features,env_main_features,hla_columns,covariate_columns)),
+# list('all+env_main+clinical_main',c(env_genetic_features,main_features,epi_features,hla_columns,env_main_features,env_clinical_features,covariate_columns)),
+# list('env_combined',c(all_env_features,covariate_columns)),
+  list('all+env_combined',c(env_genetic_features,epi_main_features,all_env_features,hla_columns,covariate_columns))
+# list('covariate',c(covariate_columns))
   
 )
 

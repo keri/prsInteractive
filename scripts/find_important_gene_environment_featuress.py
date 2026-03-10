@@ -25,8 +25,11 @@ def rank_gene_env_features(geneEnvShapleyFile,threshold):
     #get the epistatic interactions
 #   epiDf = df2[df2['epistatic'] == 1]
     
+    #change the main_E == 1 AND geneticFeatures is not NA
+    
+    
     #get the main effects
-    mainDf = df1[df1['main_E'] == 1]
+    mainDf = df1[(df1['main_E'] == 1) & (df['geneticFeature'].isna())]
     mainDf.loc[mainDf['envFeature'].isna(),'envFeature'] = mainDf['envGeneticFeature']
     
     mainDfCleaned = mainDf.groupby(by=['envGeneticFeature','env_type',
@@ -83,7 +86,7 @@ if __name__ == '__main__':
     threshold = float(threshold)
     print(f"analyzing top features based on shap z score : {threshold}")
     
-#   gene_env_file = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/productEpi/scores/cardioMetabolicimportantFeaturesPostShap.csv'
+#   gene_env_file = '/path/to/prsInteractive/results/type2Diabetes/summedEpi/scores/cardioMetabolicimportantFeaturesPostShap.csv'
 #   threshold = 1.99
 
     importantFeatures = rank_gene_env_features(gene_env_file,threshold)

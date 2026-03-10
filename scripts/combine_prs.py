@@ -212,11 +212,19 @@ def main(phenoPath):
 	#cardioFile = [f for f in allFiles if 'Cardio' in f]
 	
 	#no covariate only data used in binning
-	allFilesTemp = [f for f in allFilesTemp if 'covar' not in f]
+	allFilesTemp = [f for f in allFilesTemp if 'covariate' not in f]
+	
 	#remove the separate features from all model
 	allFilesTemp = [f for f in allFilesTemp if 'FromAll' not in f]
 	
-	allFilesTemp = [f for f in allFilesTemp if 'prscr_mix' not in f]
+	#remove clinical_main PRS and env_combined from
+	allFilesTemp = [f for f in allFilesTemp if 'clinical_main' not in f]
+	
+	#remove clinical_main PRS and env_combined from
+	allFilesTemp = [f for f in allFilesTemp if 'env_main' not in f]
+	
+	#remove combined PRS from holdout if present
+	allFilesTemp = [f for f in allFilesTemp if 'combined' not in f]
 	
 	
 

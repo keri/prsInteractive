@@ -137,8 +137,11 @@ def main(pheno,withdrawalPath,env_type,phenoData,trainingPath,testPath,resultsPa
         print("✓ First column appears to be a regular data column - keeping as is")
     
     
-    chunk_size=200
-    modelFeaturesFull = modelFeaturesFull[(modelFeaturesFull['shap_zscore'] < -threshold) | (modelFeaturesFull['shap_zscore'] > threshold)]
+    chunk_size=0
+    try:
+        modelFeaturesFull = modelFeaturesFull[(modelFeaturesFull['shap_zscore'] < -threshold) | (modelFeaturesFull['shap_zscore'] > threshold)]
+    except KeyError:
+        pass
 #   modelFeaturesFull = modelFeaturesFull[(modelFeaturesFull['shap_zscore'] < -threshold)]
     
     print('running GxGxE for important genetic features ...')
@@ -172,7 +175,7 @@ def main(pheno,withdrawalPath,env_type,phenoData,trainingPath,testPath,resultsPa
         #drops the PHENOTYPE column
         trainingData = create_epi_df(trainingData,modelFeatures['feature'].tolist()[start:stop],combo=epi_combo)
         #
-        #testData = get_dataset(testPath,modelFeatures2)
+
         testData = get_dataset(testPath, withdrawalPath,modelFeatures2, use_chunking=True)
         yTest = testData['PHENOTYPE']        
         testData = create_epi_df(testData,modelFeatures['feature'].tolist()[start:stop],combo=epi_combo)
@@ -186,6 +189,11 @@ def main(pheno,withdrawalPath,env_type,phenoData,trainingPath,testPath,resultsPa
         #get features for later use
         hlaFeatures = hlaData.columns.tolist()
         
+        if trainingData.empty:
+            #if analysis use  no genetic data (HLA only)
+            trainingData.index = y.index
+            testData.index = yTest.index
+            
         trainingData = trainingData.merge(hlaData,left_index=True,right_index=True,how='left')
         print('final shape of training dataframe for all features after hla merge = ',trainingData.shape)
         
@@ -385,12 +393,15 @@ if __name__ == '__main__':
     print(f"method to use for combining epi interactions : {epi_combo}")
     
 
-#   pheno='type2Diabetes_test'
-#   pheno_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}'
-#   env_type='cardioMetabolic'
-#   training_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
-#   test_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
-#   results_path='/Users/kerimulterer/prsInteractive/results'
+    pheno='type2Diabetes'
+    pheno_data=f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi'
+    withdrawal_path='/Users/kerimulterer/prsInteractive/data/withdrawals.csv'
+    env_type='cardioMetabolic'
+    training_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/trainingCombined.raw'
+    test_path=f'/Users/kerimulterer/prsInteractive/results/{pheno}/testCombined.raw'
+    results_path='/Users/kerimulterer/prsInteractive/results'
+    input_file=f'{pheno_data}/scores/importantFeaturesPostShap.csv'
+    chunk_stop=1
     
     
     
