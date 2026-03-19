@@ -1,0 +1,687 @@
+#!/usr/bin/env python3
+"""
+enrich_clusters_literature.py
+==============================
+Post-NMF literature enrichment for cluster features using:
+  - DisGeNET REST API   — gene-disease association scores (GDA)
+  - Open Targets        — integrated gene-disease evidence (GWAS, literature,
+                          functional genomics); no API key required
+  - PubTator3           — entity-aware publication co-occurrence (NCBI);
+                          recognises genes, SNPs and diseases as biological
+                          entities rather than plain keywords; no key required
+  - NCBI PubMed         — keyword co-occurrence count via E-utilities
+  - ClinVar             — variant clinical significance
+
+Query strategy per gene/SNP × phenotype
+----------------------------------------
+1. DisGeNET GDA score (gene-disease association)
+2. Open Targets association score (integrated evidence)
+3. PubTator3 entity-annotated co-occurrence count
+4. PubMed keyword co-occurrence count (fallback / complement)
+5. ClinVar pathogenicity (SNPs and short gene symbols only)
+6. Combined score = weighted sum of the above
+
+Usage
+-----
+  python enrich_clusters_literature.py \\
+    --cluster_dir /path/to/cohortBnmf/cardio \\
+    --phenotypes "type 2 diabetes,epilepsy,cardio" \\
+    --ncbi_api_key YOUR_NCBI_KEY \\
+    [--disgenet_api_key YOUR_DISGENET_KEY]
+"""
+
+import argparse
+import json
+import math
+import os
+import time
+from collections import defaultdict
+
+import pandas as pd
+import requests
+
+
+# ── Constants ──────────────────────────────────────────────────────────────────
+
+NCBI_BASE          = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+DISGENET_BASE      = "https://www.disgenet.org/api"
+OPEN_TARGETS_API   = "https://api.platform.opentargets.org/api/v4/graphql"
+PUBTATOR3_BASE     = "https://www.ncbi.nlm.nih.gov/research/pubtator3-api"
+
+# Significance threshold: if combined evidence below this, still include
+# but flag as low-confidence.
+MIN_SIGNIFICANT_SCORE = 0.05
+
+# Weights for combined evidence score (must sum to 1.0)
+WEIGHT_DISGENET      = 0.25
+WEIGHT_OPEN_TARGETS  = 0.30
+WEIGHT_PUBTATOR3     = 0.25
+WEIGHT_CLINVAR       = 0.20
+
+CACHE_DIR = None
+
+
+# ── HTTP helpers ───────────────────────────────────────────────────────────────
+
+def _get(url, params=None, headers=None, retries=3, wait=1.5):
+    for attempt in range(retries):
+        try:
+            r = requests.get(url, params=params, headers=headers, timeout=30)
+            if r.status_code == 200:
+                try:
+                    return r.json()
+                except Exception:
+                    return r.text
+            if r.status_code in (429, 503):
+                time.sleep(wait * (attempt + 1))
+                continue
+            r.raise_for_status()
+        except requests.RequestException as e:
+            if attempt == retries - 1:
+                print(f"    [WARN] GET {url}: {e}")
+                return None
+            time.sleep(wait)
+    return None
+
+
+def _graphql_post(query, variables, retries=3, wait=1.5):
+    """POST a GraphQL query to Open Targets."""
+    for attempt in range(retries):
+        try:
+            r = requests.post(
+                OPEN_TARGETS_API,
+                json={'query': query, 'variables': variables},
+                headers={'Content-Type': 'application/json'},
+                timeout=30,
+            )
+            if r.status_code == 200:
+                return r.json()
+            if r.status_code in (429, 503):
+                time.sleep(wait * (attempt + 1))
+                continue
+        except requests.RequestException as e:
+            if attempt == retries - 1:
+                print(f"    [WARN] GraphQL POST: {e}")
+                return None
+            time.sleep(wait)
+    return None
+
+
+def _cache_path(name):
+    return os.path.join(CACHE_DIR, f"{name}.json") if CACHE_DIR else None
+
+
+def _load_cache(name):
+    p = _cache_path(name)
+    if p and os.path.exists(p):
+        with open(p) as f:
+            return json.load(f)
+    return {}
+
+
+def _save_cache(name, data):
+    p = _cache_path(name)
+    if p:
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, 'w') as f:
+            json.dump(data, f)
+
+
+# ── DisGeNET ───────────────────────────────────────────────────────────────────
+
+def query_disgenet(gene_symbol, phenotype, api_key=None):
+    """
+    Query DisGeNET for gene-disease associations.
+
+    Returns
+    -------
+    float  GDA score in [0, 1] (0 = not found)
+    str    matched disease name or empty string
+    """
+    cache = _load_cache('disgenet')
+    key   = f'{gene_symbol}__{phenotype}'
+    if key in cache:
+        return cache[key]['score'], cache[key]['notes']
+
+    headers = {'Authorization': f'Bearer {api_key}'} if api_key else {}
+    headers['Accept'] = 'application/json'
+
+    data = _get(
+        f"{DISGENET_BASE}/gda/gene/{gene_symbol}",
+        params={'disease': phenotype, 'format': 'json'},
+        headers=headers,
+    )
+    time.sleep(0.3)
+
+    score = 0.0
+    notes = ''
+    if isinstance(data, list) and data:
+        scores = [
+            float(rec.get('score', 0))
+            for rec in data
+            if phenotype.lower() in rec.get('diseaseName', '').lower()
+        ]
+        if scores:
+            score = max(scores)
+            top   = sorted(data, key=lambda r: float(r.get('score', 0)), reverse=True)[0]
+            notes = top.get('diseaseName', '')
+
+    cache[key] = {'score': score, 'notes': notes}
+    _save_cache('disgenet', cache)
+    return score, notes
+
+
+# ── Open Targets ───────────────────────────────────────────────────────────────
+
+def query_open_targets(gene_symbol, phenotype):
+    """
+    Query Open Targets platform for gene-disease association evidence.
+
+    Uses the public GraphQL API (no API key required).  Steps:
+      1. Resolve gene symbol → Ensembl ID via target search
+      2. Fetch top associated diseases; match against phenotype string
+      3. Return the best matching association score [0, 1]
+
+    For SNP rs-IDs the function returns 0 (Open Targets is gene-centric;
+    use query_disgenet or query_pubtator3 for SNP-level evidence).
+
+    Returns
+    -------
+    float  association score in [0, 1]
+    str    matched disease name or empty string
+    """
+    if gene_symbol.startswith('rs'):
+        return 0.0, ''   # SNP — not handled by Open Targets platform
+
+    cache = _load_cache('open_targets')
+    key   = f'{gene_symbol}__{phenotype}'
+    if key in cache:
+        return cache[key]['score'], cache[key]['disease']
+
+    # ── Step 1: resolve gene symbol to Ensembl target ID ──────────────────
+    search_q = """
+    query SearchTarget($q: String!) {
+        search(queryString: $q, entityNames: ["target"]) {
+            hits { id }
+        }
+    }
+    """
+    resp = _graphql_post(search_q, {'q': gene_symbol})
+    target_id = None
+    if resp:
+        hits = resp.get('data', {}).get('search', {}).get('hits', [])
+        if hits:
+            target_id = hits[0]['id']
+
+    if not target_id:
+        cache[key] = {'score': 0.0, 'disease': ''}
+        _save_cache('open_targets', cache)
+        return 0.0, ''
+
+    # ── Step 2: fetch top disease associations ─────────────────────────────
+    assoc_q = """
+    query TargetDiseases($targetId: String!) {
+        target(ensemblId: $targetId) {
+            associatedDiseases(page: {index: 0, size: 50}) {
+                rows {
+                    score
+                    disease { name }
+                }
+            }
+        }
+    }
+    """
+    resp = _graphql_post(assoc_q, {'targetId': target_id})
+    time.sleep(0.4)
+
+    score       = 0.0
+    disease_hit = ''
+    if resp:
+        rows = (resp.get('data', {})
+                    .get('target', {})
+                    .get('associatedDiseases', {})
+                    .get('rows', []))
+        pheno_lower = phenotype.lower()
+        matching = [
+            r for r in rows
+            if pheno_lower in r.get('disease', {}).get('name', '').lower()
+        ]
+        if matching:
+            best        = max(matching, key=lambda r: r['score'])
+            score       = best['score']
+            disease_hit = best['disease']['name']
+        elif rows:
+            # No phenotype match — return a discounted highest score as background
+            best  = max(rows, key=lambda r: r['score'])
+            score = best['score'] * 0.2
+
+    cache[key] = {'score': round(score, 6), 'disease': disease_hit}
+    _save_cache('open_targets', cache)
+    return round(score, 6), disease_hit
+
+
+# ── PubTator3 ──────────────────────────────────────────────────────────────────
+
+def query_pubtator3(term, phenotype):
+    """
+    Query PubTator3 for entity-annotated publications co-mentioning
+    term (gene symbol or rs-ID) and phenotype.
+
+    PubTator3 recognises biological entities (genes, variants, diseases,
+    chemicals) in PubMed/PMC text, so the co-occurrence count is more
+    specific than a plain keyword search — "BMI" is recognised as a
+    clinical measure, "rs12345" as a genomic variant, etc.
+
+    Returns
+    -------
+    int   number of entity-annotated publications mentioning both term and phenotype
+    str   detected entity type ('Gene', 'Variant', 'Chemical', 'Disease', or '')
+    """
+    cache = _load_cache('pubtator3')
+    key   = f'{term}__{phenotype}'
+    if key in cache:
+        return cache[key]['count'], cache[key]['entity_type']
+
+    query   = f"{term} {phenotype}"
+    data    = _get(
+        f"{PUBTATOR3_BASE}/search/",
+        params={'text': query, 'sort': 'score', 'page': 1},
+    )
+    time.sleep(0.35)
+
+    count       = 0
+    entity_type = ''
+    if data:
+        count = data.get('count', 0)
+        # Try to detect the entity type of 'term' from the first result's annotations
+        for result in data.get('results', [])[:3]:
+            for passage in result.get('passages', []):
+                for ann in passage.get('annotations', []):
+                    if term.lower() in ann.get('text', '').lower():
+                        entity_type = ann.get('infons', {}).get('type', '')
+                        break
+                if entity_type:
+                    break
+            if entity_type:
+                break
+
+    cache[key] = {'count': count, 'entity_type': entity_type}
+    _save_cache('pubtator3', cache)
+    return count, entity_type
+
+
+# ── PubMed co-occurrence (keyword fallback) ────────────────────────────────────
+
+def query_pubmed_cooccurrence(term, phenotype, api_key=None):
+    """
+    Count PubMed papers mentioning (term AND phenotype) via keyword search.
+    Serves as a complement to PubTator3's entity-level counts.
+
+    Returns
+    -------
+    int  co-occurrence count
+    """
+    cache = _load_cache('pubmed_cooccurrence')
+    key   = f'{term}__{phenotype}'
+    if key in cache:
+        return cache[key]
+
+    query  = f'("{term}"[tiab] OR "{term}"[gene]) AND ("{phenotype}"[tiab])'
+    params = {'db': 'pubmed', 'term': query, 'rettype': 'count', 'retmode': 'json'}
+    if api_key:
+        params['api_key'] = api_key
+
+    data  = _get(f"{NCBI_BASE}/esearch.fcgi", params=params)
+    count = 0
+    if data and 'esearchresult' in data:
+        count = int(data['esearchresult'].get('count', 0))
+    time.sleep(0.35 if not api_key else 0.12)
+
+    cache[key] = count
+    _save_cache('pubmed_cooccurrence', cache)
+    return count
+
+
+# ── ClinVar ────────────────────────────────────────────────────────────────────
+
+def query_clinvar_significance(snp_or_gene, api_key=None):
+    """
+    Fetch clinical significance from ClinVar for a SNP rs-ID or gene.
+
+    Returns
+    -------
+    str   'pathogenic' | 'likely_pathogenic' | 'uncertain' | 'benign' | 'not_found'
+    """
+    cache = _load_cache('clinvar')
+    if snp_or_gene in cache:
+        return cache[snp_or_gene]
+
+    params = {
+        'db':      'clinvar',
+        'term':    snp_or_gene,
+        'retmode': 'json',
+        'retmax':  5,
+    }
+    if api_key:
+        params['api_key'] = api_key
+
+    search = _get(f"{NCBI_BASE}/esearch.fcgi", params=params)
+    time.sleep(0.35 if not api_key else 0.12)
+
+    sig = 'not_found'
+    if search and search.get('esearchresult', {}).get('idlist'):
+        uid  = search['esearchresult']['idlist'][0]
+        summ = _get(
+            f"{NCBI_BASE}/esummary.fcgi",
+            params={'db': 'clinvar', 'id': uid, 'retmode': 'json'},
+        )
+        time.sleep(0.35 if not api_key else 0.12)
+        if summ:
+            doc = summ.get('result', {}).get(uid, {})
+            sig = doc.get('clinical_significance', {}).get('description', 'not_found').lower()
+            sig = sig.split('/')[0].strip().replace(' ', '_')
+
+    cache[snp_or_gene] = sig
+    _save_cache('clinvar', cache)
+    return sig
+
+
+# ── Combined evidence scoring ─────────────────────────────────────────────────
+
+def compute_combined_score(disgenet_score, open_targets_score,
+                           pubtator3_count, clinvar_sig):
+    """
+    Combine evidence from DisGeNET, Open Targets, PubTator3 and ClinVar
+    into a single [0, 1] score.
+
+    PubMed keyword counts are deliberately excluded from the formula here
+    (they are stored in the evidence table for reference) because PubTator3
+    entity counts already capture publication evidence more precisely.
+
+    Weights: DisGeNET=0.25, Open Targets=0.30, PubTator3=0.25, ClinVar=0.20
+    """
+    # PubTator3: sigmoid normalisation — ~20 entity-annotated papers → 0.63
+    pubtator3_norm = 1 - math.exp(-pubtator3_count / 20.0)
+
+    clinvar_val = {
+        'pathogenic':             1.0,
+        'likely_pathogenic':      0.8,
+        'pathogenic/likely':      0.9,
+        'uncertain_significance': 0.2,
+        'benign':                 0.0,
+        'likely_benign':          0.05,
+        'not_found':              0.0,
+    }.get(clinvar_sig, 0.1)
+
+    combined = (
+        WEIGHT_DISGENET     * disgenet_score     +
+        WEIGHT_OPEN_TARGETS * open_targets_score +
+        WEIGHT_PUBTATOR3    * pubtator3_norm     +
+        WEIGHT_CLINVAR      * clinvar_val
+    )
+    return round(min(combined, 1.0), 6)
+
+
+# ── Feature → term extraction ─────────────────────────────────────────────────
+
+def extract_terms_from_feature(feature_name, snp_gene_map=None):
+    """
+    Given a prefixed feature column name, return queryable terms.
+
+    Examples:
+      'gen_rs12345'             → ['rs12345', 'GENE_NAME'] (if snp_gene_map provided)
+      'gen_rs12345_rs67890'     → ['rs12345', 'rs67890', ...]
+      'clin_bmi'                → ['bmi', 'body mass index']
+      '{cohort}_prs'            → []  (PRS anchors not queried individually)
+    """
+    if '_prs' in feature_name and not feature_name.startswith('gen_'):
+        return []
+
+    name = feature_name
+    for prefix in ('gen_', 'clin_'):
+        if name.startswith(prefix):
+            name = name[len(prefix):]
+            break
+
+    terms = []
+    if name.startswith('rs') or '_rs' in name:
+        parts = name.split('_')
+        terms = [p for p in parts if p.startswith('rs')]
+        if snp_gene_map:
+            for snp in terms[:]:
+                terms += snp_gene_map.get(snp, [])
+    else:
+        terms = [name.replace('_', ' ')]
+
+    return list(dict.fromkeys(terms))
+
+
+# ── Main enrichment ───────────────────────────────────────────────────────────
+
+def enrich_with_literature(
+    cluster_dir,
+    phenotypes,
+    disgenet_api_key=None,
+    ncbi_api_key=None,
+    top_n=20,
+):
+    """
+    Main literature enrichment routine.
+
+    Queries DisGeNET, Open Targets, PubTator3, PubMed and ClinVar for each
+    top feature × phenotype pair identified in the bNMF cluster output.
+
+    Parameters
+    ----------
+    cluster_dir      : str — bNMF output directory (contains feature_loadings.csv)
+    phenotypes       : list[str] — phenotype terms to query
+    disgenet_api_key : str | None — DisGeNET API key (free at disgenet.org)
+    ncbi_api_key     : str | None — NCBI API key (3→10 req/sec)
+    top_n            : int — top features per cluster to query
+
+    Returns
+    -------
+    dict  {'evidence_df', 'cluster_ranked_df', 'cluster_summary_df'}
+    """
+    global CACHE_DIR
+    CACHE_DIR = os.path.join(cluster_dir, 'enrichment', '.cache')
+    out_dir   = os.path.join(cluster_dir, 'enrichment', 'literature')
+    os.makedirs(out_dir, exist_ok=True)
+
+    # ── Load feature loadings ──────────────────────────────────────────────
+    loadings_path = os.path.join(cluster_dir, 'feature_loadings.csv')
+    if not os.path.exists(loadings_path):
+        print(f"  [ERROR] feature_loadings.csv not found in {cluster_dir}")
+        return {}
+
+    H_df = pd.read_csv(loadings_path, index_col=0)
+
+    # Load SNP→gene map from GTEx enrichment cache if available
+    snp_gene_map  = {}
+    snp_gene_path = os.path.join(CACHE_DIR, 'snp_gene_map.json')
+    if os.path.exists(snp_gene_path):
+        snp_gene_map = _load_cache('snp_gene_map')
+
+    # ── Collect top features per cluster ──────────────────────────────────
+    cluster_top: dict = {}
+    for cluster in H_df.index:
+        row            = H_df.loc[cluster]
+        cluster_top[cluster] = row.nlargest(top_n).index.tolist()
+
+    all_features = list({f for feats in cluster_top.values() for f in feats})
+    all_terms    = {
+        feat: extract_terms_from_feature(feat, snp_gene_map)
+        for feat in all_features
+    }
+
+    # ── Evidence gathering ─────────────────────────────────────────────────
+    unique_pairs = sorted({
+        (term, pheno)
+        for terms in all_terms.values()
+        for term in terms
+        for pheno in phenotypes
+    })
+
+    print(f"\n  Evidence sources: DisGeNET, Open Targets, PubTator3, PubMed, ClinVar")
+    print(f"  Querying {len(unique_pairs)} term × phenotype pairs...")
+
+    evidence_rows = []
+    for idx, (term, pheno) in enumerate(unique_pairs):
+        if idx % 20 == 0:
+            print(f"    {idx}/{len(unique_pairs)} queries completed")
+
+        # DisGeNET — gene-disease association score
+        disgenet_score, disgenet_disease = query_disgenet(
+            term, pheno, api_key=disgenet_api_key
+        )
+
+        # Open Targets — integrated multi-evidence gene-disease score
+        ot_score, ot_disease = query_open_targets(term, pheno)
+
+        # PubTator3 — entity-annotated co-occurrence (primary publication signal)
+        pt3_count, pt3_entity_type = query_pubtator3(term, pheno)
+
+        # PubMed — keyword co-occurrence (stored for reference)
+        pubmed_count = query_pubmed_cooccurrence(term, pheno, api_key=ncbi_api_key)
+
+        # ClinVar — variant/gene pathogenicity
+        is_snp_or_gene = term.startswith('rs') or (term.isalpha() and len(term) <= 10)
+        clinvar_sig = (
+            query_clinvar_significance(term, api_key=ncbi_api_key)
+            if is_snp_or_gene else 'not_found'
+        )
+
+        combined = compute_combined_score(
+            disgenet_score, ot_score, pt3_count, clinvar_sig
+        )
+
+        evidence_rows.append({
+            'term':                  term,
+            'phenotype':             pheno,
+            'disgenet_score':        round(disgenet_score, 6),
+            'disgenet_disease':      disgenet_disease,
+            'open_targets_score':    ot_score,
+            'open_targets_disease':  ot_disease,
+            'pubtator3_count':       pt3_count,
+            'pubtator3_entity_type': pt3_entity_type,
+            'pubmed_count':          pubmed_count,
+            'clinvar_sig':           clinvar_sig,
+            'combined_score':        combined,
+        })
+
+    evidence_df = pd.DataFrame(evidence_rows)
+    evidence_df.sort_values('combined_score', ascending=False, inplace=True)
+    evidence_df.to_csv(
+        os.path.join(out_dir, 'gene_evidence_table.csv'), index=False
+    )
+    print(f"    Saved gene_evidence_table.csv ({len(evidence_df)} rows)")
+
+    # ── Cluster-level ranking ──────────────────────────────────────────────
+    ev_lookup = (
+        evidence_df.set_index(['term', 'phenotype'])['combined_score'].to_dict()
+    )
+
+    cluster_ranked_rows = []
+    for cluster, top_feats in cluster_top.items():
+        for rank, feat in enumerate(top_feats, start=1):
+            loading = float(H_df.loc[cluster, feat])
+            for term in all_terms.get(feat, []):
+                for pheno in phenotypes:
+                    score = ev_lookup.get((term, pheno), 0.0)
+                    cluster_ranked_rows.append({
+                        'cluster':            cluster,
+                        'feature':            feat,
+                        'term':               term,
+                        'phenotype':          pheno,
+                        'cluster_rank':       rank,
+                        'loading':            round(loading, 6),
+                        'combined_score':     score,
+                        'weighted_rank_score': round(loading * score, 6),
+                    })
+
+    cluster_ranked_df = pd.DataFrame(cluster_ranked_rows)
+    if not cluster_ranked_df.empty:
+        cluster_ranked_df.sort_values(
+            ['cluster', 'weighted_rank_score'], ascending=[True, False], inplace=True
+        )
+        cluster_ranked_df.to_csv(
+            os.path.join(out_dir, 'cluster_evidence_ranked.csv'), index=False
+        )
+        print(f"    Saved cluster_evidence_ranked.csv")
+
+    # ── Cluster summary ────────────────────────────────────────────────────
+    summary_rows = []
+    if not cluster_ranked_df.empty:
+        for cluster, grp in cluster_ranked_df.groupby('cluster'):
+            best = grp.nlargest(1, 'weighted_rank_score').iloc[0]
+            summary_rows.append({
+                'cluster':             cluster,
+                'top_term':            best['term'],
+                'top_feature':         best['feature'],
+                'dominant_phenotype':  best['phenotype'],
+                'max_evidence_score':  best['combined_score'],
+                'weighted_rank_score': best['weighted_rank_score'],
+            })
+
+    summary_df = pd.DataFrame(summary_rows)
+    if not summary_df.empty:
+        summary_df.to_csv(
+            os.path.join(out_dir, 'cluster_literature_summary.csv'), index=False
+        )
+        print(f"    Saved cluster_literature_summary.csv")
+        print("\n  Cluster dominant associations:")
+        for _, row in summary_df.iterrows():
+            print(f"    {row['cluster']:20s} → {row['top_term']} "
+                  f"× {row['dominant_phenotype']}  "
+                  f"(score={row['max_evidence_score']:.3f})")
+
+    print(f"\n  Literature enrichment complete → {out_dir}/")
+    return {
+        'evidence_df':        evidence_df,
+        'cluster_ranked_df':  cluster_ranked_df,
+        'cluster_summary_df': summary_df,
+    }
+
+
+# ── CLI ────────────────────────────────────────────────────────────────────────
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(
+        description=(
+            "Post-NMF literature enrichment using DisGeNET, Open Targets, "
+            "PubTator3, PubMed and ClinVar."
+        ),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
+    parser.add_argument(
+        '--cluster_dir', required=True,
+        help="Path to bNMF output directory containing feature_loadings.csv",
+    )
+    parser.add_argument(
+        '--phenotypes', required=True,
+        help="Comma-separated phenotype terms "
+             "(e.g., 'type 2 diabetes,epilepsy,cardio')",
+    )
+    parser.add_argument(
+        '--top_n', type=int, default=20,
+        help="Top features per cluster to query (default: 20)",
+    )
+    parser.add_argument(
+        '--ncbi_api_key', default=None,
+        help="NCBI Entrez API key — increases rate limit from 3 to 10 req/sec",
+    )
+    parser.add_argument(
+        '--disgenet_api_key', default=None,
+        help="DisGeNET API key — free registration at disgenet.org; "
+             "increases rate limits and unlocks full GDA database",
+    )
+
+    args = parser.parse_args()
+
+    enrich_with_literature(
+        cluster_dir=args.cluster_dir,
+        phenotypes=[p.strip() for p in args.phenotypes.split(',')],
+        disgenet_api_key=args.disgenet_api_key,
+        ncbi_api_key=args.ncbi_api_key,
+        top_n=args.top_n,
+    )

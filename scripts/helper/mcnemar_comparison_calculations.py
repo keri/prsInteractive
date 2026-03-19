@@ -773,11 +773,11 @@ if __name__ == "__main__":
     prs_file = args.prs_file or os.environ.get("COMBINED_PRS_FILE")
     print(f"combined prs file : {prs_file}")
     
-    pheno='celiacDisease'
-    prs_file = f'/Users/kerimulterer/prsInteractive/results/{pheno}/combinedAnalysis/scores/combinedPRSGroups.filtered.csv'
-    scores_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/combinedAnalysis/scores'
+    #pheno='celiacDisease'
+    #prs_file = f'/Users/kerimulterer/prsInteractive/results/{pheno}/combinedAnalysis/scores/combinedPRSGroups.filtered.csv'
+    #scores_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/combinedAnalysis/scores'
     
-    #results = calculate_stat_tests(prs_file, scores_path)
+    results = calculate_stat_tests(prs_file, scores_path)
     
     df = pd.read_csv(prs_file)
     prs1_name = 'main'
