@@ -447,15 +447,69 @@ def extract_terms_from_feature(feature_name, snp_gene_map=None):
 
     terms = []
     if name.startswith('rs') or '_rs' in name:
+        # SNP or SNP interaction pair: gen_rs1234 / gen_rs1234_rs5678
         parts = name.split('_')
         terms = [p for p in parts if p.startswith('rs')]
         if snp_gene_map:
             for snp in terms[:]:
                 terms += snp_gene_map.get(snp, [])
+    elif '_' in name and not any(p.startswith('rs') for p in name.split('_')):
+        # Imputed HLA allele: gen_DRB5_9901 → primary form only;
+        # fallback candidates are resolved in the evidence loop.
+        gene   = name.split('_')[0]
+        allele = '_'.join(name.split('_')[1:])
+        terms  = [f'HLA-{gene}*{allele}']   # e.g. HLA-DRB5*9901
     else:
         terms = [name.replace('_', ' ')]
 
     return list(dict.fromkeys(terms))
+
+
+def _hla_candidates(primary_term):
+    """
+    Given the primary HLA query term (e.g. 'HLA-DRB5*9901'), return the ordered
+    list of fallback candidates used for NCBI/literature queries:
+      1. HLA-GENE*allele  (HLA-DRB5*9901)
+      2. HLA-GENE         (HLA-DRB5)
+      3. GENE*allele      (DRB5*9901)   ← NCBI only, not GTEx
+    Returns [] if the term is not in HLA-GENE*allele format.
+    """
+    if not primary_term.startswith('HLA-') or '*' not in primary_term:
+        return []
+    rest  = primary_term[4:]                        # DRB5*9901
+    gene  = rest.split('*')[0]                      # DRB5
+    allele = rest.split('*')[1]                     # 9901
+    return [
+        primary_term,                               # HLA-DRB5*9901
+        f'HLA-{gene}',                              # HLA-DRB5
+        f'{gene}*{allele}',                         # DRB5*9901
+    ]
+
+
+def _resolve_hla_term_for_literature(primary_term, phenotype, min_count=5):
+    """
+    Try HLA candidate terms in order and return the first whose PubTator3
+    count is >= min_count, or the last candidate if none exceed the threshold.
+
+    Returns
+    -------
+    str   resolved query term
+    str   resolution note for logging
+    """
+    candidates = _hla_candidates(primary_term)
+    if not candidates:
+        return primary_term, ''
+
+    for candidate in candidates:
+        count, _ = query_pubtator3(candidate, phenotype)
+        if count >= min_count:
+            note = (f"'{primary_term}' → '{candidate}' ({count} PubTator3 hits)"
+                    if candidate != primary_term else f"({count} PubTator3 hits)")
+            return candidate, note
+
+    # All candidates below threshold — use last one (most permissive)
+    fallback = candidates[-1]
+    return fallback, f"'{primary_term}' low coverage → fallback '{fallback}'"
 
 
 # ── Main enrichment ───────────────────────────────────────────────────────────
@@ -532,24 +586,40 @@ def enrich_with_literature(
         if idx % 20 == 0:
             print(f"    {idx}/{len(unique_pairs)} queries completed")
 
+        # ── HLA fallback resolution ────────────────────────────────────────
+        # For HLA primary terms (HLA-GENE*allele), try progressively broader
+        # candidates until >= 5 PubTator3 hits are found:
+        #   1. HLA-DRB5*9901  2. HLA-DRB5  3. DRB5*9901
+        query_term = term
+        hla_note   = ''
+        if term.startswith('HLA-') and '*' in term:
+            query_term, hla_note = _resolve_hla_term_for_literature(term, pheno)
+            if hla_note:
+                print(f"    [HLA-lit] {hla_note}")
+
         # DisGeNET — gene-disease association score
         disgenet_score, disgenet_disease = query_disgenet(
-            term, pheno, api_key=disgenet_api_key
+            query_term, pheno, api_key=disgenet_api_key
         )
 
         # Open Targets — integrated multi-evidence gene-disease score
-        ot_score, ot_disease = query_open_targets(term, pheno)
+        ot_score, ot_disease = query_open_targets(query_term, pheno)
 
-        # PubTator3 — entity-annotated co-occurrence (primary publication signal)
-        pt3_count, pt3_entity_type = query_pubtator3(term, pheno)
+        # PubTator3 — entity-annotated co-occurrence (already fetched during HLA
+        # resolution if HLA; re-use from cache otherwise)
+        pt3_count, pt3_entity_type = query_pubtator3(query_term, pheno)
 
         # PubMed — keyword co-occurrence (stored for reference)
-        pubmed_count = query_pubmed_cooccurrence(term, pheno, api_key=ncbi_api_key)
+        pubmed_count = query_pubmed_cooccurrence(query_term, pheno, api_key=ncbi_api_key)
 
         # ClinVar — variant/gene pathogenicity
-        is_snp_or_gene = term.startswith('rs') or (term.isalpha() and len(term) <= 10)
+        is_snp_or_gene = (
+            query_term.startswith('rs')
+            or (query_term.replace('-', '').replace('*', '').isalpha()
+                and len(query_term) <= 15)
+        )
         clinvar_sig = (
-            query_clinvar_significance(term, api_key=ncbi_api_key)
+            query_clinvar_significance(query_term, api_key=ncbi_api_key)
             if is_snp_or_gene else 'not_found'
         )
 
@@ -558,7 +628,8 @@ def enrich_with_literature(
         )
 
         evidence_rows.append({
-            'term':                  term,
+            'term':                  term,          # original feature term
+            'query_term':            query_term,    # resolved term actually used
             'phenotype':             pheno,
             'disgenet_score':        round(disgenet_score, 6),
             'disgenet_disease':      disgenet_disease,

@@ -151,14 +151,97 @@ def snps_to_genes(snp_ids, ncbi_api_key=None):
     return {s: cache.get(s, []) for s in snp_ids}
 
 
-def parse_feature_to_snps(feature_name):
+def parse_feature_to_identifiers(feature_name):
     """
-    Strip gen_ prefix and split interaction pairs into component SNP rs-IDs.
-    Returns list of rs-IDs (may be empty for non-rs features).
+    Strip gen_ prefix and classify the feature as SNP rs-IDs or an imputed HLA allele.
+
+    Rule: a gen_ feature whose underscore-split parts contain NO 'rs' prefix is treated
+    as an imputed HLA allele encoded as GENE_allele (e.g. DRB5_9901).
+
+    Returns
+    -------
+    dict  {
+        'snps': list[str]   — rs-ID strings (empty for HLA features)
+        'hla':  dict | None — {gene, allele, primary, gene_only, no_hla_prefix}
+                              or None if not an HLA feature
+    }
+    Examples
+    --------
+    'gen_rs1234_rs5678' → snps=['rs1234','rs5678'], hla=None
+    'gen_rs1234'        → snps=['rs1234'],           hla=None
+    'gen_DRB5_9901'     → snps=[],  hla={'primary': 'HLA-DRB5*9901',
+                                         'gene_only': 'HLA-DRB5',
+                                         'no_hla_prefix': 'DRB5*9901', ...}
     """
     name = feature_name.removeprefix('gen_')
-    parts = name.split('_') if '_' in name else [name]
-    return [p for p in parts if p.startswith('rs')]
+
+    if '_' in name:
+        parts    = name.split('_')
+        rs_parts = [p for p in parts if p.startswith('rs')]
+        if rs_parts:
+            # SNP interaction pair: rs1234_rs5678
+            return {'snps': rs_parts, 'hla': None}
+        else:
+            # Imputed HLA allele: GENE_allele  e.g. DRB5_9901
+            gene   = parts[0]
+            allele = '_'.join(parts[1:])
+            return {
+                'snps': [],
+                'hla': {
+                    'gene':          gene,
+                    'allele':        allele,
+                    'primary':       f'HLA-{gene}*{allele}',   # HLA-DRB5*9901
+                    'gene_only':     f'HLA-{gene}',             # HLA-DRB5
+                    'no_hla_prefix': f'{gene}*{allele}',        # DRB5*9901 (NCBI only)
+                },
+            }
+    else:
+        return {'snps': [name] if name.startswith('rs') else [], 'hla': None}
+
+
+def resolve_hla_gene_for_gtex(hla_info, tissues, expr_cache, min_expr=5):
+    """
+    Resolve an imputed HLA allele to a GTEx gene with two-step fallback.
+
+    Candidates tried in order:
+      1. HLA-GENE*allele  (e.g. HLA-DRB5*9901) — allele-specific
+      2. HLA-GENE         (e.g. HLA-DRB5)       — gene-level fallback
+
+    A candidate is accepted when it resolves to a GENCODE ID AND has expression
+    data in at least min_expr tissues (default 5).
+
+    Returns
+    -------
+    tuple  (symbol_used: str | None, gencode_id: str | None, tpm_map: dict)
+    """
+    for candidate in [hla_info['primary'], hla_info['gene_only']]:
+        # Use cache if already fetched and has sufficient coverage
+        if candidate in expr_cache:
+            tpm_map = expr_cache[candidate]
+            if len(tpm_map) >= min_expr:
+                print(f"      [HLA-GTEx] {hla_info['primary']} → '{candidate}' "
+                      f"(cached, {len(tpm_map)} tissues)")
+                return candidate, None, tpm_map
+            print(f"      [HLA-GTEx] '{candidate}' cached but only {len(tpm_map)} "
+                  f"tissues (< {min_expr}), trying next...")
+            continue
+
+        gencode = get_gencode_id(candidate)
+        if gencode is None:
+            print(f"      [HLA-GTEx] '{candidate}' not in GTEx reference, trying next...")
+            continue
+
+        tpm_map = get_tissue_expression(gencode, tissues)
+        if len(tpm_map) >= min_expr:
+            print(f"      [HLA-GTEx] {hla_info['primary']} → '{candidate}' "
+                  f"(GENCODE: {gencode}, {len(tpm_map)} tissues with expression)")
+            return candidate, gencode, tpm_map
+
+        print(f"      [HLA-GTEx] '{candidate}' only {len(tpm_map)} tissues "
+              f"(< {min_expr}), trying next...")
+
+    print(f"      [HLA-GTEx] no GTEx data found for {hla_info['primary']}")
+    return None, None, {}
 
 
 # ── GTEx queries ──────────────────────────────────────────────────────────────
@@ -281,28 +364,57 @@ def enrich_with_gtex(
 
     print(f"  Unique genomic features to query: {len(all_top_features)}")
 
-    # ── Map SNPs → genes ───────────────────────────────────────────────────
+    # ── Parse features → SNP ids + HLA identifiers ────────────────────────
+    feat_to_ids: dict[str, dict] = {
+        feat: parse_feature_to_identifiers(feat)
+        for feat in all_top_features
+    }
+
+    snp_features = {f for f, ids in feat_to_ids.items() if ids['snps']}
+    hla_features = {f for f, ids in feat_to_ids.items() if ids['hla'] is not None}
+    print(f"    SNP features: {len(snp_features)}  |  HLA features: {len(hla_features)}")
+
+    # ── Map SNPs → genes (NCBI dbSNP) ─────────────────────────────────────
     snp_ids: set[str] = set()
-    feat_to_snps: dict[str, list[str]] = {}
-    for feat in all_top_features:
-        snps = parse_feature_to_snps(feat)
-        feat_to_snps[feat] = snps
-        snp_ids.update(snps)
+    for feat in snp_features:
+        snp_ids.update(feat_to_ids[feat]['snps'])
 
     print(f"  Mapping {len(snp_ids)} SNPs to genes via NCBI...")
     snp_gene_map = snps_to_genes(list(snp_ids), ncbi_api_key=ncbi_api_key)
 
-    # All unique genes
-    all_genes: set[str] = set()
+    snp_genes: set[str] = set()
     for genes in snp_gene_map.values():
-        all_genes.update(genes)
-    print(f"  Genes found: {len(all_genes)}")
+        snp_genes.update(genes)
+    print(f"  Genes from SNP mapping: {len(snp_genes)}")
+
+    # ── Resolve HLA features → GTEx gene symbols ──────────────────────────
+    expr_cache = _load_cache('gtex_expression')
+
+    feat_to_hla_gene: dict[str, str | None] = {}   # feat → resolved symbol (or None)
+    hla_gene_tpm: dict[str, dict] = {}             # symbol → tpm_map (new fetches only)
+
+    if hla_features:
+        print(f"\n  Resolving {len(hla_features)} HLA features against GTEx...")
+    for feat in sorted(hla_features):
+        hla_info  = feat_to_ids[feat]['hla']
+        symbol, gencode, tpm_map = resolve_hla_gene_for_gtex(
+            hla_info, tissues, expr_cache
+        )
+        feat_to_hla_gene[feat] = symbol
+        print(f"    {feat:40s} → query used: '{symbol or 'not found'}'")
+        if symbol and symbol not in expr_cache:
+            expr_cache[symbol] = tpm_map
+            hla_gene_tpm[symbol] = tpm_map
+            _save_cache('gtex_expression', expr_cache)
+
+    hla_genes = {s for s in feat_to_hla_gene.values() if s}
+    all_genes  = snp_genes | hla_genes
+    print(f"  Total unique genes for expression lookup: {len(all_genes)}")
 
     # ── Fetch GTEx expression ──────────────────────────────────────────────
-    print(f"\n  Fetching tissue expression for {len(all_genes)} genes "
+    print(f"\n  Fetching tissue expression for SNP-mapped genes "
           f"across {len(tissues)} tissues...")
 
-    expr_cache = _load_cache('gtex_expression')
     expr_rows  = []
 
     for gene in sorted(all_genes):
@@ -325,7 +437,7 @@ def enrich_with_gtex(
         expr_df.to_csv(os.path.join(out_dir, 'gtex_gene_expression.csv'), index=False)
         print(f"    Saved gtex_gene_expression.csv ({len(expr_df)} rows)")
 
-    # ── Fetch eQTL evidence ────────────────────────────────────────────────
+    # ── Fetch eQTL evidence (SNP features only — HLA has no direct rs-ID eQTL) ──
     print(f"\n  Fetching eQTL evidence for {len(snp_ids)} SNPs...")
 
     eqtl_cache = _load_cache('gtex_eqtl')
@@ -367,28 +479,44 @@ def enrich_with_gtex(
 
         for feat in top_feats:
             loading = float(H_df.loc[cluster, feat])
-            snps    = feat_to_snps.get(feat, [])
-            for snp in snps:
-                genes = snp_gene_map.get(snp, [])
-                for gene in genes:
-                    # eQTL-weighted expression score
-                    eqtl_for_snp_gene = eqtl_df[
-                        (eqtl_df['snp'] == snp) & (eqtl_df['gene'] == gene)
-                    ] if not eqtl_df.empty else pd.DataFrame()
+            ids     = feat_to_ids.get(feat, {'snps': [], 'hla': None})
 
-                    gene_expr = expr_df[expr_df['gene'] == gene] \
-                        if not expr_df.empty else pd.DataFrame()
+            if ids['hla'] is not None:
+                # ── HLA feature: score = loading × TPM (no direct rs-ID eQTL) ──
+                gene = feat_to_hla_gene.get(feat)
+                if not gene:
+                    continue
+                gene_expr = expr_df[expr_df['gene'] == gene] \
+                    if not expr_df.empty else pd.DataFrame()
+                for tissue in tissues:
+                    tpm = gene_expr.loc[gene_expr['tissue'] == tissue, 'median_tpm']
+                    tpm_val = float(tpm.iloc[0]) if not tpm.empty else 0.0
+                    score   = loading * tpm_val   # eQTL factor = 1.0 for HLA
+                    if score > 0:
+                        tissue_scores[tissue].append(score)
 
-                    for tissue in tissues:
-                        tpm = gene_expr.loc[gene_expr['tissue'] == tissue, 'median_tpm']
-                        eff = eqtl_for_snp_gene.loc[
-                            eqtl_for_snp_gene['tissue'] == tissue, 'effect_size'
-                        ]
-                        tpm_val = float(tpm.iloc[0]) if not tpm.empty else 0.0
-                        eff_val = abs(float(eff.iloc[0])) if not eff.empty else 0.0
-                        score   = loading * eff_val * tpm_val
-                        if score > 0:
-                            tissue_scores[tissue].append(score)
+            else:
+                # ── SNP feature: score = loading × |eQTL| × TPM ──────────────
+                for snp in ids['snps']:
+                    genes = snp_gene_map.get(snp, [])
+                    for gene in genes:
+                        eqtl_for_snp_gene = eqtl_df[
+                            (eqtl_df['snp'] == snp) & (eqtl_df['gene'] == gene)
+                        ] if not eqtl_df.empty else pd.DataFrame()
+
+                        gene_expr = expr_df[expr_df['gene'] == gene] \
+                            if not expr_df.empty else pd.DataFrame()
+
+                        for tissue in tissues:
+                            tpm = gene_expr.loc[gene_expr['tissue'] == tissue, 'median_tpm']
+                            eff = eqtl_for_snp_gene.loc[
+                                eqtl_for_snp_gene['tissue'] == tissue, 'effect_size'
+                            ]
+                            tpm_val = float(tpm.iloc[0]) if not tpm.empty else 0.0
+                            eff_val = abs(float(eff.iloc[0])) if not eff.empty else 0.0
+                            score   = loading * eff_val * tpm_val
+                            if score > 0:
+                                tissue_scores[tissue].append(score)
 
         for tissue, scores in tissue_scores.items():
             summary_rows.append({
