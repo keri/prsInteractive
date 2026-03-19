@@ -151,52 +151,86 @@ def snps_to_genes(snp_ids, ncbi_api_key=None):
     return {s: cache.get(s, []) for s in snp_ids}
 
 
-def parse_feature_to_identifiers(feature_name):
+def _classify_component(comp):
     """
-    Strip gen_ prefix and classify the feature as SNP rs-IDs or an imputed HLA allele.
+    Classify a single comma-split component of a gen_ feature name.
 
-    Rule: a gen_ feature whose underscore-split parts contain NO 'rs' prefix is treated
-    as an imputed HLA allele encoded as GENE_allele (e.g. DRB5_9901).
-
-    Returns
-    -------
-    dict  {
-        'snps': list[str]   — rs-ID strings (empty for HLA features)
-        'hla':  dict | None — {gene, allele, primary, gene_only, no_hla_prefix}
-                              or None if not an HLA feature
-    }
-    Examples
-    --------
-    'gen_rs1234_rs5678' → snps=['rs1234','rs5678'], hla=None
-    'gen_rs1234'        → snps=['rs1234'],           hla=None
-    'gen_DRB5_9901'     → snps=[],  hla={'primary': 'HLA-DRB5*9901',
-                                         'gene_only': 'HLA-DRB5',
-                                         'no_hla_prefix': 'DRB5*9901', ...}
+    Returns one of:
+      ('snp',  rs_id_str)   — a single rs-ID
+      ('hla',  hla_dict)    — an imputed HLA allele (GENE_allele format)
+      ('text', term_str)    — a plain-text clinical/phenotype term
     """
-    name = feature_name.removeprefix('gen_')
+    comp = comp.strip()
+    if not comp:
+        return None
 
-    if '_' in name:
-        parts    = name.split('_')
+    if '_' in comp:
+        parts    = comp.split('_')
         rs_parts = [p for p in parts if p.startswith('rs')]
         if rs_parts:
-            # SNP interaction pair: rs1234_rs5678
-            return {'snps': rs_parts, 'hla': None}
+            # SNP interaction within this component (e.g. rs1234_rs5678)
+            return ('snps', rs_parts)
         else:
             # Imputed HLA allele: GENE_allele  e.g. DRB5_9901
             gene   = parts[0]
             allele = '_'.join(parts[1:])
-            return {
-                'snps': [],
-                'hla': {
-                    'gene':          gene,
-                    'allele':        allele,
-                    'primary':       f'HLA-{gene}*{allele}',   # HLA-DRB5*9901
-                    'gene_only':     f'HLA-{gene}',             # HLA-DRB5
-                    'no_hla_prefix': f'{gene}*{allele}',        # DRB5*9901 (NCBI only)
-                },
-            }
+            return ('hla', {
+                'gene':          gene,
+                'allele':        allele,
+                'primary':       f'HLA-{gene}*{allele}',   # HLA-DRB5*9901
+                'gene_only':     f'HLA-{gene}',             # HLA-DRB5
+                'no_hla_prefix': f'{gene}*{allele}',        # DRB5*9901 (NCBI only)
+            })
+    elif comp.startswith('rs'):
+        return ('snps', [comp])
     else:
-        return {'snps': [name] if name.startswith('rs') else [], 'hla': None}
+        return ('text', comp)
+
+
+def parse_feature_to_identifiers(feature_name):
+    """
+    Strip gen_ prefix, split by comma for interaction/compound features, then
+    classify each component as SNP rs-IDs, imputed HLA alleles, or plain text.
+
+    Features may be comma-separated interaction terms, e.g.:
+      'gen_Systolic blood pressure,DRB5_9901'
+      'gen_rs1234,DRB5_9901'
+
+    Returns
+    -------
+    dict  {
+        'snps': list[str]   — all rs-ID strings across all components
+        'hla':  list[dict]  — all HLA allele dicts (empty list if none)
+        'text': list[str]   — plain text terms (clinical measures, etc.)
+    }
+    Examples
+    --------
+    'gen_rs1234_rs5678'                     → snps=['rs1234','rs5678'], hla=[], text=[]
+    'gen_rs1234'                            → snps=['rs1234'],          hla=[], text=[]
+    'gen_DRB5_9901'                         → snps=[], hla=[{primary:'HLA-DRB5*9901',...}], text=[]
+    'gen_Systolic blood pressure,DRB5_9901' → snps=[], hla=[{primary:'HLA-DRB5*9901',...}],
+                                               text=['Systolic blood pressure']
+    """
+    name       = feature_name.removeprefix('gen_')
+    components = [c.strip() for c in name.split(',') if c.strip()]
+
+    snps  = []
+    hla   = []
+    text  = []
+
+    for comp in components:
+        result = _classify_component(comp)
+        if result is None:
+            continue
+        kind, value = result
+        if kind == 'snps':
+            snps.extend(value)
+        elif kind == 'hla':
+            hla.append(value)
+        elif kind == 'text':
+            text.append(value)
+
+    return {'snps': snps, 'hla': hla, 'text': text}
 
 
 def resolve_hla_gene_for_gtex(hla_info, tissues, expr_cache, min_expr=5):
@@ -371,7 +405,7 @@ def enrich_with_gtex(
     }
 
     snp_features = {f for f, ids in feat_to_ids.items() if ids['snps']}
-    hla_features = {f for f, ids in feat_to_ids.items() if ids['hla'] is not None}
+    hla_features = {f for f, ids in feat_to_ids.items() if ids['hla']}
     print(f"    SNP features: {len(snp_features)}  |  HLA features: {len(hla_features)}")
 
     # ── Map SNPs → genes (NCBI dbSNP) ─────────────────────────────────────
@@ -390,24 +424,26 @@ def enrich_with_gtex(
     # ── Resolve HLA features → GTEx gene symbols ──────────────────────────
     expr_cache = _load_cache('gtex_expression')
 
-    feat_to_hla_gene: dict[str, str | None] = {}   # feat → resolved symbol (or None)
-    hla_gene_tpm: dict[str, dict] = {}             # symbol → tpm_map (new fetches only)
+    # feat → list of resolved gene symbols (one per HLA component, may be empty)
+    feat_to_hla_genes: dict[str, list[str]] = {}
 
     if hla_features:
         print(f"\n  Resolving {len(hla_features)} HLA features against GTEx...")
     for feat in sorted(hla_features):
-        hla_info  = feat_to_ids[feat]['hla']
-        symbol, gencode, tpm_map = resolve_hla_gene_for_gtex(
-            hla_info, tissues, expr_cache
-        )
-        feat_to_hla_gene[feat] = symbol
-        print(f"    {feat:40s} → query used: '{symbol or 'not found'}'")
-        if symbol and symbol not in expr_cache:
-            expr_cache[symbol] = tpm_map
-            hla_gene_tpm[symbol] = tpm_map
-            _save_cache('gtex_expression', expr_cache)
+        resolved = []
+        for hla_info in feat_to_ids[feat]['hla']:
+            symbol, gencode, tpm_map = resolve_hla_gene_for_gtex(
+                hla_info, tissues, expr_cache
+            )
+            print(f"    {feat:50s} [{hla_info['primary']}] → query used: '{symbol or 'not found'}'")
+            if symbol:
+                resolved.append(symbol)
+                if symbol not in expr_cache:
+                    expr_cache[symbol] = tpm_map
+                    _save_cache('gtex_expression', expr_cache)
+        feat_to_hla_genes[feat] = resolved
 
-    hla_genes = {s for s in feat_to_hla_gene.values() if s}
+    hla_genes = {s for syms in feat_to_hla_genes.values() for s in syms}
     all_genes  = snp_genes | hla_genes
     print(f"  Total unique genes for expression lookup: {len(all_genes)}")
 
@@ -481,22 +517,20 @@ def enrich_with_gtex(
             loading = float(H_df.loc[cluster, feat])
             ids     = feat_to_ids.get(feat, {'snps': [], 'hla': None})
 
-            if ids['hla'] is not None:
-                # ── HLA feature: score = loading × TPM (no direct rs-ID eQTL) ──
-                gene = feat_to_hla_gene.get(feat)
-                if not gene:
-                    continue
-                gene_expr = expr_df[expr_df['gene'] == gene] \
-                    if not expr_df.empty else pd.DataFrame()
-                for tissue in tissues:
-                    tpm = gene_expr.loc[gene_expr['tissue'] == tissue, 'median_tpm']
-                    tpm_val = float(tpm.iloc[0]) if not tpm.empty else 0.0
-                    score   = loading * tpm_val   # eQTL factor = 1.0 for HLA
-                    if score > 0:
-                        tissue_scores[tissue].append(score)
+            if ids['hla']:
+                # ── HLA components: score = loading × TPM (no direct rs-ID eQTL) ──
+                for gene in feat_to_hla_genes.get(feat, []):
+                    gene_expr = expr_df[expr_df['gene'] == gene] \
+                        if not expr_df.empty else pd.DataFrame()
+                    for tissue in tissues:
+                        tpm = gene_expr.loc[gene_expr['tissue'] == tissue, 'median_tpm']
+                        tpm_val = float(tpm.iloc[0]) if not tpm.empty else 0.0
+                        score   = loading * tpm_val   # eQTL factor = 1.0 for HLA
+                        if score > 0:
+                            tissue_scores[tissue].append(score)
 
-            else:
-                # ── SNP feature: score = loading × |eQTL| × TPM ──────────────
+            if ids['snps']:
+                # ── SNP components: score = loading × |eQTL| × TPM ───────────
                 for snp in ids['snps']:
                     genes = snp_gene_map.get(snp, [])
                     for gene in genes:

@@ -445,22 +445,28 @@ def extract_terms_from_feature(feature_name, snp_gene_map=None):
             name = name[len(prefix):]
             break
 
+    # Split comma-separated interaction components (e.g. "Systolic blood pressure,DRB5_9901")
+    components = [c.strip() for c in name.split(',') if c.strip()]
+
     terms = []
-    if name.startswith('rs') or '_rs' in name:
-        # SNP or SNP interaction pair: gen_rs1234 / gen_rs1234_rs5678
-        parts = name.split('_')
-        terms = [p for p in parts if p.startswith('rs')]
-        if snp_gene_map:
-            for snp in terms[:]:
-                terms += snp_gene_map.get(snp, [])
-    elif '_' in name and not any(p.startswith('rs') for p in name.split('_')):
-        # Imputed HLA allele: gen_DRB5_9901 → primary form only;
-        # fallback candidates are resolved in the evidence loop.
-        gene   = name.split('_')[0]
-        allele = '_'.join(name.split('_')[1:])
-        terms  = [f'HLA-{gene}*{allele}']   # e.g. HLA-DRB5*9901
-    else:
-        terms = [name.replace('_', ' ')]
+    for comp in components:
+        if comp.startswith('rs') or '_rs' in comp:
+            # SNP or SNP interaction pair
+            parts   = comp.split('_')
+            rs_ids  = [p for p in parts if p.startswith('rs')]
+            terms.extend(rs_ids)
+            if snp_gene_map:
+                for snp in rs_ids:
+                    terms.extend(snp_gene_map.get(snp, []))
+        elif '_' in comp and not any(p.startswith('rs') for p in comp.split('_')):
+            # Imputed HLA allele: GENE_allele → primary HLA form;
+            # fallback candidates are resolved in the evidence loop.
+            gene   = comp.split('_')[0]
+            allele = '_'.join(comp.split('_')[1:])
+            terms.append(f'HLA-{gene}*{allele}')   # e.g. HLA-DRB5*9901
+        else:
+            # Plain text term (clinical measure, phenotype label, etc.)
+            terms.append(comp.replace('_', ' '))
 
     return list(dict.fromkeys(terms))
 
