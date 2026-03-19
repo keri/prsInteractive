@@ -43,8 +43,9 @@ import seaborn as sns
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-GTEX_API    = "https://gtexportal.org/rest/v1"
-NCBI_BASE   = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+GTEX_API     = "https://gtexportal.org/api/v2"   # v1 (rest/v1) is deprecated
+GTEX_DATASET = "gtex_v8"
+NCBI_BASE    = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 GENOME_BUILD = "GRCh38"
 
 # Tissues most relevant to cardiometabolic / neurological phenotypes.
@@ -281,45 +282,50 @@ def resolve_hla_gene_for_gtex(hla_info, tissues, expr_cache, min_expr=5):
 # ── GTEx queries ──────────────────────────────────────────────────────────────
 
 def get_gencode_id(gene_symbol):
-    """Return GENCODE ID (ENSG...) for a gene symbol via GTEx API."""
+    """
+    Return GENCODE ID (ENSG...) for a gene symbol via GTEx v2 API.
+    Uses 'geneId' param (v2 renamed 'geneName' → 'geneId').
+    """
     data = _get(
         f"{GTEX_API}/reference/gene",
-        params={'geneName': gene_symbol, 'referenceGenomeBuild': GENOME_BUILD},
+        params={'geneId': gene_symbol, 'referenceGenomeBuild': GENOME_BUILD},
     )
-    if data and data.get('gene'):
-        return data['gene'][0].get('gencodeId')
+    if data and data.get('data'):
+        return data['data'][0].get('gencodeId')
     return None
 
 
 def get_tissue_expression(gencode_id, tissues):
     """
-    Fetch median TPM per tissue for one gene.
+    Fetch median TPM for one gene across all tissues in one request (v2 API),
+    then filter to the requested tissue list.
 
     Returns
     -------
     dict  {tissue_id: median_tpm}
     """
+    data = _get(
+        f"{GTEX_API}/expression/medianGeneExpression",
+        params={'gencodeId': gencode_id, 'datasetId': GTEX_DATASET},
+    )
     results = {}
-    for tissue in tissues:
-        data = _get(
-            f"{GTEX_API}/expression/geneExpression",
-            params={
-                'gencodeId':         gencode_id,
-                'tissueSiteDetailId': tissue,
-            },
-        )
-        if data and data.get('geneExpression'):
-            entry  = data['geneExpression'][0]
-            tpm    = entry.get('median', entry.get('data', [None])[0])
-            if tpm is not None:
-                results[tissue] = float(tpm)
-        time.sleep(0.2)
+    if data and data.get('data'):
+        tissue_set = set(tissues)
+        for entry in data['data']:
+            t = entry.get('tissueSiteDetailId', '')
+            if not tissues or t in tissue_set:
+                tpm = entry.get('median')
+                if tpm is not None:
+                    results[t] = float(tpm)
     return results
 
 
 def get_eqtl_evidence(snp_id, gencode_id, tissues):
     """
-    Fetch eQTL effect sizes for one SNP × gene pair across tissues.
+    Fetch eQTL effect sizes for one SNP × gene pair across tissues (GTEx v2).
+
+    v2 endpoint: association/singleTissueEqtl
+    Queries per tissue, filtering by snpId (rs-ID).
 
     Returns
     -------
@@ -328,20 +334,21 @@ def get_eqtl_evidence(snp_id, gencode_id, tissues):
     results = {}
     for tissue in tissues:
         data = _get(
-            f"{GTEX_API}/eqtl/singleTissueEqtl",
+            f"{GTEX_API}/association/singleTissueEqtl",
             params={
-                'variantId':          snp_id,
+                'snpId':              snp_id,
                 'gencodeId':          gencode_id,
                 'tissueSiteDetailId': tissue,
+                'datasetId':          GTEX_DATASET,
             },
         )
-        if data and data.get('singleTissueEqtl'):
-            rec = data['singleTissueEqtl'][0]
+        if data and data.get('data'):
+            rec = data['data'][0]
             results[tissue] = {
                 'effect_size': float(rec.get('nes', 0)),
                 'p_value':     float(rec.get('pValue', 1.0)),
             }
-        time.sleep(0.2)
+        time.sleep(0.15)
     return results
 
 
