@@ -285,7 +285,9 @@ def query_pubtator3(term, phenotype):
     query   = f"{term} {phenotype}"
     data    = _get(
         f"{PUBTATOR3_BASE}/search/",
-        params={'text': query, 'sort': 'score', 'page': 1},
+        # Note: 'sort' parameter removed — PubTator3 API returns 400 Bad Request
+        # when sort=score is included; default relevance ordering is sufficient.
+        params={'text': query, 'page': 1},
     )
     time.sleep(0.35)
 
