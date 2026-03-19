@@ -1351,7 +1351,7 @@ def run_cohort_bnmf(
 
         if not profile_df.empty:
             profile_df.to_csv(
-                os.path.join(output_path, 'cluster_profile.csv'), index=False)
+                os.path.join(output_path, 'cluster_profile.csv'), index=True)  # index='cluster'
 
         print(f"    Outputs → {output_path}")
 
