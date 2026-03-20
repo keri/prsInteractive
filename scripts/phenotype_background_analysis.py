@@ -4,40 +4,42 @@ phenotype_background_analysis.py
 =================================
 Pre-enrichment background knowledge table for a phenotype of interest.
 
-Before running cluster-level enrichment, this script builds a structured
-literature summary covering six clinical/molecular categories for the
-phenotype.  Each category is queried with:
+Uses a manually curated seed file (phenotype_seeds/<phenotype>.json) that
+lists known subtypes, co-phenotypes, molecular mechanisms, pathways,
+complications, comorbidities and protective factors.  Each seed term is
+queried individually against PubTator3 so that the output table contains
+real literature evidence counts for every curated term rather than relying
+on open-ended discovery (which missed well-known terms like SIDD/SAID/MARD
+because PubTator3 only indexes titles, not abstracts).
 
-  1. Risk query     — standard association search (phenotype + category modifier)
-  2. Protective query — same search augmented with protective/prevention modifiers;
-                        papers unique to this query (not found in risk results)
-                        are flagged as potentially novel protective findings.
-
-A simple title-level sentiment score (fraction of titles containing protective
-keywords) distinguishes true protective associations from incidental mentions.
-
-Categories
-----------
-  subtypes       — disease subgroups, endotypes, heterogeneity
-  co_phenotypes  — co-occurring phenotypes, phenotypic overlap
-  mechanisms     — molecular mechanisms, pathogenesis, pathophysiology
-  pathways       — biological pathways, signaling, metabolic processes
-  complications  — outcomes, sequelae, disease progression
-  comorbidities  — comorbidities, multimorbidity
+For every seed term the script runs:
+  1. Risk query     — PubTator3: "{seed_term} {phenotype}"
+  2. Protective query — PubTator3: "{seed_term} {phenotype} {protective_suffix}"
+     Papers unique to the protective query (absent from risk results) are
+     flagged; a simple title-keyword sentiment score is computed.
 
 Outputs (in <output_dir>/)
 --------------------------
-  phenotype_background.csv   — entity-level table; one row per
-                                (category, term, risk/protective)
+  phenotype_background.csv         — one row per seed term; all evidence columns
   phenotype_background_summary.csv — category-level aggregate counts
-  phenotype_background.json  — full result dict (cached for downstream use)
+  phenotype_background.json        — full results dict for downstream use
+
+The output CSV is the input to enrich_clusters_literature.py via --background_table.
+Every unique term in the 'term' column will be used as a phenotype query term so
+that every cluster feature (gene / SNP / HLA allele) is scored against each
+background term independently.
+
+Seeds files
+-----------
+  scripts/phenotype_seeds/type_2_diabetes.json  — curated T2D seeds
+  scripts/phenotype_seeds/_template.json        — blank template
 
 Usage
 -----
   python scripts/phenotype_background_analysis.py \\
       --phenotype "type 2 diabetes" \\
       --output_dir results/diabetes/background \\
-      [--additional_phenotypes "insulin resistance,metabolic syndrome"] \\
+      [--seeds_file scripts/phenotype_seeds/type_2_diabetes.json] \\
       [--ncbi_api_key  <key>] \\
       [--open_targets]
 """
@@ -46,8 +48,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import math
 import os
+import re
 import time
 from datetime import datetime
 from typing import Any
@@ -58,30 +60,27 @@ import requests
 
 # ── Constants ─────────────────────────────────────────────────────────────────
 
-PUBTATOR3_BASE = "https://www.ncbi.nlm.nih.gov/research/pubtator3-api"
-NCBI_BASE      = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+PUBTATOR3_BASE   = "https://www.ncbi.nlm.nih.gov/research/pubtator3-api"
 OPEN_TARGETS_API = "https://api.platform.opentargets.org/api/v4/graphql"
 
-# Category modifiers: each is appended to "{phenotype} {modifier}" for querying
-BACKGROUND_CATEGORIES: dict[str, list[str]] = {
-    'subtypes':      ['subtype', 'subgroup', 'heterogeneity', 'endotype',
-                      'classification', 'stratification'],
-    'co_phenotypes': ['comorbid phenotype', 'co-occurring', 'associated condition',
-                      'phenotypic overlap', 'pleiotropic'],
-    'mechanisms':    ['mechanism', 'pathogenesis', 'pathophysiology',
-                      'molecular basis', 'etiology'],
-    'pathways':      ['pathway', 'signaling pathway', 'metabolic pathway',
-                      'biological process', 'gene network'],
-    'complications': ['complication', 'outcome', 'sequelae', 'progression',
-                      'end-organ damage'],
-    'comorbidities': ['comorbidity', 'multimorbidity', 'co-morbid',
-                      'concurrent disease'],
-}
+# Categories that are present in seeds files (in display order)
+SEED_CATEGORIES = [
+    'subtypes',
+    'co_phenotypes',
+    'mechanisms',
+    'pathways',
+    'complications',
+    'comorbidities',
+    'protective',
+]
 
 # Protective modifiers appended for protective queries
 PROTECTIVE_SUFFIXES = [
-    'protective', 'prevention', 'reduces risk',
-    'resilience', 'resistance', 'inverse association',
+    'protective',
+    'prevention',
+    'reduces risk',
+    'resilience',
+    'inverse association',
 ]
 
 # Title-level protective sentiment keywords
@@ -89,9 +88,6 @@ PROTECTIVE_TITLE_KEYWORDS = [
     'protective', 'prevent', 'inverse', 'negat', 'reduc',
     'resilience', 'resistance', 'risk reduction', 'lower risk', 'beneficial',
 ]
-
-# Minimum PubTator3 count to include an entity in the output table
-MIN_COUNT_THRESHOLD = 3
 
 CACHE_DIR: str | None = None
 
@@ -114,7 +110,7 @@ def _get(url: str, params: dict | None = None, retries: int = 3,
             print(f"    [WARN] GET {url}: HTTP {r.status_code}")
             return None
         except requests.exceptions.RequestException as exc:
-            print(f"    [WARN] Request attempt {attempt+1} failed: {exc}")
+            print(f"    [WARN] Request attempt {attempt + 1} failed: {exc}")
             time.sleep(wait)
     return None
 
@@ -161,147 +157,155 @@ def _save_cache(name: str, data: dict) -> None:
         pass
 
 
-# ── PubTator3 queries ──────────────────────────────────────────────────────────
+# ── Seeds loader ───────────────────────────────────────────────────────────────
 
-def _pubtator3_search(query: str, page: int = 1) -> dict | None:
-    """Single PubTator3 search; returns raw API response or None."""
-    return _get(
-        f"{PUBTATOR3_BASE}/search/",
-        params={'text': query, 'page': page},
-    )
+def _phenotype_slug(phenotype: str) -> str:
+    """Convert phenotype string to filename slug (lowercase, underscores)."""
+    return re.sub(r'[^a-z0-9]+', '_', phenotype.lower()).strip('_')
 
+
+def load_seeds(seeds_file: str | None, phenotype: str,
+               script_dir: str | None = None) -> dict:
+    """
+    Load a seeds JSON file.  Resolution order:
+      1. Explicit --seeds_file argument
+      2. Auto-detect: scripts/phenotype_seeds/<phenotype_slug>.json
+      3. Empty dict with warning (graceful degradation)
+
+    Parameters
+    ----------
+    seeds_file : str | None  — explicit path from CLI
+    phenotype  : str         — primary phenotype string (for auto-detect)
+    script_dir : str | None  — directory of this script (for auto-detect)
+
+    Returns
+    -------
+    dict  keyed by category; values are lists of seed term strings
+    """
+    candidates = []
+
+    if seeds_file:
+        candidates.append(seeds_file)
+
+    # Auto-detect alongside this script
+    if script_dir:
+        slug = _phenotype_slug(phenotype)
+        candidates.append(os.path.join(script_dir, 'phenotype_seeds', f'{slug}.json'))
+
+    for path in candidates:
+        if os.path.exists(path):
+            try:
+                with open(path) as f:
+                    raw = json.load(f)
+                # Strip metadata keys; keep only category lists
+                seeds = {
+                    k: v for k, v in raw.items()
+                    if isinstance(v, list) and k in SEED_CATEGORIES
+                }
+                total = sum(len(v) for v in seeds.values())
+                print(f"  Seeds file        : {path}")
+                print(f"  Seed terms loaded : {total} across {len(seeds)} categories")
+                return seeds
+            except Exception as exc:
+                print(f"  [WARN] Could not parse seeds file '{path}': {exc}")
+
+    print(f"  [WARN] No seeds file found for '{phenotype}'. "
+          f"Create scripts/phenotype_seeds/{_phenotype_slug(phenotype)}.json "
+          f"using scripts/phenotype_seeds/_template.json as a starting point.")
+    return {}
+
+
+# ── PubTator3 per-term queries ─────────────────────────────────────────────────
 
 def _title_sentiment(title: str) -> bool:
-    """Return True if the title contains protective-sentiment keywords."""
+    """Return True if the title contains a protective-sentiment keyword."""
     t = title.lower()
     return any(kw in t for kw in PROTECTIVE_TITLE_KEYWORDS)
 
 
-def _extract_entities(results: list[dict], max_entities: int = 30) -> list[dict]:
+def query_seed_term_risk(seed_term: str, phenotype: str) -> dict:
     """
-    Extract annotated biological entities from PubTator3 search results.
-
-    Returns list of {'text', 'type', 'pmid', 'title'} dicts.
-    """
-    entities = []
-    for result in results:
-        pmid  = str(result.get('pmid', ''))
-        title = result.get('title', '')
-        for passage in result.get('passages', []):
-            for ann in passage.get('annotations', []):
-                etype = ann.get('infons', {}).get('type', '')
-                etext = ann.get('text', '').strip()
-                if etext and etype and etype not in ('Species',):
-                    entities.append({
-                        'text':  etext,
-                        'type':  etype,
-                        'pmid':  pmid,
-                        'title': title,
-                    })
-                if len(entities) >= max_entities:
-                    return entities
-    return entities
-
-
-def query_category_risk(phenotype: str, category: str,
-                         modifiers: list[str],
-                         api_key: str | None = None) -> dict:
-    """
-    Query PubTator3 for risk associations of phenotype within a category.
+    Query PubTator3 for co-occurrence of seed_term and phenotype.
 
     Returns
     -------
-    dict {
-      'count':     int   — total paper count
-      'entities':  list  — entity dicts {text, type, pmid, title}
-      'pmids':     set   — set of PMIDs found
-    }
+    dict  {'count', 'pmids' (set), 'sample_titles' (list[str])}
     """
-    cache = _load_cache('bg_risk')
-    cache_key = f'{phenotype}__{category}'
+    cache     = _load_cache('seed_risk')
+    cache_key = f'{seed_term}__{phenotype}'
     if cache_key in cache:
         rec = cache[cache_key]
         return {**rec, 'pmids': set(rec.get('pmids', []))}
 
-    all_entities: list[dict] = []
-    all_pmids:    set  = set()
-    total_count = 0
+    query = f"{seed_term} {phenotype}"
+    data  = _get(f"{PUBTATOR3_BASE}/search/", params={'text': query, 'page': 1})
+    time.sleep(0.4)
 
-    for modifier in modifiers:
-        query = f"{phenotype} {modifier}"
-        data  = _pubtator3_search(query)
-        time.sleep(0.4)
-        if not data:
-            continue
-        total_count += data.get('count', 0)
-        results = data.get('results', [])
-        all_entities.extend(_extract_entities(results))
-        for r in results:
-            pmid = str(r.get('pmid', ''))
+    pmids  : set       = set()
+    titles : list[str] = []
+    count  = 0
+
+    if data:
+        count = data.get('count', 0)
+        for r in data.get('results', []):
+            pmid  = str(r.get('pmid', ''))
+            title = r.get('title', '')
             if pmid:
-                all_pmids.add(pmid)
+                pmids.add(pmid)
+                titles.append(title)
 
-    rec = {
-        'count':    total_count,
-        'entities': all_entities[:60],
-        'pmids':    list(all_pmids),
-    }
+    rec = {'count': count, 'pmids': list(pmids), 'sample_titles': titles[:5]}
     cache[cache_key] = rec
-    _save_cache('bg_risk', cache)
-    return {**rec, 'pmids': all_pmids}
+    _save_cache('seed_risk', cache)
+    return {**rec, 'pmids': pmids}
 
 
-def query_category_protective(phenotype: str, category: str,
-                               modifiers: list[str],
-                               risk_pmids: set,
-                               api_key: str | None = None) -> dict:
+def query_seed_term_protective(seed_term: str, phenotype: str,
+                                risk_pmids: set) -> dict:
     """
-    Query PubTator3 for protective associations within a category.
+    Query PubTator3 for protective/prevention associations of seed_term × phenotype.
 
-    Subtracts risk_pmids to find unique protective findings.
+    Tries each PROTECTIVE_SUFFIX in turn and aggregates unique PMIDs.
+    Papers absent from risk_pmids are flagged as unique protective findings.
 
     Returns
     -------
-    dict {
-      'count':               int   — total protective paper count
-      'unique_count':        int   — papers not found in risk query
-      'sentiment_score':     float — fraction of titles with protective keywords
-      'sample_prot_titles':  list  — up to 5 unique protective titles
-      'entities':            list  — entity dicts
+    dict  {
+      'count':                int   — total unique protective PMIDs found
+      'unique_count':         int   — papers not in risk query
+      'sentiment_score':      float — fraction of titles with protective keywords
+      'sample_prot_titles':   list  — titles with protective-sentiment keywords
+      'sample_uniq_titles':   list  — titles unique to protective query
     }
     """
-    cache = _load_cache('bg_protective')
-    cache_key = f'{phenotype}__{category}'
+    cache     = _load_cache('seed_protective')
+    cache_key = f'{seed_term}__{phenotype}'
     if cache_key in cache:
         return cache[cache_key]
 
-    all_entities:  list[dict] = []
-    all_pmids:     set  = set()
-    prot_titles:   list = []
-    all_titles:    list = []
+    all_pmids  : set       = set()
+    pmid_title : dict      = {}   # pmid → title
+    prot_titles: list[str] = []
 
-    for modifier in modifiers:
-        for prot_suffix in PROTECTIVE_SUFFIXES[:3]:  # top 3 protective suffixes
-            query = f"{phenotype} {modifier} {prot_suffix}"
-            data  = _pubtator3_search(query)
-            time.sleep(0.4)
-            if not data:
-                continue
-            for result in data.get('results', []):
-                pmid  = str(result.get('pmid', ''))
-                title = result.get('title', '')
-                if pmid and pmid not in all_pmids:
-                    all_pmids.add(pmid)
-                    all_titles.append(title)
-                    if _title_sentiment(title):
-                        prot_titles.append(title)
-                    all_entities.extend(
-                        _extract_entities([result], max_entities=5)
-                    )
+    for suffix in PROTECTIVE_SUFFIXES[:3]:
+        query = f"{seed_term} {phenotype} {suffix}"
+        data  = _get(f"{PUBTATOR3_BASE}/search/", params={'text': query, 'page': 1})
+        time.sleep(0.4)
+        if not data:
+            continue
+        for r in data.get('results', []):
+            pmid  = str(r.get('pmid', ''))
+            title = r.get('title', '')
+            if pmid and pmid not in all_pmids:
+                all_pmids.add(pmid)
+                pmid_title[pmid] = title
+                if _title_sentiment(title):
+                    prot_titles.append(title)
 
     unique_pmids  = all_pmids - risk_pmids
-    unique_titles = [t for pmid, t in zip(all_pmids, all_titles)
-                     if pmid in unique_pmids]
+    unique_titles = [pmid_title[p] for p in sorted(unique_pmids)
+                     if p in pmid_title]
+    all_titles    = list(pmid_title.values())
 
     rec = {
         'count':              len(all_pmids),
@@ -309,10 +313,9 @@ def query_category_protective(phenotype: str, category: str,
         'sentiment_score':    round(len(prot_titles) / max(1, len(all_titles)), 3),
         'sample_prot_titles': prot_titles[:5],
         'sample_uniq_titles': unique_titles[:5],
-        'entities':           all_entities[:60],
     }
     cache[cache_key] = rec
-    _save_cache('bg_protective', cache)
+    _save_cache('seed_protective', cache)
     return rec
 
 
@@ -322,13 +325,12 @@ def query_open_targets_top_genes(phenotype: str, max_genes: int = 30) -> list[di
     """
     Fetch top genes associated with phenotype via Open Targets disease search.
 
-    Returns list of {'gene', 'score', 'category'} dicts.
+    Returns list of {'gene', 'biotype', 'ot_score'} dicts.
     """
     cache = _load_cache('bg_ot_genes')
     if phenotype in cache:
         return cache[phenotype]
 
-    # Step 1: find disease EFO ID
     search_query = """
     query SearchDisease($q: String!) {
       search(queryString: $q, entityNames: ["disease"], page: {index: 0, size: 5}) {
@@ -346,17 +348,14 @@ def query_open_targets_top_genes(phenotype: str, max_genes: int = 30) -> list[di
         print(f"    [OT] No disease found for '{phenotype}'")
         return []
 
-    # Pick best hit — prefer exact-ish match
     pheno_lower = phenotype.lower()
-    best_hit = next(
-        (h for h in hits if pheno_lower in h.get('name', '').lower()),
-        hits[0]
+    best_hit    = next(
+        (h for h in hits if pheno_lower in h.get('name', '').lower()), hits[0]
     )
     disease_id   = best_hit['id']
     disease_name = best_hit.get('name', disease_id)
     print(f"    [OT] Resolved '{phenotype}' → {disease_name} ({disease_id})")
 
-    # Step 2: fetch top associated genes
     assoc_query = """
     query DiseaseAssociations($efoId: String!, $size: Int!) {
       disease(efoId: $efoId) {
@@ -374,11 +373,10 @@ def query_open_targets_top_genes(phenotype: str, max_genes: int = 30) -> list[di
     if not assoc:
         return []
 
-    rows = (assoc.get('data', {})
-               .get('disease', {})
-               .get('associatedTargets', {})
-               .get('rows', []))
-
+    rows  = (assoc.get('data', {})
+                  .get('disease', {})
+                  .get('associatedTargets', {})
+                  .get('rows', []))
     genes = [
         {
             'gene':     r['target']['approvedSymbol'],
@@ -387,30 +385,9 @@ def query_open_targets_top_genes(phenotype: str, max_genes: int = 30) -> list[di
         }
         for r in rows
     ]
-
     cache[phenotype] = genes
     _save_cache('bg_ot_genes', cache)
     return genes
-
-
-# ── Entity aggregation ─────────────────────────────────────────────────────────
-
-def _aggregate_entities(entities: list[dict]) -> list[dict]:
-    """
-    Deduplicate and count entities by (text, type).
-
-    Returns list sorted by count descending.
-    """
-    counts: dict[tuple, int] = {}
-    samples: dict[tuple, str] = {}
-    for e in entities:
-        key = (e['text'], e['type'])
-        counts[key] = counts.get(key, 0) + 1
-        samples.setdefault(key, e.get('title', ''))
-    return [
-        {'term': k[0], 'entity_type': k[1], 'count': v, 'sample_title': samples[k]}
-        for k, v in sorted(counts.items(), key=lambda x: -x[1])
-    ]
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
@@ -418,191 +395,156 @@ def _aggregate_entities(entities: list[dict]) -> list[dict]:
 def run_background_analysis(
     phenotype: str,
     output_dir: str,
-    additional_phenotypes: list[str] | None = None,
+    seeds: dict,
     ncbi_api_key: str | None = None,
     include_open_targets: bool = True,
 ) -> dict:
     """
-    Run the full pre-enrichment background analysis for a phenotype.
+    Run seed-term background analysis for a phenotype.
+
+    For every term in every category of the seeds dict, queries PubTator3
+    for risk and protective associations individually, then writes:
+      - phenotype_background.csv  (one row per seed term — all evidence columns)
+      - phenotype_background_summary.csv  (one row per category)
+      - phenotype_background.json
 
     Parameters
     ----------
-    phenotype             : primary phenotype string (e.g. 'type 2 diabetes')
-    output_dir            : directory for output CSVs and JSON
-    additional_phenotypes : optional list of related phenotype aliases to include
-    ncbi_api_key          : NCBI Entrez API key (increases rate limit)
-    include_open_targets  : if True, also query Open Targets for top associated genes
-
-    Returns
-    -------
-    dict  full results keyed by category
+    phenotype             : primary phenotype string
+    output_dir            : directory for outputs
+    seeds                 : dict {category: [term, ...]} from load_seeds()
+    ncbi_api_key          : NCBI Entrez API key (unused here, kept for compatibility)
+    include_open_targets  : query Open Targets for top disease-associated genes
     """
     global CACHE_DIR
     CACHE_DIR = os.path.join(output_dir, '.cache')
     os.makedirs(output_dir, exist_ok=True)
 
-    all_phenotypes = [phenotype] + (additional_phenotypes or [])
+    total_terms = sum(len(v) for v in seeds.values())
 
     print("=" * 60)
-    print("PHENOTYPE BACKGROUND ANALYSIS")
+    print("PHENOTYPE BACKGROUND ANALYSIS  (seed-term mode)")
     print("=" * 60)
-    print(f"  Primary phenotype    : {phenotype}")
-    if additional_phenotypes:
-        print(f"  Additional aliases   : {', '.join(additional_phenotypes)}")
-    print(f"  Categories           : {', '.join(BACKGROUND_CATEGORIES)}")
-    print(f"  Output               : {output_dir}")
+    print(f"  Primary phenotype : {phenotype}")
+    print(f"  Total seed terms  : {total_terms}")
+    print(f"  Categories        : {', '.join(seeds.keys())}")
+    print(f"  Output            : {output_dir}")
     print()
 
-    results:     dict = {}
-    entity_rows: list = []
+    entity_rows : list = []
+    category_summary: dict = {}
 
-    # ── Category loop ──────────────────────────────────────────────────────
-    for category, modifiers in BACKGROUND_CATEGORIES.items():
-        print(f"\n[{category}]")
+    # ── Per-category, per-term loop ─────────────────────────────────────────
+    for category in SEED_CATEGORIES:
+        terms = seeds.get(category, [])
+        if not terms:
+            continue
 
-        cat_risk_entities:  list = []
-        cat_prot_entities:  list = []
-        cat_risk_count     = 0
-        cat_prot_count     = 0
-        cat_unique_prot    = 0
-        cat_risk_pmids:    set  = set()
-        cat_prot_sentiment = 0.0
-        cat_prot_titles:   list = []
-        cat_uniq_titles:   list = []
+        print(f"\n[{category}]  ({len(terms)} terms)")
 
-        for pheno in all_phenotypes:
-            # Risk
-            risk_res = query_category_risk(pheno, category, modifiers, ncbi_api_key)
-            cat_risk_count  += risk_res['count']
-            cat_risk_pmids  |= risk_res['pmids']
-            cat_risk_entities.extend(risk_res['entities'])
-            print(f"  risk   [{pheno}]: {risk_res['count']:,} papers  "
-                  f"({len(risk_res['pmids'])} unique PMIDs)")
+        cat_risk_total = 0
+        cat_prot_total = 0
+        cat_uniq_total = 0
 
-            # Protective
-            prot_res = query_category_protective(
-                pheno, category, modifiers, risk_res['pmids'], ncbi_api_key
-            )
-            cat_prot_count   += prot_res['count']
-            cat_unique_prot  += prot_res['unique_count']
-            cat_prot_sentiment = round(
-                (cat_prot_sentiment + prot_res['sentiment_score']) / 2, 3
-            )
-            cat_prot_entities.extend(prot_res['entities'])
-            cat_prot_titles.extend(prot_res['sample_prot_titles'])
-            cat_uniq_titles.extend(prot_res['sample_uniq_titles'])
-            print(f"  prot   [{pheno}]: {prot_res['count']:,} papers  "
-                  f"unique={prot_res['unique_count']}  "
-                  f"sentiment={prot_res['sentiment_score']:.2f}")
+        for term in terms:
+            risk_res = query_seed_term_risk(term, phenotype)
+            prot_res = query_seed_term_protective(term, phenotype,
+                                                  risk_res['pmids'])
 
-        # Aggregate entities for this category
-        agg_risk = _aggregate_entities(cat_risk_entities)
-        agg_prot = _aggregate_entities(cat_prot_entities)
+            risk_count = risk_res['count']
+            prot_count = prot_res['count']
+            uniq_count = prot_res['unique_count']
 
-        # Build entity rows for output table
-        seen_terms: set = set()
-        for ent in agg_risk:
-            if ent['count'] < MIN_COUNT_THRESHOLD:
-                continue
-            term = ent['term']
-            seen_terms.add(term)
+            cat_risk_total += risk_count
+            cat_prot_total += prot_count
+            cat_uniq_total += uniq_count
+
+            print(f"  {term:<45}  risk={risk_count:>6,}  "
+                  f"prot={prot_count:>5,}  uniq={uniq_count:>4,}  "
+                  f"sent={prot_res['sentiment_score']:.2f}")
+
             entity_rows.append({
-                'category':            category,
-                'term':                term,
-                'entity_type':         ent['entity_type'],
-                'association_type':    'risk',
-                'count':               ent['count'],
-                'sample_title':        ent['sample_title'][:200],
+                'category':                  category,
+                'term':                      term,
+                'entity_type':               'curated_seed',
+                'count':                     risk_count,   # for backward compat
+                'risk_count':                risk_count,
+                'protective_count':          prot_count,
+                'unique_protective_count':   uniq_count,
+                'sentiment_score':           prot_res['sentiment_score'],
+                'risk_sample_titles':        ' | '.join(
+                    risk_res['sample_titles'][:3]),
+                'protective_sample_titles':  ' | '.join(
+                    prot_res['sample_prot_titles'][:3]),
+                'unique_protective_titles':  ' | '.join(
+                    prot_res['sample_uniq_titles'][:3]),
+                'association_type':          'curated',
             })
 
-        for ent in agg_prot:
-            if ent['count'] < MIN_COUNT_THRESHOLD:
-                continue
-            entity_rows.append({
-                'category':            category,
-                'term':                ent['term'],
-                'entity_type':         ent['entity_type'],
-                'association_type':    'protective',
-                'count':               ent['count'],
-                'sample_title':        ent['sample_title'][:200],
-            })
-
-        results[category] = {
-            'risk_count':           cat_risk_count,
-            'protective_count':     cat_prot_count,
-            'unique_protective':    cat_unique_prot,
-            'sentiment_score':      cat_prot_sentiment,
-            'sample_prot_titles':   cat_prot_titles[:5],
-            'sample_uniq_titles':   cat_uniq_titles[:5],
-            'top_risk_entities':    agg_risk[:20],
-            'top_prot_entities':    agg_prot[:20],
+        category_summary[category] = {
+            'n_terms':          len(terms),
+            'risk_total':       cat_risk_total,
+            'protective_total': cat_prot_total,
+            'unique_prot':      cat_uniq_total,
         }
 
     # ── Open Targets top genes ─────────────────────────────────────────────
     ot_genes: list[dict] = []
     if include_open_targets:
         print(f"\n[open_targets]")
-        for pheno in all_phenotypes:
-            genes = query_open_targets_top_genes(pheno, max_genes=30)
-            ot_genes.extend(genes)
-            print(f"  {pheno}: {len(genes)} associated genes")
+        genes = query_open_targets_top_genes(phenotype, max_genes=30)
+        ot_genes.extend(genes)
+        print(f"  {phenotype}: {len(genes)} associated genes")
 
-        # Deduplicate by gene symbol, keep highest score
-        seen_genes: dict[str, dict] = {}
-        for g in ot_genes:
-            sym = g['gene']
-            if sym not in seen_genes or g['ot_score'] > seen_genes[sym]['ot_score']:
-                seen_genes[sym] = g
-        ot_genes = sorted(seen_genes.values(), key=lambda x: -x['ot_score'])
-
-        # Add OT genes as entity rows in 'mechanisms' category
         for g in ot_genes[:20]:
+            ot_count = round(g['ot_score'] * 100)
             entity_rows.append({
-                'category':         'open_targets_genes',
-                'term':             g['gene'],
-                'entity_type':      'Gene',
-                'association_type': 'risk',
-                'count':            round(g['ot_score'] * 100),
-                'sample_title':     f"OT score={g['ot_score']} biotype={g['biotype']}",
+                'category':                  'open_targets_genes',
+                'term':                      g['gene'],
+                'entity_type':               'Gene',
+                'count':                     ot_count,
+                'risk_count':                ot_count,
+                'protective_count':          0,
+                'unique_protective_count':   0,
+                'sentiment_score':           0.0,
+                'risk_sample_titles':        f"OT score={g['ot_score']} "
+                                             f"biotype={g['biotype']}",
+                'protective_sample_titles':  '',
+                'unique_protective_titles':  '',
+                'association_type':          'open_targets',
             })
 
-        results['open_targets_genes'] = {
-            'genes': ot_genes,
-            'n':     len(ot_genes),
+        category_summary['open_targets_genes'] = {
+            'n_terms':          len(ot_genes),
+            'risk_total':       sum(round(g['ot_score'] * 100) for g in ot_genes),
+            'protective_total': 0,
+            'unique_prot':      0,
         }
 
     # ── Save outputs ───────────────────────────────────────────────────────
     entity_df = pd.DataFrame(entity_rows)
-    entity_df.sort_values(['category', 'association_type', 'count'],
-                          ascending=[True, True, False], inplace=True)
-    entity_path = os.path.join(output_dir, 'phenotype_background.csv')
-    entity_df.to_csv(entity_path, index=False)
+    entity_df.sort_values(
+        ['category', 'risk_count'],
+        ascending=[True, False],
+        inplace=True,
+    )
+
+    csv_path = os.path.join(output_dir, 'phenotype_background.csv')
+    entity_df.to_csv(csv_path, index=False)
     print(f"\n  Saved phenotype_background.csv ({len(entity_df)} rows)")
 
-    # Category-level summary
-    summary_rows = []
-    for cat, r in results.items():
-        if cat == 'open_targets_genes':
-            continue
-        summary_rows.append({
+    # Category summary
+    summary_rows = [
+        {
             'category':          cat,
-            'risk_paper_count':  r['risk_count'],
-            'prot_paper_count':  r['protective_count'],
-            'unique_prot_count': r['unique_protective'],
-            'prot_sentiment':    r['sentiment_score'],
-            'top_risk_terms':    ', '.join(
-                e['term'] for e in r['top_risk_entities'][:5]
-            ),
-            'top_prot_terms':    ', '.join(
-                e['term'] for e in r['top_prot_entities'][:5]
-            ),
-            'sample_prot_title': r['sample_prot_titles'][0]
-                                 if r['sample_prot_titles'] else '',
-            'sample_uniq_prot':  r['sample_uniq_titles'][0]
-                                 if r['sample_uniq_titles'] else '',
-        })
-
-    summary_df = pd.DataFrame(summary_rows)
+            'n_terms':           v['n_terms'],
+            'risk_paper_total':  v['risk_total'],
+            'prot_paper_total':  v['protective_total'],
+            'unique_prot_total': v['unique_prot'],
+        }
+        for cat, v in category_summary.items()
+    ]
+    summary_df  = pd.DataFrame(summary_rows)
     summary_path = os.path.join(output_dir, 'phenotype_background_summary.csv')
     summary_df.to_csv(summary_path, index=False)
     print(f"  Saved phenotype_background_summary.csv")
@@ -610,22 +552,17 @@ def run_background_analysis(
     # Full JSON
     json_path = os.path.join(output_dir, 'phenotype_background.json')
     with open(json_path, 'w') as f:
-        # Convert sets to lists for JSON serialisation
-        json_safe = {}
-        for cat, r in results.items():
-            json_safe[cat] = {
-                k: list(v) if isinstance(v, set) else v
-                for k, v in r.items()
-            }
         json.dump({
-            'phenotype':   phenotype,
-            'run_date':    datetime.now().isoformat(),
-            'categories':  json_safe,
+            'phenotype':        phenotype,
+            'run_date':         datetime.now().isoformat(),
+            'category_summary': category_summary,
+            'terms':            entity_rows,
+            'ot_genes':         ot_genes,
         }, f, indent=2)
     print(f"  Saved phenotype_background.json")
 
     print(f"\nBackground analysis complete → {output_dir}/")
-    return results
+    return category_summary
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────────
@@ -633,11 +570,14 @@ def run_background_analysis(
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(
         description=(
-            "Pre-enrichment phenotype background analysis.\n\n"
-            "Builds a literature-backed table of subtypes, co-phenotypes,\n"
-            "molecular mechanisms, pathways, complications and comorbidities\n"
-            "for a phenotype of interest.  Risk AND protective associations\n"
-            "are queried separately; protective-unique findings are flagged."
+            "Pre-enrichment phenotype background analysis (seed-term mode).\n\n"
+            "Queries PubTator3 for each curated seed term individually,\n"
+            "producing a literature-backed evidence table with risk counts,\n"
+            "protective counts, unique protective findings, and sentiment\n"
+            "scores per term.\n\n"
+            "Output CSV is used directly by enrich_clusters_literature.py\n"
+            "via --background_table so every cluster feature is scored\n"
+            "against every background term."
         ),
         formatter_class=argparse.RawTextHelpFormatter,
     )
@@ -650,31 +590,34 @@ if __name__ == '__main__':
         help="Directory to write output CSVs and JSON",
     )
     parser.add_argument(
-        '--additional_phenotypes', default=None,
-        help="Comma-separated phenotype aliases to include alongside the primary\n"
-             "(e.g. 'T2D,diabetes mellitus type 2,insulin resistance')",
+        '--seeds_file', default=None,
+        help=(
+            "Path to a phenotype seeds JSON file.\n"
+            "If omitted, auto-detects scripts/phenotype_seeds/<phenotype_slug>.json.\n"
+            "Use scripts/phenotype_seeds/_template.json as a starting point."
+        ),
     )
     parser.add_argument(
         '--ncbi_api_key', default=None,
-        help="NCBI Entrez API key — increases rate limit from 3 to 10 req/sec",
+        help="NCBI Entrez API key (increases rate limit from 3 to 10 req/sec)",
     )
     parser.add_argument(
         '--open_targets', action='store_true',
-        help="Also query Open Targets for top phenotype-associated genes\n"
-             "(adds 'open_targets_genes' section to output; default: disabled)",
+        help=(
+            "Also query Open Targets for the top phenotype-associated genes\n"
+            "and add them to the background table (default: disabled)"
+        ),
     )
 
     args = parser.parse_args()
 
-    extra = (
-        [p.strip() for p in args.additional_phenotypes.split(',')]
-        if args.additional_phenotypes else None
-    )
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    seeds      = load_seeds(args.seeds_file, args.phenotype, script_dir)
 
     run_background_analysis(
         phenotype=args.phenotype,
         output_dir=args.output_dir,
-        additional_phenotypes=extra,
+        seeds=seeds,
         ncbi_api_key=args.ncbi_api_key,
         include_open_targets=args.open_targets,
     )

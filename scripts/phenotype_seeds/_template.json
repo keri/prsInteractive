@@ -1,0 +1,53 @@
+{
+  "_comment": "Template for phenotype seeds files. Copy and rename to {phenotype_slug}.json",
+  "_slug_note": "Filename should be the phenotype with spaces replaced by underscores, e.g. celiac_disease.json",
+
+  "phenotype": "your phenotype here",
+  "aliases": [
+    "short alias",
+    "alternative name",
+    "abbreviation"
+  ],
+
+  "subtypes": [
+    "known subtype 1",
+    "known subtype 2",
+    "endotype or subgroup name"
+  ],
+
+  "co_phenotypes": [
+    "co-occurring condition 1",
+    "associated phenotype 2",
+    "phenotypic overlap 3"
+  ],
+
+  "mechanisms": [
+    "molecular mechanism 1",
+    "pathophysiology term 2",
+    "cellular process 3"
+  ],
+
+  "pathways": [
+    "signalling pathway 1",
+    "metabolic pathway 2",
+    "biological process 3"
+  ],
+
+  "complications": [
+    "disease complication 1",
+    "end-organ outcome 2",
+    "disease progression marker 3"
+  ],
+
+  "comorbidities": [
+    "comorbid disease 1",
+    "multimorbidity term 2",
+    "concurrent condition 3"
+  ],
+
+  "protective": [
+    "protective intervention 1",
+    "prevention strategy 2",
+    "risk-reducing exposure 3"
+  ]
+}
