@@ -52,6 +52,10 @@
 #   TISSUES             — comma-separated GTEx tissue IDs (default: panel)
 #   NCBI_API_KEY        — NCBI Entrez API key for 10 req/sec (default: 3/sec)
 #   DISGENET_KEY        — DisGeNET API key (default: unauthenticated)
+#   BACKGROUND_TABLE    — path to phenotype_background.csv from
+#                         phenotype_background_analysis.py; when set, ALL terms
+#                         in the table are used as phenotype query terms so every
+#                         gene/SNP gets a score for each background term
 #   NO_APPEND           — set to 1 to overwrite existing CSVs (default: append)
 #   SKIP_GTEX           — set to 1 to skip GTEx enrichment (default: 0)
 #   SKIP_LITERATURE     — set to 1 to skip literature enrichment (default: 0)
@@ -77,6 +81,7 @@ fi
 TOP_N="${TOP_N:-20}"
 NCBI_API_KEY="${NCBI_API_KEY:-}"
 DISGENET_KEY="${DISGENET_KEY:-}"
+BACKGROUND_TABLE="${BACKGROUND_TABLE:-}"
 SKIP_GTEX="${SKIP_GTEX:-0}"
 SKIP_LITERATURE="${SKIP_LITERATURE:-0}"
 NO_APPEND="${NO_APPEND:-0}"
@@ -97,10 +102,11 @@ GTEX_ARGS=()
 LIT_ARGS_BASE=()
 
 [[ -n "${NCBI_API_KEY}" ]] && GTEX_ARGS+=(--ncbi_api_key "${NCBI_API_KEY}")
-[[ -n "${NCBI_API_KEY}" ]] && LIT_ARGS_BASE+=(--ncbi_api_key  "${NCBI_API_KEY}")
-[[ -n "${DISGENET_KEY}" ]] && LIT_ARGS_BASE+=(--disgenet_api_key "${DISGENET_KEY}")
-[[ -n "${TISSUES:-}" ]]    && GTEX_ARGS+=(--tissues "${TISSUES}")
-[[ "${NO_APPEND}" == "1" ]] && LIT_ARGS_BASE+=(--no_append)
+[[ -n "${NCBI_API_KEY}" ]]    && LIT_ARGS_BASE+=(--ncbi_api_key  "${NCBI_API_KEY}")
+[[ -n "${DISGENET_KEY}" ]]    && LIT_ARGS_BASE+=(--disgenet_api_key "${DISGENET_KEY}")
+[[ -n "${TISSUES:-}" ]]       && GTEX_ARGS+=(--tissues "${TISSUES}")
+[[ -n "${BACKGROUND_TABLE}" ]] && LIT_ARGS_BASE+=(--background_table "${BACKGROUND_TABLE}")
+[[ "${NO_APPEND}" == "1" ]]   && LIT_ARGS_BASE+=(--no_append)
 
 # ── Per-directory loop ────────────────────────────────────────────────────────
 for i in "${!DIRS[@]}"; do

@@ -602,11 +602,86 @@ def _resolve_hla_term_for_literature(primary_term, phenotype, min_count=5):
     return fallback, f"'{primary_term}' low coverage → fallback '{fallback}'"
 
 
+# ── Background table loader ────────────────────────────────────────────────────
+
+def load_phenotypes_from_background_table(
+    background_table_path: str,
+    primary_phenotype: str | None = None,
+    association_type: str | None = None,
+    min_count: int = 0,
+) -> list[str]:
+    """
+    Load all unique terms from a phenotype_background.csv produced by
+    phenotype_background_analysis.py and return them as a phenotype list
+    for use in enrich_with_literature().
+
+    Every gene/SNP feature will be queried against every term in this list,
+    producing a full (feature × background_term) evidence matrix so that
+    each cluster feature has scores for "type 2 diabetes" AND
+    "beta-cell dysfunction" AND "metabolic syndrome" etc. simultaneously.
+
+    Parameters
+    ----------
+    background_table_path : str  — path to phenotype_background.csv
+    primary_phenotype     : str | None — if given, it is prepended to the list
+                             and any duplicate removed; ensures the main phenotype
+                             is always included even if not in the table
+    association_type      : str | None — filter to 'risk', 'protective', or None
+                             (both); default: None = include all terms
+    min_count             : int — minimum count threshold to include a term;
+                             0 means include all (default)
+
+    Returns
+    -------
+    list[str]  deduplicated phenotype terms in discovery order
+    """
+    try:
+        bg = pd.read_csv(background_table_path)
+    except Exception as exc:
+        print(f"  [WARN] Could not read background table '{background_table_path}': {exc}")
+        return [primary_phenotype] if primary_phenotype else []
+
+    required_cols = {'term', 'count'}
+    missing = required_cols - set(bg.columns)
+    if missing:
+        print(f"  [WARN] background table missing columns: {missing}. "
+              f"Falling back to primary phenotype only.")
+        return [primary_phenotype] if primary_phenotype else []
+
+    if association_type and 'association_type' in bg.columns:
+        bg = bg[bg['association_type'] == association_type]
+
+    if min_count > 0:
+        bg = bg[bg['count'] >= min_count]
+
+    # Preserve discovery order (highest count first within each category)
+    terms_ordered: list[str] = []
+    seen: set[str] = set()
+    for term in bg.sort_values('count', ascending=False)['term']:
+        t = str(term).strip()
+        if t and t.lower() not in seen:
+            terms_ordered.append(t)
+            seen.add(t.lower())
+
+    # Prepend primary phenotype if supplied and not already present
+    if primary_phenotype:
+        pp_lower = primary_phenotype.lower()
+        if pp_lower not in seen:
+            terms_ordered.insert(0, primary_phenotype)
+
+    print(f"  Background table  : {background_table_path}")
+    print(f"  Phenotype terms   : {len(terms_ordered)} loaded "
+          f"(every feature will be scored against each term)")
+
+    return terms_ordered
+
+
 # ── Main enrichment ───────────────────────────────────────────────────────────
 
 def enrich_with_literature(
     cluster_dir,
     phenotypes,
+    background_table=None,
     disgenet_api_key=None,
     ncbi_api_key=None,
     top_n=20,
@@ -619,10 +694,23 @@ def enrich_with_literature(
     Queries DisGeNET, Open Targets, PubTator3, PubMed and ClinVar for each
     top feature × phenotype pair identified in the bNMF cluster output.
 
+    Every feature (gene / SNP / HLA allele) is scored against EVERY phenotype
+    term, producing a full cross-product evidence matrix.  When background_table
+    is supplied, all terms from that table are used as phenotype terms so that
+    each cluster feature gets a score for "type 2 diabetes" AND
+    "beta-cell dysfunction" AND "metabolic syndrome" etc. simultaneously.
+
     Parameters
     ----------
     cluster_dir        : str — bNMF output directory (contains feature_loadings.csv)
-    phenotypes         : list[str] — phenotype terms to query
+    phenotypes         : list[str] — phenotype terms to query; used as the base list
+                          and also as the primary_phenotype anchor when background_table
+                          is supplied (so the primary phenotype is always included)
+    background_table   : str | None — path to phenotype_background.csv produced by
+                          phenotype_background_analysis.py.  When supplied, ALL unique
+                          terms in the table are appended to the phenotypes list so
+                          that every feature × every background term is queried.
+                          No ranking or truncation is applied — all terms are used.
     disgenet_api_key   : str | None — DisGeNET API key (free at disgenet.org)
     ncbi_api_key       : str | None — NCBI API key (3→10 req/sec)
     top_n              : int — top features per cluster to query
@@ -651,6 +739,30 @@ def enrich_with_literature(
     run_protective = (population_context == 'low_control')
     print(f"  Population context : {population_context}"
           f"{'  [protective queries enabled]' if run_protective else ''}")
+
+    # ── Expand phenotypes from background table ────────────────────────────
+    # When a background table is provided, all unique terms from it are added
+    # to the phenotypes list so every feature is scored against every term.
+    # No ranking or truncation — the full cross-product is always computed.
+    if background_table:
+        # primary_phenotype = first element of the phenotypes list acts as anchor
+        primary = phenotypes[0] if phenotypes else None
+        bg_terms = load_phenotypes_from_background_table(
+            background_table,
+            primary_phenotype=primary,
+        )
+        # Merge: keep original phenotypes first, then append background terms
+        # that are not already present (case-insensitive dedup)
+        n_before   = len(phenotypes)
+        seen_lower = {p.lower() for p in phenotypes}
+        extra: list[str] = []
+        for t in bg_terms:
+            if t.lower() not in seen_lower:
+                extra.append(t)
+                seen_lower.add(t.lower())
+        phenotypes = list(phenotypes) + extra
+        print(f"  Total query terms : {len(phenotypes)} "
+              f"({n_before} explicit + {len(extra)} from background table)")
 
     # ── Load feature loadings ──────────────────────────────────────────────
     loadings_path = os.path.join(cluster_dir, 'feature_loadings.csv')
@@ -897,8 +1009,23 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--phenotypes', required=True,
-        help="Comma-separated phenotype terms "
-             "(e.g., 'type 2 diabetes,epilepsy,cardio')",
+        help=(
+            "Comma-separated primary phenotype terms "
+            "(e.g., 'type 2 diabetes').  These are always included.\n"
+            "When --background_table is also supplied, ALL terms from the\n"
+            "table are appended so every feature is scored against every term."
+        ),
+    )
+    parser.add_argument(
+        '--background_table', default=None,
+        help=(
+            "Path to phenotype_background.csv produced by\n"
+            "phenotype_background_analysis.py.  When supplied, all unique\n"
+            "terms in the table (subtypes, co-phenotypes, mechanisms, pathways,\n"
+            "complications, comorbidities) are added to the phenotype list so\n"
+            "every gene/SNP feature is scored against every background term.\n"
+            "No ranking or truncation is applied."
+        ),
     )
     parser.add_argument(
         '--top_n', type=int, default=20,
@@ -935,6 +1062,7 @@ if __name__ == '__main__':
     enrich_with_literature(
         cluster_dir=args.cluster_dir,
         phenotypes=[p.strip() for p in args.phenotypes.split(',')],
+        background_table=args.background_table,
         disgenet_api_key=args.disgenet_api_key,
         ncbi_api_key=args.ncbi_api_key,
         top_n=args.top_n,
