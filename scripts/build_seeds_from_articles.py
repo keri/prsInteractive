@@ -88,29 +88,56 @@ PUBTATOR3_BASE = "https://www.ncbi.nlm.nih.gov/research/pubtator3-api"
 
 DEFAULT_ZOTERO_DB = os.path.expanduser("~/Zotero/zotero.sqlite")
 
-# Seed categories in display order
+# Seed categories — must match the Zotero sub-folder names (slugified)
+# Structure:  seedCollection/T2D/{Subtypes, Mechanisms, Pathways, Pharma,
+#                                   Protective, Comorbidities}
 SEED_CATEGORIES = [
-    'subtypes', 'co_phenotypes', 'mechanisms', 'pathways',
-    'complications', 'comorbidities', 'protective',
+    'subtypes',       # disease subtypes and endotypes (SIDD, SIRD, MARD …)
+    'mechanisms',     # molecular / cellular pathogenesis
+    'pathways',       # biological signalling and metabolic pathways
+    'pharma',         # pharmaceutical / drug-based interventions
+    'protective',     # lifestyle protective factors (diet, exercise …)
+    'comorbidities',  # co-occurring diseases, complications, comorbid conditions
 ]
 
-# Keywords used to auto-match sub-collection names to seed categories
-CATEGORY_KEYWORDS: dict[str, list[str]] = {
-    'subtypes':      ['subtype', 'endotype', 'classif', 'stratif',
-                      'cluster', 'heterogen', 'variant'],
-    'co_phenotypes': ['co-phenotype', 'cophenotype', 'associated condition',
-                      'phenotype', 'pleiotrop'],
-    'mechanisms':    ['mechanism', 'pathogenesis', 'pathophysiology',
-                      'molecular', 'cellular', 'etiology', 'aetiology'],
-    'pathways':      ['pathway', 'signaling', 'signalling', 'metabolic',
-                      'cascade', 'network'],
-    'complications': ['complication', 'outcome', 'sequelae', 'progression',
-                      'end-organ', 'damage'],
-    'comorbidities': ['comorbidity', 'comorbidities', 'multimorbidity',
-                      'concurrent', 'co-morbid'],
-    'protective':    ['protective', 'protection', 'prevention', 'prevent',
-                      'intervention', 'therapy', 'treatment', 'benefi',
-                      'resilience'],
+# Human-readable descriptions used in the Claude classification prompt.
+# Sub-folder name → category slug is DIRECT (no keyword heuristics);
+# these descriptions are only for guiding Claude's entity assignment.
+CATEGORY_DESCRIPTIONS: dict[str, str] = {
+    'subtypes': (
+        "disease subtypes, endotypes, subgroups, and classification systems "
+        "(e.g. SIDD, SIRD, MARD, MOD, MODY, LADA, ketosis-prone diabetes)"
+    ),
+    'mechanisms': (
+        "molecular/cellular mechanisms and pathogenesis "
+        "(e.g. insulin resistance, beta-cell dysfunction, glucotoxicity, "
+        "oxidative stress, ER stress, mitochondrial dysfunction)"
+    ),
+    'pathways': (
+        "biological signalling and metabolic pathways "
+        "(e.g. PI3K/AKT, AMPK, mTOR, NF-κB, gluconeogenesis, FOXO1, "
+        "ceramide pathway, unfolded protein response)"
+    ),
+    'pharma': (
+        "pharmaceutical and drug-based interventions — prescription medications "
+        "and surgical procedures used in disease management "
+        "(e.g. metformin, GLP-1 receptor agonists, SGLT2 inhibitors, "
+        "DPP-4 inhibitors, insulin, thiazolidinediones, bariatric surgery)"
+    ),
+    'protective': (
+        "lifestyle and non-pharmacological protective factors "
+        "(e.g. Mediterranean diet, physical activity, caloric restriction, "
+        "intermittent fasting, plant-based diet, resistance training, "
+        "dietary fibre, omega-3 fatty acids, vitamin D) — "
+        "EXCLUDE drugs (→ pharma) and clinical measures (→ comorbidities)"
+    ),
+    'comorbidities': (
+        "co-occurring diseases, disease complications, comorbid conditions, "
+        "and clinically assessed outcomes "
+        "(e.g. obesity, hypertension, dyslipidaemia, NAFLD, diabetic "
+        "nephropathy, retinopathy, neuropathy, cardiovascular disease, "
+        "heart failure, stroke, sleep disorder, depression, CKD, cancer)"
+    ),
 }
 
 # Entity types to exclude from seeds (too generic or non-biological)
@@ -303,16 +330,47 @@ def _extract_pmid(extra: str, url: str) -> str:
     return ''
 
 
-def match_collection_to_category(name: str) -> str | None:
+def _folder_name_to_category_slug(name: str) -> str:
     """
-    Match a sub-collection name to a seed category using keyword heuristics.
-    Returns the category key or None if no match.
+    Convert a Zotero sub-folder name directly to a seed category slug.
+
+    The mapping is intentionally simple: lowercase + underscore normalisation.
+    No heuristic keyword matching — the folder name IS the category.
+
+    Common aliases are resolved so minor naming variations still map cleanly:
+      'Subtypes'       → 'subtypes'
+      'Pharma'         → 'pharma'
+      'Pharmaceutical' → 'pharma'
+      'Protective'     → 'protective'
+      'Lifestyle'      → 'protective'
+      'Mechanisms'     → 'mechanisms'
+      'Pathways'       → 'pathways'
+      'Comorbidities'  → 'comorbidities'
     """
-    name_lower = name.lower()
-    for category, keywords in CATEGORY_KEYWORDS.items():
-        if any(kw in name_lower for kw in keywords):
-            return category
-    return None
+    slug = re.sub(r'[^a-z0-9]+', '_', name.strip().lower()).strip('_')
+    _ALIASES: dict[str, str] = {
+        'pharmaceutical':  'pharma',
+        'pharmaceuticals': 'pharma',
+        'drugs':           'pharma',
+        'pharmacological': 'pharma',
+        'pharmacotherapy': 'pharma',
+        'treatment':       'pharma',
+        'treatments':      'pharma',
+        'subtype':         'subtypes',
+        'endotype':        'subtypes',
+        'endotypes':       'subtypes',
+        'heterogeneity':   'subtypes',
+        'mechanism':       'mechanisms',
+        'pathway':         'pathways',
+        'lifestyle':       'protective',
+        'prevention':      'protective',
+        'protective_factors': 'protective',
+        'comorbidity':     'comorbidities',
+        'co_morbidities':  'comorbidities',
+        'complications':   'comorbidities',
+        'co_phenotypes':   'comorbidities',
+    }
+    return _ALIASES.get(slug, slug)
 
 
 # ── PubTator3 entity extraction ────────────────────────────────────────────────
@@ -374,51 +432,68 @@ def _aggregate_entities(entities: list[dict]) -> list[dict]:
 
 # ── Claude API classification ──────────────────────────────────────────────────
 
-_CLASSIFICATION_PROMPT = """\
+def _build_classification_prompt(phenotype: str, n_papers: int,
+                                  min_freq: int, entity_list: str,
+                                  category_hint: str | None = None) -> str:
+    """
+    Build the Claude entity-classification prompt dynamically from
+    SEED_CATEGORIES and CATEGORY_DESCRIPTIONS so the prompt always
+    reflects the current category schema.
+    """
+    cat_lines = '\n'.join(
+        f"- {cat:<16}: {CATEGORY_DESCRIPTIONS[cat]}"
+        for cat in SEED_CATEGORIES
+    )
+    # Build an example JSON with one illustrative term per category
+    example_terms: dict[str, str] = {
+        'subtypes':      'SIDD',
+        'mechanisms':    'insulin resistance',
+        'pathways':      'PI3K AKT signalling',
+        'pharma':        'metformin',
+        'protective':    'Mediterranean diet',
+        'comorbidities': 'hypertension',
+    }
+    example_json = json.dumps(
+        {cat: [example_terms.get(cat, 'example term')] for cat in SEED_CATEGORIES},
+        indent=2,
+    )
+
+    hint_note = (
+        f"\n\nContext: these papers specifically discuss the '{category_hint}' "
+        f"aspect of {phenotype} — weight entity assignments accordingly. "
+        f"Terms that clearly belong to '{category_hint}' should be placed there."
+        if category_hint else ""
+    )
+
+    return f"""\
 You are a biomedical expert building a structured knowledge base about {phenotype}.
 
-The entities below were extracted from {n_papers} research papers. Each entity
-appears in at least {min_freq} papers. Classify each into the most appropriate
-category for a disease knowledge base.
+The entities below were extracted from {n_papers} research papers using \
+PubTator3 entity recognition. Each entity appears in at least {min_freq} papers.
+Classify each entity into the most appropriate category for the knowledge base.
 
 Categories:
-- subtypes        : disease subtypes, endotypes, subgroups, classification systems
-                    (e.g. SIDD, MODY, LADA, insulin-resistant T2D)
-- co_phenotypes   : co-occurring phenotypes, phenotypic overlap
-                    (e.g. obesity, metabolic syndrome, PCOS)
-- mechanisms      : molecular/cellular mechanisms and pathogenesis
-                    (e.g. insulin resistance, beta-cell apoptosis, glucotoxicity)
-- pathways        : biological pathways, signalling cascades, metabolic processes
-                    (e.g. PI3K/AKT, AMPK, gluconeogenesis, NF-κB)
-- complications   : disease complications, outcomes, end-organ damage
-                    (e.g. diabetic nephropathy, retinopathy, neuropathy)
-- comorbidities   : comorbid diseases that frequently co-occur
-                    (e.g. hypertension, cardiovascular disease, CKD)
-- protective      : protective factors, preventive interventions, risk reducers
-                    (e.g. metformin, Mediterranean diet, physical activity)
-- exclude         : not relevant to {phenotype}, too generic, or a species name
+{cat_lines}
+- exclude         : entity is not relevant to {phenotype}, too generic, a \
+species/cell-line name, or a common English word
 
-Extracted entities (text | entity_type | frequency):
+Extracted entities (entity text | entity type | frequency):
 {entity_list}
 
 Rules:
-1. Return ONLY a JSON object — no preamble, no markdown fences.
-2. Keys are the 7 category names above (exclude 'exclude').
+1. Return ONLY a JSON object — no preamble, no markdown fences, no comments.
+2. Keys are exactly the {len(SEED_CATEGORIES)} category names listed above \
+(NOT 'exclude').
 3. Values are arrays of standardised term strings.
-4. Standardise spelling (e.g. "beta-cell dysfunction" not "β-cell dysfunction").
-5. Exclude terms that are clearly irrelevant to {phenotype}.
-6. A term may appear in at most one category.
+4. Standardise terminology: use English, spell out Greek letters \
+(e.g. "beta-cell dysfunction" not "β-cell dysfunction").
+5. Omit terms that are irrelevant to {phenotype} or too generic.
+6. Each term may appear in AT MOST ONE category.
+7. Keep granular, specific terms (e.g. "SIDD", "HbA1c", "DRB5*0301") \
+rather than collapsing to generic labels.{hint_note}
 
-Example output format:
-{{
-  "subtypes": ["SIDD", "MODY"],
-  "co_phenotypes": ["obesity"],
-  "mechanisms": ["insulin resistance", "glucotoxicity"],
-  "pathways": ["PI3K AKT signalling"],
-  "complications": ["diabetic nephropathy"],
-  "comorbidities": ["hypertension"],
-  "protective": ["metformin", "physical activity"]
-}}
+Return format (example):
+{example_json}
 """
 
 
@@ -458,15 +533,13 @@ def classify_with_claude(
         for e in top
     )
 
-    prompt = _CLASSIFICATION_PROMPT.format(
+    prompt = _build_classification_prompt(
         phenotype=phenotype,
         n_papers=n_papers,
         min_freq=MIN_ENTITY_FREQ,
         entity_list=entity_lines,
+        category_hint=category_hint,
     )
-    if category_hint:
-        prompt += (f"\n\nNote: these papers are specifically about the "
-                   f"'{category_hint}' category — weight classifications accordingly.")
 
     client = _anthropic.Anthropic(api_key=api_key)
 
@@ -709,11 +782,15 @@ def run_from_zotero(
                 sc_ids   = _get_collection_ids(conn, sc_name)
                 papers   = _query_papers_in_collections(conn, sc_ids)
 
-                # Determine category for this sub-collection
+                # Determine category for this sub-collection.
+                # Priority: explicit --category_map override, then direct
+                # slug conversion from folder name (e.g. "Subtypes"→"subtypes",
+                # "Pharma"→"pharma").  No keyword heuristics — folder name IS
+                # the category.
                 if category_map and sc_name in category_map:
                     category = category_map[sc_name]
                 else:
-                    category = match_collection_to_category(sc_name) or sc_name.lower()
+                    category = _folder_name_to_category_slug(sc_name)
 
                 papers_by_category.setdefault(category, []).extend(papers)
                 print(f"  '{sc_name}' → category='{category}'  ({len(papers)} papers)")

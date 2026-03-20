@@ -1,24 +1,14 @@
 {
-  "_comment": "Template for phenotype seeds files. Copy and rename to {phenotype_slug}.json",
-  "_slug_note": "Filename should be the phenotype with spaces replaced by underscores, e.g. celiac_disease.json",
+  "_comment": "Template for phenotype seed files. Copy and rename to {phenotype_slug}.json",
+  "_slug_note": "Filename should be the phenotype with spaces replaced by underscores, e.g. type_2_diabetes.json",
+  "_categories_note": "Six categories matching seedCollection sub-folder structure: Subtypes / Mechanisms / Pathways / Pharma / Protective / Comorbidities",
 
   "phenotype": "your phenotype here",
-  "aliases": [
-    "short alias",
-    "alternative name",
-    "abbreviation"
-  ],
 
   "subtypes": [
     "known subtype 1",
-    "known subtype 2",
-    "endotype or subgroup name"
-  ],
-
-  "co_phenotypes": [
-    "co-occurring condition 1",
-    "associated phenotype 2",
-    "phenotypic overlap 3"
+    "endotype or subgroup name",
+    "classification system term"
   ],
 
   "mechanisms": [
@@ -33,21 +23,22 @@
     "biological process 3"
   ],
 
-  "complications": [
-    "disease complication 1",
-    "end-organ outcome 2",
-    "disease progression marker 3"
-  ],
-
-  "comorbidities": [
-    "comorbid disease 1",
-    "multimorbidity term 2",
-    "concurrent condition 3"
+  "pharma": [
+    "drug or medication 1",
+    "pharmaceutical intervention 2",
+    "surgical procedure 3"
   ],
 
   "protective": [
-    "protective intervention 1",
-    "prevention strategy 2",
-    "risk-reducing exposure 3"
+    "lifestyle protective factor 1 (diet, exercise, fasting — NOT drugs)",
+    "dietary intervention 2",
+    "non-pharmacological prevention strategy 3"
+  ],
+
+  "comorbidities": [
+    "co-occurring condition 1",
+    "disease complication 2 (end-organ damage)",
+    "comorbid disease 3",
+    "clinically assessed outcome 4"
   ]
 }

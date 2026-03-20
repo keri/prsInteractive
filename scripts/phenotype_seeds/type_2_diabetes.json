@@ -1,6 +1,7 @@
 {
   "phenotype": "type 2 diabetes",
   "aliases": ["T2D", "T2DM", "type 2 diabetes mellitus", "diabetes mellitus type 2"],
+
   "subtypes": [
     "SIDD",
     "SAID",
@@ -17,22 +18,7 @@
     "obesity-related diabetes",
     "lipodystrophy-associated diabetes"
   ],
-  "co_phenotypes": [
-    "obesity",
-    "metabolic syndrome",
-    "hypertension",
-    "dyslipidaemia",
-    "non-alcoholic fatty liver disease",
-    "NASH",
-    "obstructive sleep apnoea",
-    "depression",
-    "polycystic ovary syndrome",
-    "cardiovascular disease",
-    "atrial fibrillation",
-    "hyperuricaemia",
-    "hypothyroidism",
-    "psoriasis"
-  ],
+
   "mechanisms": [
     "insulin resistance",
     "beta-cell dysfunction",
@@ -52,6 +38,7 @@
     "adipose tissue inflammation",
     "gut microbiome dysbiosis"
   ],
+
   "pathways": [
     "PI3K AKT signalling",
     "AMPK pathway",
@@ -69,7 +56,65 @@
     "ceramide pathway",
     "unfolded protein response"
   ],
-  "complications": [
+
+  "pharma": [
+    "metformin",
+    "SGLT2 inhibitor",
+    "GLP-1 receptor agonist",
+    "DPP-4 inhibitor",
+    "thiazolidinedione",
+    "sulfonylurea",
+    "insulin therapy",
+    "basal insulin",
+    "rapid-acting insulin",
+    "pioglitazone",
+    "rosiglitazone",
+    "empagliflozin",
+    "dapagliflozin",
+    "canagliflozin",
+    "semaglutide",
+    "liraglutide",
+    "dulaglutide",
+    "sitagliptin",
+    "bariatric surgery",
+    "gastric bypass"
+  ],
+
+  "protective": [
+    "caloric restriction",
+    "physical activity",
+    "Mediterranean diet",
+    "weight loss",
+    "dietary fibre",
+    "time-restricted eating",
+    "low glycaemic index diet",
+    "high-protein diet",
+    "intermittent fasting",
+    "plant-based diet",
+    "resistance training",
+    "omega-3 fatty acids",
+    "vitamin D",
+    "aerobic exercise",
+    "DASH diet",
+    "low-carbohydrate diet",
+    "mindful eating"
+  ],
+
+  "comorbidities": [
+    "obesity",
+    "metabolic syndrome",
+    "hypertension",
+    "dyslipidaemia",
+    "non-alcoholic fatty liver disease",
+    "NASH",
+    "obstructive sleep apnoea",
+    "depression",
+    "polycystic ovary syndrome",
+    "cardiovascular disease",
+    "atrial fibrillation",
+    "hyperuricaemia",
+    "hypothyroidism",
+    "psoriasis",
     "diabetic nephropathy",
     "diabetic retinopathy",
     "diabetic neuropathy",
@@ -81,41 +126,12 @@
     "hyperosmolar hyperglycaemic state",
     "peripheral arterial disease",
     "erectile dysfunction",
-    "cognitive impairment"
-  ],
-  "comorbidities": [
+    "cognitive impairment",
     "chronic kidney disease",
-    "cardiovascular disease",
-    "hypertension",
-    "dyslipidaemia",
-    "obesity",
-    "depression",
-    "non-alcoholic fatty liver disease",
-    "atrial fibrillation",
     "cognitive decline",
     "cancer",
     "osteoporosis",
     "sarcopenia",
     "sleep disorder"
-  ],
-  "protective": [
-    "caloric restriction",
-    "physical activity",
-    "Mediterranean diet",
-    "SGLT2 inhibitor",
-    "GLP-1 receptor agonist",
-    "metformin",
-    "weight loss",
-    "bariatric surgery",
-    "dietary fibre",
-    "time-restricted eating",
-    "low glycaemic index diet",
-    "high-protein diet",
-    "intermittent fasting",
-    "plant-based diet",
-    "resistance training",
-    "omega-3 fatty acids",
-    "vitamin D",
-    "sleep quality"
   ]
 }

@@ -11,6 +11,9 @@ Post-NMF literature enrichment for cluster features using:
                           entities rather than plain keywords; no key required
   - NCBI PubMed         — keyword co-occurrence count via E-utilities
   - ClinVar             — variant clinical significance
+  - Zotero corpus       — optional; full-text PDFs + abstracts from a curated
+                          local Zotero collection; Claude claude-opus-4-6 sentence-level
+                          sentiment analysis (RISK / PROTECTIVE / NEUTRAL)
 
 Query strategy per gene/SNP × phenotype
 ----------------------------------------
@@ -19,7 +22,8 @@ Query strategy per gene/SNP × phenotype
 3. PubTator3 entity-annotated co-occurrence count
 4. PubMed keyword co-occurrence count (fallback / complement)
 5. ClinVar pathogenicity (SNPs and short gene symbols only)
-6. Combined score = weighted sum of the above
+6. Zotero corpus sentiment score (optional; 20% weight when active)
+7. Combined score = weighted sum of the above
 
 Usage
 -----
@@ -27,18 +31,41 @@ Usage
     --cluster_dir /path/to/cohortBnmf/cardio \\
     --phenotypes "type 2 diabetes,epilepsy,cardio" \\
     --ncbi_api_key YOUR_NCBI_KEY \\
-    [--disgenet_api_key YOUR_DISGENET_KEY]
+    [--disgenet_api_key YOUR_DISGENET_KEY] \\
+    [--zotero_corpus T2D --anthropic_api_key YOUR_ANTHROPIC_KEY]
 """
 
 import argparse
 import json
 import math
 import os
+import re
+import sqlite3
 import time
 from collections import defaultdict
 
 import pandas as pd
 import requests
+
+# ── Optional: Anthropic SDK for Zotero corpus sentiment analysis ───────────────
+try:
+    import anthropic as _anthropic
+    _ANTHROPIC_AVAILABLE = True
+except ImportError:
+    _ANTHROPIC_AVAILABLE = False
+
+# ── Optional: PDF text extraction ─────────────────────────────────────────────
+try:
+    import pdfplumber as _pdfplumber
+    _PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    _PDFPLUMBER_AVAILABLE = False
+
+try:
+    import pypdf as _pypdf
+    _PYPDF_AVAILABLE = True
+except ImportError:
+    _PYPDF_AVAILABLE = False
 
 
 # ── Constants ──────────────────────────────────────────────────────────────────
@@ -77,6 +104,473 @@ PROTECTIVE_TITLE_KEYWORDS = [
 ]
 
 CACHE_DIR = None
+
+# Default Zotero storage directory
+DEFAULT_ZOTERO_DB      = os.path.expanduser('~/Zotero/zotero.sqlite')
+DEFAULT_ZOTERO_STORAGE = os.path.expanduser('~/Zotero/storage')
+
+# Max sentences sent to Claude per (feature, phenotype) pair — controls cost
+CORPUS_MAX_SENTENCES = 120
+
+# Weight of Zotero corpus evidence in the combined score (when corpus is active)
+WEIGHT_CORPUS = 0.20
+
+# Rescaled weights when corpus is included (original total = 1.0)
+# Corpus takes 0.20; remaining 0.80 distributed proportionally
+_W_BASE_TOTAL = (
+    WEIGHT_DISGENET + WEIGHT_OPEN_TARGETS + WEIGHT_PUBTATOR3 + WEIGHT_CLINVAR
+)
+WEIGHT_DISGENET_CORP     = WEIGHT_DISGENET     / _W_BASE_TOTAL * (1.0 - WEIGHT_CORPUS)
+WEIGHT_OPEN_TARGETS_CORP = WEIGHT_OPEN_TARGETS / _W_BASE_TOTAL * (1.0 - WEIGHT_CORPUS)
+WEIGHT_PUBTATOR3_CORP    = WEIGHT_PUBTATOR3    / _W_BASE_TOTAL * (1.0 - WEIGHT_CORPUS)
+WEIGHT_CLINVAR_CORP      = WEIGHT_CLINVAR      / _W_BASE_TOTAL * (1.0 - WEIGHT_CORPUS)
+
+
+# ── Zotero corpus loader ───────────────────────────────────────────────────────
+
+class ZoteroCorpus:
+    """
+    Local Zotero literature corpus for feature-level enrichment.
+
+    Loads all papers from a named Zotero collection, extracts full text from
+    PDF attachments where available (via pdfplumber → pypdf fallback), and
+    falls back to PubTator3-fetched abstracts for papers without local PDFs.
+
+    Usage
+    -----
+    corpus = ZoteroCorpus('T2D', db_path='~/Zotero/zotero.sqlite')
+    corpus.load()                                     # one-time load
+    matches = corpus.search(['KAZN', 'kazrin'])       # list of matching papers
+    """
+
+    def __init__(self,
+                 collection_name: str,
+                 db_path: str = DEFAULT_ZOTERO_DB,
+                 storage_dir: str = DEFAULT_ZOTERO_STORAGE):
+        self.collection_name = collection_name
+        self.db_path         = os.path.expanduser(db_path)
+        self.storage_dir     = os.path.expanduser(storage_dir)
+        self.papers: dict[str, dict] = {}   # corpus_key → paper dict
+        self._loaded = False
+
+    # ── SQLite helpers ─────────────────────────────────────────────────────
+
+    def _open_db(self) -> sqlite3.Connection:
+        uri = f'file:{self.db_path}?mode=ro'
+        conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _get_collection_ids(self, conn: sqlite3.Connection) -> list[int]:
+        """Recursive CTE — returns the named collection + all descendants."""
+        root_rows = conn.execute(
+            "SELECT collectionID FROM collections "
+            "WHERE LOWER(collectionName) = LOWER(?)",
+            (self.collection_name,),
+        ).fetchall()
+        if not root_rows:
+            root_rows = conn.execute(
+                "SELECT collectionID FROM collections "
+                "WHERE LOWER(collectionName) LIKE LOWER(?)",
+                (f'%{self.collection_name}%',),
+            ).fetchall()
+        if not root_rows:
+            return []
+        root_ids = [r[0] for r in root_rows]
+        placeholders = ','.join('?' * len(root_ids))
+        rows = conn.execute(f"""
+            WITH RECURSIVE tree(collectionID) AS (
+                SELECT collectionID FROM collections
+                WHERE collectionID IN ({placeholders})
+                UNION ALL
+                SELECT c.collectionID FROM collections c
+                JOIN tree t ON c.parentCollectionID = t.collectionID
+            )
+            SELECT collectionID FROM tree
+        """, root_ids).fetchall()
+        return [r[0] for r in rows]
+
+    def _query_papers(self, conn: sqlite3.Connection,
+                      collection_ids: list[int]) -> list[dict]:
+        if not collection_ids:
+            return []
+        placeholders = ','.join('?' * len(collection_ids))
+        rows = conn.execute(f"""
+            SELECT DISTINCT
+                i.itemID,
+                i.key                                                          AS item_key,
+                it.typeName                                                    AS item_type,
+                MAX(CASE WHEN f.fieldName = 'title'        THEN idv.value END) AS title,
+                MAX(CASE WHEN f.fieldName = 'abstractNote' THEN idv.value END) AS abstract,
+                MAX(CASE WHEN f.fieldName = 'extra'        THEN idv.value END) AS extra,
+                MAX(CASE WHEN f.fieldName = 'url'          THEN idv.value END) AS url
+            FROM items i
+            JOIN itemTypes it   ON i.itemTypeID  = it.itemTypeID
+            JOIN collectionItems ci ON i.itemID  = ci.collectionID
+            LEFT JOIN itemData id    ON i.itemID  = id.itemID
+            LEFT JOIN fields f       ON id.fieldID = f.fieldID
+            LEFT JOIN itemDataValues idv ON id.valueID = idv.valueID
+            WHERE ci.collectionID IN ({placeholders})
+              AND it.typeName NOT IN ('note', 'attachment')
+            GROUP BY i.itemID
+        """, collection_ids).fetchall()
+        return [dict(r) for r in rows]
+
+    def _get_pdf_paths(self, conn: sqlite3.Connection,
+                       item_ids: list[int]) -> dict[int, str]:
+        """Return {itemID: local_pdf_path} for items that have a stored PDF."""
+        if not item_ids:
+            return {}
+        placeholders = ','.join('?' * len(item_ids))
+        rows = conn.execute(f"""
+            SELECT
+                ia.parentItemID,
+                att.key       AS att_key,
+                ia.path       AS attachment_path,
+                ia.contentType
+            FROM itemAttachments ia
+            JOIN items att ON ia.itemID = att.itemID
+            WHERE ia.parentItemID IN ({placeholders})
+              AND ia.contentType = 'application/pdf'
+            ORDER BY ia.itemID
+        """, item_ids).fetchall()
+
+        pdf_map: dict[int, str] = {}
+        for row in rows:
+            parent_id = row['parentItemID']
+            if parent_id in pdf_map:
+                continue   # already have a PDF for this item
+            att_key = row['att_key']
+            raw_path = row['attachment_path'] or ''
+            if raw_path.startswith('storage:'):
+                filename = raw_path[8:]     # strip 'storage:' prefix
+                pdf_path = os.path.join(self.storage_dir, att_key, filename)
+            elif os.path.isabs(raw_path):
+                pdf_path = raw_path         # linked file: absolute path
+            else:
+                # Fallback: att_key directory with whatever filename we have
+                pdf_path = os.path.join(self.storage_dir, att_key, raw_path)
+            pdf_map[parent_id] = pdf_path
+        return pdf_map
+
+    # ── PDF text extraction ────────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_pdf_text(pdf_path: str, max_pages: int = 60) -> str:
+        """Extract plain text from a PDF. Returns '' if extraction fails."""
+        if not pdf_path or not os.path.exists(pdf_path):
+            return ''
+
+        # Preferred: pdfplumber (handles complex layouts well)
+        if _PDFPLUMBER_AVAILABLE:
+            try:
+                with _pdfplumber.open(pdf_path) as pdf:
+                    pages = pdf.pages[:max_pages]
+                    return ' '.join(
+                        t for page in pages
+                        for t in [page.extract_text() or '']
+                        if t
+                    )
+            except Exception:
+                pass
+
+        # Fallback: pypdf
+        if _PYPDF_AVAILABLE:
+            try:
+                with open(pdf_path, 'rb') as fh:
+                    reader = _pypdf.PdfReader(fh)
+                    return ' '.join(
+                        reader.pages[i].extract_text() or ''
+                        for i in range(min(max_pages, len(reader.pages)))
+                    )
+            except Exception:
+                pass
+
+        return ''
+
+    # ── Corpus loading ─────────────────────────────────────────────────────
+
+    @staticmethod
+    def _extract_pmid(extra: str, url: str) -> str:
+        if extra:
+            m = re.search(r'PMID:\s*(\d{6,})', extra, re.IGNORECASE)
+            if m:
+                return m.group(1)
+        if url:
+            m = re.search(r'pubmed\.ncbi\.nlm\.nih\.gov/(\d{6,})', url)
+            if m:
+                return m.group(1)
+        return ''
+
+    def load(self) -> 'ZoteroCorpus':
+        """
+        Load all papers + PDF text from the Zotero collection.
+
+        Call once before calling search(). Loading 200-500 papers with PDFs
+        typically takes 30–120 seconds depending on PDF size and disk speed.
+        """
+        if self._loaded:
+            return self
+
+        if not os.path.exists(self.db_path):
+            print(f"  [WARN] Zotero DB not found at '{self.db_path}' — "
+                  f"corpus enrichment disabled.")
+            self._loaded = True
+            return self
+
+        print(f"\n  Loading Zotero corpus: '{self.collection_name}' ...")
+        conn = self._open_db()
+        try:
+            coll_ids = self._get_collection_ids(conn)
+            if not coll_ids:
+                print(f"  [WARN] Collection '{self.collection_name}' not found "
+                      f"in Zotero — corpus enrichment disabled.")
+                self._loaded = True
+                return self
+
+            papers = self._query_papers(conn, coll_ids)
+            if not papers:
+                print(f"  [WARN] No papers found in '{self.collection_name}'.")
+                self._loaded = True
+                return self
+
+            item_ids  = [p['itemID'] for p in papers]
+            pdf_map   = self._get_pdf_paths(conn, item_ids)
+        finally:
+            conn.close()
+
+        # Build corpus entries, extract PDF text where available
+        n_pdfs = 0
+        for p in papers:
+            pmid    = self._extract_pmid(p.get('extra') or '',
+                                         p.get('url') or '')
+            key     = pmid or f"item_{p['itemID']}"
+            pdf_path = pdf_map.get(p['itemID'], '')
+            full_text = ''
+            is_full   = False
+            if pdf_path:
+                full_text = self._extract_pdf_text(pdf_path)
+                if full_text:
+                    is_full = True
+                    n_pdfs += 1
+
+            self.papers[key] = {
+                'itemID':       p['itemID'],
+                'pmid':         pmid,
+                'title':        p.get('title') or '',
+                'abstract':     p.get('abstract') or '',
+                'full_text':    full_text,
+                'is_full_text': is_full,
+            }
+
+        n_total    = len(self.papers)
+        n_abs_only = n_total - n_pdfs
+        print(f"    {n_total} papers  |  {n_pdfs} with full-text PDF  "
+              f"|  {n_abs_only} abstract-only")
+        self._loaded = True
+        return self
+
+    # ── Corpus search ──────────────────────────────────────────────────────
+
+    def search(self, query_terms: list[str],
+               max_sentences_per_paper: int = 12) -> list[dict]:
+        """
+        Find corpus papers that mention any of the query terms.
+
+        Returns a list of match dicts, each with:
+          pmid, title, matched_term, sentences (list[str]), is_full_text
+        Full-text papers are returned first.
+        """
+        if not self._loaded:
+            self.load()
+
+        results: list[dict] = []
+        qt_lower = [q.lower() for q in query_terms]
+
+        for key, paper in self.papers.items():
+            text_src  = paper.get('full_text') or paper.get('abstract', '')
+            title_src = paper.get('title', '')
+            combined  = f"{title_src}. {text_src}" if text_src else title_src
+            if not combined.strip():
+                continue
+
+            combined_lower = combined.lower()
+            matched_term   = next(
+                (q for ql, q in zip(qt_lower, query_terms)
+                 if ql in combined_lower),
+                None,
+            )
+            if not matched_term:
+                continue
+
+            # Split into sentences, keep those that mention any query term
+            raw_sentences = re.split(r'(?<=[.!?])\s+(?=[A-Z])', combined)
+            relevant = [
+                s.strip()
+                for s in raw_sentences
+                if any(ql in s.lower() for ql in qt_lower)
+                and 25 < len(s.strip()) < 1500
+            ][:max_sentences_per_paper]
+
+            if relevant:
+                results.append({
+                    'pmid':         paper['pmid'],
+                    'title':        paper['title'],
+                    'matched_term': matched_term,
+                    'sentences':    relevant,
+                    'is_full_text': paper['is_full_text'],
+                })
+
+        # Full-text papers first, then abstract-only
+        results.sort(key=lambda r: (0 if r['is_full_text'] else 1))
+        return results
+
+
+# ── Zotero corpus sentiment analysis (Claude) ─────────────────────────────────
+
+def _empty_corpus_result(n_papers: int = 0, n_sentences: int = 0) -> dict:
+    return {
+        'corpus_papers':          n_papers,
+        'corpus_sentences':       n_sentences,
+        'corpus_risk_count':      0,
+        'corpus_protective_count': 0,
+        'corpus_neutral_count':   0,
+        'corpus_sentiment_score': 0.0,
+        'corpus_summary':         '',
+    }
+
+
+def analyze_corpus_sentiment(
+    feature: str,
+    phenotype: str,
+    paper_matches: list[dict],
+    client,
+) -> dict:
+    """
+    Use Claude claude-opus-4-6 (adaptive thinking) to classify the direction of
+    association between *feature* and *phenotype* for each relevant sentence
+    found in the Zotero corpus.
+
+    Parameters
+    ----------
+    feature       : query term (gene symbol, rs-ID, HLA allele, clinical measure)
+    phenotype     : phenotype string (e.g. "type 2 diabetes")
+    paper_matches : output of ZoteroCorpus.search()
+    client        : anthropic.Anthropic() instance
+
+    Returns
+    -------
+    dict with keys: corpus_papers, corpus_sentences, corpus_risk_count,
+                    corpus_protective_count, corpus_neutral_count,
+                    corpus_sentiment_score (-1 = protective … +1 = risk),
+                    corpus_summary
+    """
+    if not paper_matches or client is None:
+        return _empty_corpus_result()
+
+    # Collect sentences, preferring full-text over abstract-only
+    all_entries: list[dict] = []
+    for match in paper_matches:
+        for s in match['sentences']:
+            all_entries.append({
+                'pmid':        match['pmid'],
+                'title':       match['title'][:80],
+                'sentence':    s,
+                'is_full_text': match['is_full_text'],
+            })
+
+    if not all_entries:
+        return _empty_corpus_result(len(paper_matches))
+
+    # Cap: prefer full-text sentences up to CORPUS_MAX_SENTENCES
+    if len(all_entries) > CORPUS_MAX_SENTENCES:
+        ft   = [e for e in all_entries if e['is_full_text']]
+        ab   = [e for e in all_entries if not e['is_full_text']]
+        n_ft = min(len(ft), int(CORPUS_MAX_SENTENCES * 0.7))
+        n_ab = CORPUS_MAX_SENTENCES - n_ft
+        all_entries = ft[:n_ft] + ab[:n_ab]
+
+    sentence_block = '\n'.join(
+        f"[{i}] (PMID:{e['pmid'] or 'n/a'}, "
+        f"{'full-text' if e['is_full_text'] else 'abstract'}) {e['sentence']}"
+        for i, e in enumerate(all_entries)
+    )
+
+    prompt = (
+        f'You are a biomedical expert assessing the association between '
+        f'"{feature}" and "{phenotype}".\n\n'
+        f'The following {len(all_entries)} sentences come from '
+        f'{len(paper_matches)} papers in a curated scientific literature '
+        f'corpus. Full-text papers are prioritised over abstracts.\n\n'
+        f'For each sentence classify the association as exactly one of:\n'
+        f'  RISK        — feature increases risk, severity, or progression\n'
+        f'  PROTECTIVE  — feature reduces risk, is beneficial, or protective\n'
+        f'  NEUTRAL     — feature mentioned but direction unclear or methodological\n\n'
+        f'Return ONLY a JSON object (no markdown, no preamble):\n'
+        f'{{\n'
+        f'  "classifications": [\n'
+        f'    {{"idx": 0, "label": "RISK", "confidence": 0.85}},\n'
+        f'    ...\n'
+        f'  ],\n'
+        f'  "summary": "2-3 sentence synthesis of the overall association"\n'
+        f'}}\n\n'
+        f'Sentences:\n{sentence_block}'
+    )
+
+    try:
+        with client.messages.stream(
+            model='claude-opus-4-6',
+            max_tokens=4096,
+            thinking={'type': 'adaptive'},
+            messages=[{'role': 'user', 'content': prompt}],
+        ) as stream:
+            message = stream.get_final_message()
+
+        response_text = ''.join(
+            b.text for b in message.content if hasattr(b, 'text')
+        )
+        # Strip accidental markdown fences
+        response_text = re.sub(r'^```[a-z]*\n?', '', response_text.strip(),
+                                flags=re.MULTILINE)
+        response_text = re.sub(r'\n?```$', '', response_text.strip(),
+                                flags=re.MULTILINE)
+        result = json.loads(response_text)
+
+        classifications = result.get('classifications', [])
+        summary         = result.get('summary', '')
+
+        risk_count  = sum(1 for c in classifications if c.get('label') == 'RISK')
+        prot_count  = sum(1 for c in classifications if c.get('label') == 'PROTECTIVE')
+        neut_count  = sum(1 for c in classifications if c.get('label') == 'NEUTRAL')
+        total       = risk_count + prot_count + neut_count
+
+        # Weighted sentiment: +1 = all RISK, -1 = all PROTECTIVE
+        sentiment_score = 0.0
+        if total > 0:
+            weighted = sum(
+                c.get('confidence', 0.5) * (
+                    1.0 if c.get('label') == 'RISK'
+                    else -1.0 if c.get('label') == 'PROTECTIVE'
+                    else 0.0
+                )
+                for c in classifications
+            )
+            sentiment_score = round(weighted / total, 4)
+
+        return {
+            'corpus_papers':           len(paper_matches),
+            'corpus_sentences':        len(all_entries),
+            'corpus_risk_count':       risk_count,
+            'corpus_protective_count': prot_count,
+            'corpus_neutral_count':    neut_count,
+            'corpus_sentiment_score':  sentiment_score,
+            'corpus_summary':          summary,
+        }
+
+    except Exception as exc:
+        print(f"    [WARN] Corpus sentiment failed for '{feature}' × "
+              f"'{phenotype}': {exc}")
+        return _empty_corpus_result(len(paper_matches), len(all_entries))
 
 
 # ── HTTP helpers ───────────────────────────────────────────────────────────────
@@ -475,7 +969,8 @@ def query_clinvar_significance(snp_or_gene, api_key=None):
 # ── Combined evidence scoring ─────────────────────────────────────────────────
 
 def compute_combined_score(disgenet_score, open_targets_score,
-                           pubtator3_count, clinvar_sig):
+                           pubtator3_count, clinvar_sig,
+                           corpus_papers=0, corpus_sentiment_score=0.0):
     """
     Combine evidence from DisGeNET, Open Targets, PubTator3 and ClinVar
     into a single [0, 1] score.
@@ -484,7 +979,13 @@ def compute_combined_score(disgenet_score, open_targets_score,
     (they are stored in the evidence table for reference) because PubTator3
     entity counts already capture publication evidence more precisely.
 
-    Weights: DisGeNET=0.25, Open Targets=0.30, PubTator3=0.25, ClinVar=0.20
+    When corpus evidence is available (corpus_papers > 0), the Zotero corpus
+    sentiment score is incorporated and the base source weights are rescaled
+    to occupy 80% of the total, with WEIGHT_CORPUS (20%) allocated to the
+    corpus term.
+
+    Weights (no corpus): DisGeNET=0.25, Open Targets=0.30, PubTator3=0.25, ClinVar=0.20
+    Weights (corpus):    above × 0.80  +  corpus × 0.20
     """
     # PubTator3: sigmoid normalisation — ~20 entity-annotated papers → 0.63
     pubtator3_norm = 1 - math.exp(-pubtator3_count / 20.0)
@@ -499,12 +1000,24 @@ def compute_combined_score(disgenet_score, open_targets_score,
         'not_found':              0.0,
     }.get(clinvar_sig, 0.1)
 
-    combined = (
-        WEIGHT_DISGENET     * disgenet_score     +
-        WEIGHT_OPEN_TARGETS * open_targets_score +
-        WEIGHT_PUBTATOR3    * pubtator3_norm     +
-        WEIGHT_CLINVAR      * clinvar_val
-    )
+    if corpus_papers > 0:
+        # corpus_sentiment_score ∈ [-1, +1]; map to [0, 1] for weighting
+        corpus_val = (corpus_sentiment_score + 1.0) / 2.0
+
+        combined = (
+            WEIGHT_DISGENET_CORP     * disgenet_score     +
+            WEIGHT_OPEN_TARGETS_CORP * open_targets_score +
+            WEIGHT_PUBTATOR3_CORP    * pubtator3_norm     +
+            WEIGHT_CLINVAR_CORP      * clinvar_val         +
+            WEIGHT_CORPUS            * corpus_val
+        )
+    else:
+        combined = (
+            WEIGHT_DISGENET     * disgenet_score     +
+            WEIGHT_OPEN_TARGETS * open_targets_score +
+            WEIGHT_PUBTATOR3    * pubtator3_norm     +
+            WEIGHT_CLINVAR      * clinvar_val
+        )
     return round(min(combined, 1.0), 6)
 
 
@@ -687,6 +1200,9 @@ def enrich_with_literature(
     top_n=20,
     population_context='auto',
     append_mode=True,
+    zotero_corpus_collection=None,
+    zotero_db=None,
+    anthropic_api_key=None,
 ):
     """
     Main literature enrichment routine.
@@ -700,29 +1216,41 @@ def enrich_with_literature(
     each cluster feature gets a score for "type 2 diabetes" AND
     "beta-cell dysfunction" AND "metabolic syndrome" etc. simultaneously.
 
+    When zotero_corpus_collection is provided, full-text and abstract-level
+    sentence analysis is performed using a local Zotero library and Claude
+    claude-opus-4-6 (adaptive thinking).  The corpus sentiment score is folded into
+    the combined evidence score (20% weight; base weights rescaled to 80%).
+
     Parameters
     ----------
-    cluster_dir        : str — bNMF output directory (contains feature_loadings.csv)
-    phenotypes         : list[str] — phenotype terms to query; used as the base list
-                          and also as the primary_phenotype anchor when background_table
-                          is supplied (so the primary phenotype is always included)
-    background_table   : str | None — path to phenotype_background.csv produced by
-                          phenotype_background_analysis.py.  When supplied, ALL unique
-                          terms in the table are appended to the phenotypes list so
-                          that every feature × every background term is queried.
-                          No ranking or truncation is applied — all terms are used.
-    disgenet_api_key   : str | None — DisGeNET API key (free at disgenet.org)
-    ncbi_api_key       : str | None — NCBI API key (3→10 req/sec)
-    top_n              : int — top features per cluster to query
-    population_context : str — 'auto' | 'both' | 'high_risk' | 'low_control'
+    cluster_dir               : str — bNMF output directory (contains feature_loadings.csv)
+    phenotypes                : list[str] — phenotype terms to query; used as the base list
+                                 and also as the primary_phenotype anchor when background_table
+                                 is supplied (so the primary phenotype is always included)
+    background_table          : str | None — path to phenotype_background.csv produced by
+                                 phenotype_background_analysis.py.  When supplied, ALL unique
+                                 terms in the table are appended to the phenotypes list so
+                                 that every feature × every background term is queried.
+                                 No ranking or truncation is applied — all terms are used.
+    disgenet_api_key          : str | None — DisGeNET API key (free at disgenet.org)
+    ncbi_api_key              : str | None — NCBI API key (3→10 req/sec)
+    top_n                     : int — top features per cluster to query
+    population_context        : str — 'auto' | 'both' | 'high_risk' | 'low_control'
         Controls which additional queries are run:
           'high_risk'   — standard risk-oriented queries (default behaviour)
           'low_control' — adds protective/prevention queries per feature × phenotype;
                           output columns include protective_count, protective_sentiment,
                           and unique_protective_titles (findings absent from risk queries)
           'both'/'auto' — auto-detect from cluster_dir path; if not detectable, uses 'both'
-    append_mode        : bool — if True and output CSVs already exist, new columns are
-                          merged into them rather than overwriting (default: True)
+    append_mode               : bool — if True and output CSVs already exist, new columns are
+                                 merged into them rather than overwriting (default: True)
+    zotero_corpus_collection  : str | None — Zotero collection name for corpus enrichment
+                                 (e.g. 'T2D').  When set, full-text PDFs and abstracts from
+                                 the collection are searched and Claude performs sentence-level
+                                 sentiment analysis per (feature × phenotype) pair.
+    zotero_db                 : str | None — path to zotero.sqlite (default: ~/Zotero/zotero.sqlite)
+    anthropic_api_key         : str | None — Anthropic API key for Claude corpus sentiment
+                                 analysis; falls back to ANTHROPIC_API_KEY env var if unset
 
     Returns
     -------
@@ -798,7 +1326,42 @@ def enrich_with_literature(
         for pheno in phenotypes
     })
 
-    print(f"\n  Evidence sources: DisGeNET, Open Targets, PubTator3, PubMed, ClinVar")
+    # ── Load Zotero corpus (optional) ─────────────────────────────────────
+    zotero_corpus: ZoteroCorpus | None = None
+    anthropic_client = None
+
+    if zotero_corpus_collection:
+        if not _ANTHROPIC_AVAILABLE:
+            print("  [WARN] --zotero_corpus supplied but 'anthropic' package not "
+                  "installed — corpus enrichment disabled.  "
+                  "Install with: pip install anthropic")
+        else:
+            db_path = zotero_db or DEFAULT_ZOTERO_DB
+            zotero_corpus = ZoteroCorpus(
+                collection_name=zotero_corpus_collection,
+                db_path=db_path,
+            ).load()
+            if not zotero_corpus.papers:
+                print("  [WARN] Zotero corpus is empty — corpus enrichment disabled.")
+                zotero_corpus = None
+            else:
+                api_key = anthropic_api_key or os.environ.get('ANTHROPIC_API_KEY')
+                if not api_key:
+                    print("  [WARN] No Anthropic API key found — corpus sentiment "
+                          "analysis disabled.  Set ANTHROPIC_API_KEY or pass "
+                          "--anthropic_api_key.")
+                    zotero_corpus = None
+                else:
+                    anthropic_client = _anthropic.Anthropic(api_key=api_key)
+                    print(f"  Corpus sentiment: enabled "
+                          f"({len(zotero_corpus.papers)} papers via Claude claude-opus-4-6)")
+
+    corpus_active = zotero_corpus is not None and anthropic_client is not None
+
+    sources_label = "DisGeNET, Open Targets, PubTator3, PubMed, ClinVar"
+    if corpus_active:
+        sources_label += f", Zotero corpus ({zotero_corpus_collection})"
+    print(f"\n  Evidence sources: {sources_label}")
     print(f"  Querying {len(unique_pairs)} term × phenotype pairs...")
 
     evidence_rows = []
@@ -843,8 +1406,22 @@ def enrich_with_literature(
             if is_snp_or_gene else 'not_found'
         )
 
+        # ── Zotero corpus sentiment (optional) ────────────────────────────
+        corpus_result = _empty_corpus_result()
+        if corpus_active:
+            paper_matches = zotero_corpus.search([query_term, term])
+            if paper_matches:
+                corpus_result = analyze_corpus_sentiment(
+                    feature=query_term,
+                    phenotype=pheno,
+                    paper_matches=paper_matches,
+                    client=anthropic_client,
+                )
+
         combined = compute_combined_score(
-            disgenet_score, ot_score, pt3_count, clinvar_sig
+            disgenet_score, ot_score, pt3_count, clinvar_sig,
+            corpus_papers=corpus_result['corpus_papers'],
+            corpus_sentiment_score=corpus_result['corpus_sentiment_score'],
         )
 
         # ── Protective queries (low_control context only) ──────────────────
@@ -860,7 +1437,7 @@ def enrich_with_literature(
             # the standard risk query (approximated: prot_count beyond risk count)
             unique_prot = max(0, prot_count - pt3_count)
 
-        evidence_rows.append({
+        row = {
             'term':                  term,
             'query_term':            query_term,
             'phenotype':             pheno,
@@ -878,7 +1455,10 @@ def enrich_with_literature(
             'pubmed_count':          pubmed_count,
             'clinvar_sig':           clinvar_sig,
             'combined_score':        combined,
-        })
+        }
+        if corpus_active:
+            row.update(corpus_result)
+        evidence_rows.append(row)
 
     evidence_df = pd.DataFrame(evidence_rows)
     evidence_df.sort_values('combined_score', ascending=False, inplace=True)
@@ -1056,6 +1636,32 @@ if __name__ == '__main__':
         '--no_append', action='store_true',
         help="Overwrite existing output CSVs rather than merging new columns (default: append)",
     )
+    parser.add_argument(
+        '--zotero_corpus', default=None,
+        metavar='COLLECTION',
+        help=(
+            "Zotero collection name to use as a curated literature corpus for\n"
+            "sentence-level sentiment analysis (e.g. 'T2D').  Full-text PDFs are\n"
+            "prioritised over abstracts.  Requires the 'anthropic' Python package\n"
+            "and a valid Anthropic API key (--anthropic_api_key or ANTHROPIC_API_KEY)."
+        ),
+    )
+    parser.add_argument(
+        '--zotero_db', default=None,
+        metavar='PATH',
+        help=(
+            f"Path to Zotero SQLite database (default: {DEFAULT_ZOTERO_DB}).\n"
+            "Only used when --zotero_corpus is set."
+        ),
+    )
+    parser.add_argument(
+        '--anthropic_api_key', default=None,
+        help=(
+            "Anthropic API key for Claude corpus sentiment analysis.\n"
+            "Falls back to the ANTHROPIC_API_KEY environment variable if not set.\n"
+            "Only used when --zotero_corpus is set."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1068,4 +1674,7 @@ if __name__ == '__main__':
         top_n=args.top_n,
         population_context=args.population_context,
         append_mode=not args.no_append,
+        zotero_corpus_collection=args.zotero_corpus,
+        zotero_db=args.zotero_db,
+        anthropic_api_key=args.anthropic_api_key,
     )
