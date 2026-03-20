@@ -89,8 +89,11 @@ PUBTATOR3_BASE = "https://www.ncbi.nlm.nih.gov/research/pubtator3-api"
 DEFAULT_ZOTERO_DB = os.path.expanduser("~/Zotero/zotero.sqlite")
 
 # Seed categories — must match the Zotero sub-folder names (slugified)
-# Structure:  seedCollection/T2D/{Subtypes, Mechanisms, Pathways, Pharma,
-#                                   Protective, Comorbidities}
+# Expected structure:  T2D/{Subtypes, Mechanisms, Pathways, Pharma,
+#                           Protective, Comorbidities}
+# Also handles:  Clinical → comorbidities
+#                Complications → comorbidities
+#                Comorbities (typo) → comorbidities
 SEED_CATEGORIES = [
     'subtypes',       # disease subtypes and endotypes (SIDD, SIRD, MARD …)
     'mechanisms',     # molecular / cellular pathogenesis
@@ -367,8 +370,12 @@ def _folder_name_to_category_slug(name: str) -> str:
         'protective_factors': 'protective',
         'comorbidity':     'comorbidities',
         'co_morbidities':  'comorbidities',
+        'comorbities':     'comorbidities',   # common Zotero typo
         'complications':   'comorbidities',
         'co_phenotypes':   'comorbidities',
+        'clinical':        'comorbidities',   # clinically-assessed outcomes
+        'clinical_measures': 'comorbidities',
+        'outcomes':        'comorbidities',
     }
     return _ALIASES.get(slug, slug)
 
