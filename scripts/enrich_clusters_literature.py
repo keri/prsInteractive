@@ -58,6 +58,24 @@ WEIGHT_OPEN_TARGETS  = 0.30
 WEIGHT_PUBTATOR3     = 0.25
 WEIGHT_CLINVAR       = 0.20
 
+# ── Population context ────────────────────────────────────────────────────────
+# When running enrichment on high-risk case clusters, queries are already
+# risk-oriented by default.  For low-risk control clusters, protective modifiers
+# are appended to PubTator3 and PubMed queries to surface resilience/prevention
+# literature that would otherwise be drowned out by disease-association results.
+
+PROTECTIVE_QUERY_SUFFIXES = [
+    'protective', 'prevention', 'reduces risk', 'resilience',
+    'resistance', 'inverse association', 'negatively associated',
+]
+
+# Keywords scanned in paper titles to assign a simple protective-sentiment flag.
+# A paper is flagged protective if its title contains ≥1 of these phrases.
+PROTECTIVE_TITLE_KEYWORDS = [
+    'protective', 'prevent', 'inverse', 'negat', 'reduc', 'resilience',
+    'resistance', 'risk reduction', 'lower risk', 'beneficial',
+]
+
 CACHE_DIR = None
 
 
@@ -344,6 +362,72 @@ def query_pubmed_cooccurrence(term, phenotype, api_key=None):
     return count
 
 
+# ── Protective literature query ────────────────────────────────────────────────
+
+def query_pubtator3_protective(term, phenotype, api_key=None):
+    """
+    Query PubTator3 for protective/prevention associations between term and phenotype.
+
+    Runs one query per PROTECTIVE_QUERY_SUFFIXES modifier, aggregates unique paper
+    counts, and scans returned titles for protective-sentiment keywords.
+
+    Returns
+    -------
+    int   total protective paper count (union across modifier queries)
+    float protective sentiment score 0-1 (fraction of titles with protective keywords)
+    list  sample protective titles (up to 3)
+    """
+    cache = _load_cache('pubtator3_protective')
+    key   = f'{term}__{phenotype}'
+    if key in cache:
+        rec = cache[key]
+        return rec['count'], rec['sentiment'], rec['titles']
+
+    seen_pmids:  set  = set()
+    prot_titles: list = []
+    all_titles:  list = []
+
+    for modifier in PROTECTIVE_QUERY_SUFFIXES:
+        query = f"{term} {phenotype} {modifier}"
+        data  = _get(
+            f"{PUBTATOR3_BASE}/search/",
+            params={'text': query, 'page': 1},
+        )
+        time.sleep(0.35)
+        if not data:
+            continue
+        for result in data.get('results', []):
+            pmid  = str(result.get('pmid', ''))
+            title = result.get('title', '')
+            if pmid and pmid not in seen_pmids:
+                seen_pmids.add(pmid)
+                all_titles.append(title)
+                title_lower = title.lower()
+                if any(kw in title_lower for kw in PROTECTIVE_TITLE_KEYWORDS):
+                    prot_titles.append(title)
+
+    count     = len(seen_pmids)
+    sentiment = round(len(prot_titles) / max(1, len(all_titles)), 3)
+    titles    = prot_titles[:3]
+
+    cache[key] = {'count': count, 'sentiment': sentiment, 'titles': titles}
+    _save_cache('pubtator3_protective', cache)
+    return count, sentiment, titles
+
+
+def _detect_population_context(cluster_dir):
+    """
+    Auto-detect population context from the cluster_dir path.
+    Returns 'high_risk' or 'low_control' or 'both'.
+    """
+    parts = cluster_dir.replace('\\', '/').split('/')
+    if 'high_risk' in parts:
+        return 'high_risk'
+    if 'low_control' in parts:
+        return 'low_control'
+    return 'both'
+
+
 # ── ClinVar ────────────────────────────────────────────────────────────────────
 
 def query_clinvar_significance(snp_or_gene, api_key=None):
@@ -526,6 +610,8 @@ def enrich_with_literature(
     disgenet_api_key=None,
     ncbi_api_key=None,
     top_n=20,
+    population_context='auto',
+    append_mode=True,
 ):
     """
     Main literature enrichment routine.
@@ -535,11 +621,20 @@ def enrich_with_literature(
 
     Parameters
     ----------
-    cluster_dir      : str — bNMF output directory (contains feature_loadings.csv)
-    phenotypes       : list[str] — phenotype terms to query
-    disgenet_api_key : str | None — DisGeNET API key (free at disgenet.org)
-    ncbi_api_key     : str | None — NCBI API key (3→10 req/sec)
-    top_n            : int — top features per cluster to query
+    cluster_dir        : str — bNMF output directory (contains feature_loadings.csv)
+    phenotypes         : list[str] — phenotype terms to query
+    disgenet_api_key   : str | None — DisGeNET API key (free at disgenet.org)
+    ncbi_api_key       : str | None — NCBI API key (3→10 req/sec)
+    top_n              : int — top features per cluster to query
+    population_context : str — 'auto' | 'both' | 'high_risk' | 'low_control'
+        Controls which additional queries are run:
+          'high_risk'   — standard risk-oriented queries (default behaviour)
+          'low_control' — adds protective/prevention queries per feature × phenotype;
+                          output columns include protective_count, protective_sentiment,
+                          and unique_protective_titles (findings absent from risk queries)
+          'both'/'auto' — auto-detect from cluster_dir path; if not detectable, uses 'both'
+    append_mode        : bool — if True and output CSVs already exist, new columns are
+                          merged into them rather than overwriting (default: True)
 
     Returns
     -------
@@ -549,6 +644,13 @@ def enrich_with_literature(
     CACHE_DIR = os.path.join(cluster_dir, 'enrichment', '.cache')
     out_dir   = os.path.join(cluster_dir, 'enrichment', 'literature')
     os.makedirs(out_dir, exist_ok=True)
+
+    # ── Resolve population context ─────────────────────────────────────────
+    if population_context == 'auto':
+        population_context = _detect_population_context(cluster_dir)
+    run_protective = (population_context == 'low_control')
+    print(f"  Population context : {population_context}"
+          f"{'  [protective queries enabled]' if run_protective else ''}")
 
     # ── Load feature loadings ──────────────────────────────────────────────
     loadings_path = os.path.join(cluster_dir, 'feature_loadings.csv')
@@ -633,16 +735,34 @@ def enrich_with_literature(
             disgenet_score, ot_score, pt3_count, clinvar_sig
         )
 
+        # ── Protective queries (low_control context only) ──────────────────
+        prot_count     = 0
+        prot_sentiment = 0.0
+        prot_titles    = []
+        unique_prot    = 0
+        if run_protective:
+            prot_count, prot_sentiment, prot_titles = query_pubtator3_protective(
+                query_term, pheno, api_key=ncbi_api_key
+            )
+            # Unique protective = papers with protective signal not already in
+            # the standard risk query (approximated: prot_count beyond risk count)
+            unique_prot = max(0, prot_count - pt3_count)
+
         evidence_rows.append({
-            'term':                  term,          # original feature term
-            'query_term':            query_term,    # resolved term actually used
+            'term':                  term,
+            'query_term':            query_term,
             'phenotype':             pheno,
+            'population_context':    population_context,
             'disgenet_score':        round(disgenet_score, 6),
             'disgenet_disease':      disgenet_disease,
             'open_targets_score':    ot_score,
             'open_targets_disease':  ot_disease,
             'pubtator3_count':       pt3_count,
             'pubtator3_entity_type': pt3_entity_type,
+            'protective_count':      prot_count,
+            'protective_sentiment':  prot_sentiment,
+            'unique_protective':     unique_prot,
+            'protective_titles':     ' | '.join(prot_titles) if prot_titles else '',
             'pubmed_count':          pubmed_count,
             'clinvar_sig':           clinvar_sig,
             'combined_score':        combined,
@@ -650,10 +770,22 @@ def enrich_with_literature(
 
     evidence_df = pd.DataFrame(evidence_rows)
     evidence_df.sort_values('combined_score', ascending=False, inplace=True)
-    evidence_df.to_csv(
-        os.path.join(out_dir, 'gene_evidence_table.csv'), index=False
-    )
-    print(f"    Saved gene_evidence_table.csv ({len(evidence_df)} rows)")
+    evidence_path = os.path.join(out_dir, 'gene_evidence_table.csv')
+    if append_mode and os.path.exists(evidence_path):
+        existing = pd.read_csv(evidence_path)
+        new_cols = [c for c in evidence_df.columns if c not in existing.columns]
+        if new_cols:
+            merged = existing.merge(
+                evidence_df[['term', 'phenotype'] + new_cols],
+                on=['term', 'phenotype'], how='left',
+            )
+            merged.to_csv(evidence_path, index=False)
+            print(f"    Appended {len(new_cols)} new columns to gene_evidence_table.csv")
+        else:
+            print(f"    gene_evidence_table.csv up to date (no new columns)")
+    else:
+        evidence_df.to_csv(evidence_path, index=False)
+        print(f"    Saved gene_evidence_table.csv ({len(evidence_df)} rows)")
 
     # ── Cluster-level ranking ──────────────────────────────────────────────
     ev_lookup = (
@@ -683,10 +815,24 @@ def enrich_with_literature(
         cluster_ranked_df.sort_values(
             ['cluster', 'weighted_rank_score'], ascending=[True, False], inplace=True
         )
-        cluster_ranked_df.to_csv(
-            os.path.join(out_dir, 'cluster_evidence_ranked.csv'), index=False
-        )
-        print(f"    Saved cluster_evidence_ranked.csv")
+        ranked_path = os.path.join(out_dir, 'cluster_evidence_ranked.csv')
+        if append_mode and os.path.exists(ranked_path):
+            existing_r  = pd.read_csv(ranked_path)
+            new_cols_r  = [c for c in cluster_ranked_df.columns
+                           if c not in existing_r.columns]
+            if new_cols_r:
+                key_cols = ['cluster', 'feature', 'term', 'phenotype']
+                merged_r = existing_r.merge(
+                    cluster_ranked_df[key_cols + new_cols_r],
+                    on=key_cols, how='left',
+                )
+                merged_r.to_csv(ranked_path, index=False)
+                print(f"    Appended {len(new_cols_r)} new columns to cluster_evidence_ranked.csv")
+            else:
+                print(f"    cluster_evidence_ranked.csv up to date")
+        else:
+            cluster_ranked_df.to_csv(ranked_path, index=False)
+            print(f"    Saved cluster_evidence_ranked.csv")
 
     # ── Cluster summary ────────────────────────────────────────────────────
     summary_rows = []
@@ -704,10 +850,23 @@ def enrich_with_literature(
 
     summary_df = pd.DataFrame(summary_rows)
     if not summary_df.empty:
-        summary_df.to_csv(
-            os.path.join(out_dir, 'cluster_literature_summary.csv'), index=False
-        )
-        print(f"    Saved cluster_literature_summary.csv")
+        summary_path = os.path.join(out_dir, 'cluster_literature_summary.csv')
+        if append_mode and os.path.exists(summary_path):
+            existing_s = pd.read_csv(summary_path)
+            new_cols_s = [c for c in summary_df.columns
+                          if c not in existing_s.columns]
+            if new_cols_s:
+                merged_s = existing_s.merge(
+                    summary_df[['cluster'] + new_cols_s],
+                    on='cluster', how='left',
+                )
+                merged_s.to_csv(summary_path, index=False)
+                print(f"    Appended {len(new_cols_s)} new columns to cluster_literature_summary.csv")
+            else:
+                print(f"    cluster_literature_summary.csv up to date")
+        else:
+            summary_df.to_csv(summary_path, index=False)
+            print(f"    Saved cluster_literature_summary.csv")
         print("\n  Cluster dominant associations:")
         for _, row in summary_df.iterrows():
             print(f"    {row['cluster']:20s} → {row['top_term']} "
@@ -754,6 +913,22 @@ if __name__ == '__main__':
         help="DisGeNET API key — free registration at disgenet.org; "
              "increases rate limits and unlocks full GDA database",
     )
+    parser.add_argument(
+        '--population_context', default='auto',
+        choices=['auto', 'both', 'high_risk', 'low_control'],
+        help=(
+            "Population context for query strategy (default: auto-detect from path):\n"
+            "  high_risk   — standard risk-oriented queries\n"
+            "  low_control — adds protective/prevention queries; extra output columns:\n"
+            "                protective_count, protective_sentiment, unique_protective,\n"
+            "                protective_titles\n"
+            "  auto        — detect from cluster_dir path (high_risk / low_control subdir)"
+        ),
+    )
+    parser.add_argument(
+        '--no_append', action='store_true',
+        help="Overwrite existing output CSVs rather than merging new columns (default: append)",
+    )
 
     args = parser.parse_args()
 
@@ -763,4 +938,6 @@ if __name__ == '__main__':
         disgenet_api_key=args.disgenet_api_key,
         ncbi_api_key=args.ncbi_api_key,
         top_n=args.top_n,
+        population_context=args.population_context,
+        append_mode=not args.no_append,
     )

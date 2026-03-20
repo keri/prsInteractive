@@ -408,9 +408,10 @@ def select_cohort_individuals(
     cohort,
     high_risk_threshold=HIGH_RISK_BIN_THRESHOLD,
     low_control_threshold=LOW_CONTROL_BIN_THRESHOLD,
+    population='both',
 ):
     """
-    Select high-risk cases and low-control controls for a given cohort.
+    Select high-risk cases and/or low-control controls for a given cohort.
 
     High-risk   : bin_{cohort} > high_risk_threshold  AND PHENOTYPE == case_code
                   (must have a valid cohort-specific bin)
@@ -421,6 +422,12 @@ def select_cohort_individuals(
                   as a fallback so the full control population is accessible)
 
     PHENOTYPE coding is detected automatically (PLINK 1/2 or binary 0/1).
+
+    Parameters
+    ----------
+    population : str  'both' (default) | 'high_risk' | 'low_control'
+        Which population sub-group to return.  When 'both', the union of
+        high-risk cases and low-control controls is returned (original behaviour).
 
     Returns
     -------
@@ -473,12 +480,19 @@ def select_cohort_individuals(
 
     high_risk_iids   = prs_bins[high_risk_mask].index
     low_control_iids = prs_bins[low_control_mask].index
-    selected         = high_risk_iids.union(low_control_iids)
+
+    if population == 'high_risk':
+        selected = high_risk_iids
+    elif population == 'low_control':
+        selected = low_control_iids
+    else:  # 'both'
+        selected = high_risk_iids.union(low_control_iids)
 
     stats = {
         'n_high_risk':   len(high_risk_iids),
         'n_low_control': len(low_control_iids),
         'n_total':       len(selected),
+        'population':    population,
     }
 
     if n_ctrl_from_combined_bin > 0:
@@ -1412,13 +1426,26 @@ def run_all_cohorts(
     low_control_threshold=LOW_CONTROL_BIN_THRESHOLD,
     cohorts_to_run=None,
     include_holdout_prs=True,
+    population='both',
 ):
     """
     Run cohort bNMF for all (or specified) cohorts.
 
+    Parameters
+    ----------
+    population : str  'both' | 'high_risk' | 'low_control' | 'separate'
+        Which population to include in the feature matrix:
+          'both'        — union of high-risk cases and low-control controls
+                          (original behaviour, single output per cohort)
+          'high_risk'   — only high-risk cases (bin > threshold, PHENOTYPE=case)
+          'low_control' — only low-risk controls (bin < threshold, PHENOTYPE=ctrl)
+          'separate'    — run two independent bNMF analyses per cohort; saves
+                          results to {cohort}/high_risk/ and {cohort}/low_control/
+                          so each population gets its own clusters and enrichment.
+
     Returns
     -------
-    pd.DataFrame  overview table (one row per cohort)
+    pd.DataFrame  overview table (one row per cohort × population)
     """
     scores_path  = os.path.join(pheno_data, 'scores')
     base_output  = os.path.join(scores_path, 'cohortBnmf')
@@ -1440,6 +1467,7 @@ def run_all_cohorts(
     print(f"  low_control_threshold : bin < {low_control_threshold}")
     print(f"  min_effect_size       : {min_effect_size}")
     print(f"  specificity_tier_max  : {specificity_tier_max}")
+    print(f"  population            : {population}")
 
     # ── Load shared data ───────────────────────────────────────────────────
     print("\n[1] Loading cohort analysis results...")
@@ -1472,87 +1500,102 @@ def run_all_cohorts(
     prs_dict = _filter_prs_dict_to_cohorts(prs_dict, cohorts)
 
     # ── Per-cohort loop ────────────────────────────────────────────────────
+    # When population='separate', each cohort is run twice (high_risk then
+    # low_control) with independent bNMF analyses saved to separate subdirs.
     overview_rows = []
+    pop_runs = (['high_risk', 'low_control']
+                if population == 'separate' else [population])
 
     for cohort in cohorts:
-        print(f"\n{'='*60}")
-        print(f"  COHORT: {cohort}")
-        print(f"{'='*60}")
+        for pop in pop_runs:
+            pop_label = f" [{pop}]" if population == 'separate' else ''
+            print(f"\n{'='*60}")
+            print(f"  COHORT: {cohort}{pop_label}")
+            print(f"{'='*60}")
 
-        # Individual selection
-        selected_iids, sel_stats = select_cohort_individuals(
-            prs_bins, cohort,
-            high_risk_threshold=high_risk_threshold,
-            low_control_threshold=low_control_threshold,
-        )
+            # Individual selection
+            selected_iids, sel_stats = select_cohort_individuals(
+                prs_bins, cohort,
+                high_risk_threshold=high_risk_threshold,
+                low_control_threshold=low_control_threshold,
+                population=pop,
+            )
 
-        if len(selected_iids) < MIN_INDIVIDUALS:
-            print(f"  [SKIP] Too few individuals: "
-                  f"{len(selected_iids)} < {MIN_INDIVIDUALS}")
-            overview_rows.append({
-                'cohort': cohort,
-                'status': 'skipped_too_few_individuals',
-                **sel_stats,
-            })
-            continue
+            if len(selected_iids) < MIN_INDIVIDUALS:
+                print(f"  [SKIP] Too few individuals: "
+                      f"{len(selected_iids)} < {MIN_INDIVIDUALS}")
+                overview_rows.append({
+                    'cohort':     cohort,
+                    'population': pop,
+                    'status':     'skipped_too_few_individuals',
+                    **sel_stats,
+                })
+                continue
 
-        # Feature matrix
-        print(f"  Building feature matrix...")
-        feature_matrix, feat_counts = build_cohort_feature_matrix(
-            cohort=cohort,
-            selected_iids=selected_iids,
-            genomic_features_df=genomic_df,
-            clinical_features_df=clinical_df,
-            prs_dict=prs_dict,
-            raw_clinical_df=raw_clinical,
-            min_effect_size=min_effect_size,
-            specificity_tier_max=specificity_tier_max,
-        )
+            # Feature matrix
+            print(f"  Building feature matrix...")
+            feature_matrix, feat_counts = build_cohort_feature_matrix(
+                cohort=cohort,
+                selected_iids=selected_iids,
+                genomic_features_df=genomic_df,
+                clinical_features_df=clinical_df,
+                prs_dict=prs_dict,
+                raw_clinical_df=raw_clinical,
+                min_effect_size=min_effect_size,
+                specificity_tier_max=specificity_tier_max,
+            )
 
-        if feature_matrix.empty or feature_matrix.shape[1] < 2:
-            print(f"  [SKIP] Insufficient features for '{cohort}'")
-            overview_rows.append({
-                'cohort': cohort,
-                'status': 'skipped_no_features',
-                **sel_stats, **feat_counts,
-            })
-            continue
+            if feature_matrix.empty or feature_matrix.shape[1] < 2:
+                print(f"  [SKIP] Insufficient features for '{cohort}'")
+                overview_rows.append({
+                    'cohort':     cohort,
+                    'population': pop,
+                    'status':     'skipped_no_features',
+                    **sel_stats, **feat_counts,
+                })
+                continue
 
-        # Run bNMF
-        cohort_output = os.path.join(base_output, cohort)
-        cohort_figs   = os.path.join(base_fig,    cohort)
+            # Output paths — subdirectory per population when running separately
+            if population == 'separate':
+                cohort_output = os.path.join(base_output, cohort, pop)
+                cohort_figs   = os.path.join(base_fig,    cohort, pop)
+            else:
+                cohort_output = os.path.join(base_output, cohort)
+                cohort_figs   = os.path.join(base_fig,    cohort)
 
-        result = run_cohort_bnmf(
-            cohort=cohort,
-            feature_matrix=feature_matrix,
-            prs_bins=prs_bins,
-            k_min=k_min,
-            k_max=k_max,
-            n_runs=n_runs,
-            k_select_method=k_select_method,
-            l1_ratio=l1_ratio,
-            alpha_W=alpha_W,
-            output_path=cohort_output,
-            fig_path=cohort_figs,
-        )
+            result = run_cohort_bnmf(
+                cohort=cohort,
+                feature_matrix=feature_matrix,
+                prs_bins=prs_bins,
+                k_min=k_min,
+                k_max=k_max,
+                n_runs=n_runs,
+                k_select_method=k_select_method,
+                l1_ratio=l1_ratio,
+                alpha_W=alpha_W,
+                output_path=cohort_output,
+                fig_path=cohort_figs,
+            )
 
-        if result:
-            print(f"  Completed: k={result['optimal_k']}, n={result['n']:,}")
-            overview_rows.append({
-                'cohort':         cohort,
-                'status':         'completed',
-                'optimal_k':      result['optimal_k'],
-                'n_in_analysis':  result['n'],
-                **sel_stats,
-                **feat_counts,
-            })
-        else:
-            overview_rows.append({
-                'cohort': cohort,
-                'status': 'failed',
-                **sel_stats,
-                **feat_counts,
-            })
+            if result:
+                print(f"  Completed: k={result['optimal_k']}, n={result['n']:,}")
+                overview_rows.append({
+                    'cohort':         cohort,
+                    'population':     pop,
+                    'status':         'completed',
+                    'optimal_k':      result['optimal_k'],
+                    'n_in_analysis':  result['n'],
+                    **sel_stats,
+                    **feat_counts,
+                })
+            else:
+                overview_rows.append({
+                    'cohort':     cohort,
+                    'population': pop,
+                    'status':     'failed',
+                    **sel_stats,
+                    **feat_counts,
+                })
 
     # ── Overview table ─────────────────────────────────────────────────────
     overview_df = pd.DataFrame(overview_rows)
@@ -1911,6 +1954,19 @@ if __name__ == '__main__':
             "  both       — run per-cohort then combined"
         ),
     )
+    parser.add_argument(
+        "--population", default='both',
+        choices=['both', 'high_risk', 'low_control', 'separate'],
+        help=(
+            "Which population to use for per-cohort bNMF (default: both):\n"
+            "  both        — union of high-risk cases and low-control controls\n"
+            "  high_risk   — only high-risk cases (bin > threshold, PHENOTYPE=case)\n"
+            "  low_control — only low-risk controls (bin < threshold, PHENOTYPE=ctrl)\n"
+            "  separate    — run two independent bNMF analyses per cohort,\n"
+            "                saving to {cohort}/high_risk/ and {cohort}/low_control/\n"
+            "                so each population gets its own clusters and enrichment"
+        ),
+    )
 
     # ── Combined-mode feature options ─────────────────────────────────────
     parser.add_argument(
@@ -1971,7 +2027,7 @@ if __name__ == '__main__':
     )
 
     if args.mode in ('per_cohort', 'both'):
-        run_all_cohorts(**shared_kwargs)
+        run_all_cohorts(**shared_kwargs, population=args.population)
 
     if args.mode in ('combined', 'both'):
         run_combined_bnmf(
