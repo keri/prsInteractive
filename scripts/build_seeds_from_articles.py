@@ -197,55 +197,113 @@ def _open_zotero_db(db_path: str) -> sqlite3.Connection:
 
 def list_collections(db_path: str) -> list[dict]:
     """
-    Return all Zotero collections with their parent names and item counts.
+    Return all Zotero collections with their full path and item counts.
+
+    Each dict contains: collectionID, collectionName, parentCollectionID,
+    full_path (e.g. 'seedCollection/T2D/Subtypes'), item_count.
     """
     conn = _open_zotero_db(db_path)
     try:
         rows = conn.execute("""
             SELECT
+                c.collectionID,
                 c.collectionName,
-                p.collectionName  AS parentName,
-                COUNT(ci.itemID)  AS item_count
+                c.parentCollectionID,
+                COUNT(ci.itemID) AS item_count
             FROM collections c
-            LEFT JOIN collections p ON c.parentCollectionID = p.collectionID
             LEFT JOIN collectionItems ci ON c.collectionID = ci.collectionID
             GROUP BY c.collectionID
-            ORDER BY COALESCE(p.collectionName, ''), c.collectionName
+            ORDER BY c.collectionName
         """).fetchall()
-        return [dict(r) for r in rows]
+        records = [dict(r) for r in rows]
+
+        # Build full paths using a lookup map
+        id_to_name   = {r['collectionID']: r['collectionName'] for r in records}
+        id_to_parent = {r['collectionID']: r['parentCollectionID'] for r in records}
+
+        def _full_path(cid: int) -> str:
+            parts: list[str] = []
+            while cid is not None:
+                parts.append(id_to_name.get(cid, '?'))
+                cid = id_to_parent.get(cid)
+            return '/'.join(reversed(parts))
+
+        for r in records:
+            r['full_path'] = _full_path(r['collectionID'])
+
+        # Sort by full path for a clean tree-like display
+        records.sort(key=lambda r: r['full_path'].lower())
+        return records
     finally:
         conn.close()
 
 
-def _get_collection_ids(conn: sqlite3.Connection,
-                         collection_name: str,
-                         include_subcollections: bool = True) -> list[int]:
+def _resolve_collection_path(conn: sqlite3.Connection,
+                              path: str) -> list[int]:
     """
-    Return collectionIDs for a named collection and optionally all descendants.
+    Resolve a collection path to a list of matching collectionIDs.
+
+    Supports two forms:
+      - Simple name : 'T2D'
+          → all collections named T2D (any level)
+      - Slash path  : 'seedCollection/T2D'
+          → only the T2D whose immediate parent is seedCollection
+
+    Paths may have arbitrary depth: 'grandparent/parent/child'.
+    Returns [] if no match is found.
     """
-    root_rows = conn.execute(
-        "SELECT collectionID FROM collections "
-        "WHERE LOWER(collectionName) = LOWER(?)",
-        (collection_name,),
-    ).fetchall()
-
-    if not root_rows:
-        # Try partial match
-        root_rows = conn.execute(
-            "SELECT collectionID FROM collections "
-            "WHERE LOWER(collectionName) LIKE LOWER(?)",
-            (f'%{collection_name}%',),
-        ).fetchall()
-
-    if not root_rows:
+    parts = [p.strip() for p in path.split('/') if p.strip()]
+    if not parts:
         return []
 
-    root_ids = [r[0] for r in root_rows]
+    if len(parts) == 1:
+        # Simple name: exact match first, partial fallback
+        rows = conn.execute(
+            "SELECT collectionID FROM collections "
+            "WHERE LOWER(collectionName) = LOWER(?)",
+            (parts[0],),
+        ).fetchall()
+        if not rows:
+            rows = conn.execute(
+                "SELECT collectionID FROM collections "
+                "WHERE LOWER(collectionName) LIKE LOWER(?)",
+                (f'%{parts[0]}%',),
+            ).fetchall()
+        return [r[0] for r in rows]
 
-    if not include_subcollections:
-        return root_ids
+    # Walk the path segment by segment
+    # Start: root-level collections (no parent) matching parts[0]
+    current_ids: list[int] = [
+        r[0] for r in conn.execute(
+            "SELECT collectionID FROM collections "
+            "WHERE LOWER(collectionName) = LOWER(?) "
+            "AND parentCollectionID IS NULL",
+            (parts[0],),
+        ).fetchall()
+    ]
+    if not current_ids:
+        return []
 
-    # Recursive CTE to get all descendants
+    for part in parts[1:]:
+        if not current_ids:
+            return []
+        placeholders = ','.join('?' * len(current_ids))
+        current_ids = [
+            r[0] for r in conn.execute(
+                f"SELECT collectionID FROM collections "
+                f"WHERE LOWER(collectionName) = LOWER(?) "
+                f"AND parentCollectionID IN ({placeholders})",
+                [part] + current_ids,
+            ).fetchall()
+        ]
+    return current_ids
+
+
+def _expand_to_descendants(conn: sqlite3.Connection,
+                            root_ids: list[int]) -> list[int]:
+    """Return root_ids + all descendant collectionIDs via recursive CTE."""
+    if not root_ids:
+        return []
     placeholders = ','.join('?' * len(root_ids))
     rows = conn.execute(f"""
         WITH RECURSIVE tree(collectionID) AS (
@@ -260,17 +318,18 @@ def _get_collection_ids(conn: sqlite3.Connection,
     return [r[0] for r in rows]
 
 
-def _get_subcollections(conn: sqlite3.Connection,
-                         parent_name: str) -> list[dict]:
-    """
-    Return immediate sub-collections of a named parent.
-    """
-    rows = conn.execute("""
-        SELECT c.collectionID, c.collectionName
-        FROM collections c
-        JOIN collections p ON c.parentCollectionID = p.collectionID
-        WHERE LOWER(p.collectionName) = LOWER(?)
-    """, (parent_name,)).fetchall()
+def _get_subcollections_by_ids(conn: sqlite3.Connection,
+                                parent_ids: list[int]) -> list[dict]:
+    """Return immediate sub-collections for a list of parent collectionIDs."""
+    if not parent_ids:
+        return []
+    placeholders = ','.join('?' * len(parent_ids))
+    rows = conn.execute(
+        f"SELECT collectionID, collectionName "
+        f"FROM collections "
+        f"WHERE parentCollectionID IN ({placeholders})",
+        parent_ids,
+    ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -739,7 +798,7 @@ def build_seeds_from_papers(
 
 def run_from_zotero(
     phenotype: str,
-    collection_name: str,
+    collection_path: str,
     output_path: str,
     db_path: str = DEFAULT_ZOTERO_DB,
     category_map: dict[str, str] | None = None,
@@ -752,15 +811,21 @@ def run_from_zotero(
     Parameters
     ----------
     phenotype       : primary phenotype string
-    collection_name : Zotero collection name (partial match accepted)
+    collection_path : Zotero collection path.
+                      Use slash notation to disambiguate collections with
+                      the same name at different levels:
+                        'seedCollection/T2D'  — unambiguous (recommended)
+                        'T2D'                 — matches any collection named T2D
     output_path     : output JSON file path
     db_path         : path to zotero.sqlite
     category_map    : explicit {subcollection_name: category} mapping;
-                      if None, auto-detect from subcollection names
+                      if None, auto-detect from subcollection names via
+                      _folder_name_to_category_slug()
     api_key         : Anthropic API key
     merge           : merge with existing seeds file
     """
-    print(f"\nZotero database : {db_path}")
+    print(f"\nZotero database  : {db_path}")
+    print(f"Seed collection  : {collection_path}")
     if not os.path.exists(db_path):
         raise FileNotFoundError(
             f"Zotero database not found at '{db_path}'. "
@@ -769,48 +834,58 @@ def run_from_zotero(
 
     conn = _open_zotero_db(db_path)
     try:
-        # ── Find collection ───────────────────────────────────────────────
-        col_ids = _get_collection_ids(conn, collection_name,
-                                       include_subcollections=False)
+        # ── Resolve collection by path ─────────────────────────────────────
+        col_ids = _resolve_collection_path(conn, collection_path)
         if not col_ids:
             raise ValueError(
-                f"Collection '{collection_name}' not found in Zotero. "
-                f"Run --list_collections to see available collections."
+                f"Collection '{collection_path}' not found in Zotero.\n"
+                f"Run --list_collections to see available collections and "
+                f"their full paths."
             )
+        if len(col_ids) > 1:
+            print(f"  [NOTE] '{collection_path}' matched {len(col_ids)} collections "
+                  f"— papers from all will be included.  Use a slash path "
+                  f"(e.g. 'seedCollection/T2D') to match exactly one.")
 
         # ── Check for sub-collections ─────────────────────────────────────
-        subcols = _get_subcollections(conn, collection_name)
+        subcols = _get_subcollections_by_ids(conn, col_ids)
         papers_by_category: dict[str, list[dict]] = {}
 
         if subcols:
-            print(f"\nSub-collections found: {len(subcols)}")
+            print(f"\nSub-collections found under '{collection_path}': {len(subcols)}")
             for sc in subcols:
-                sc_name  = sc['collectionName']
-                sc_ids   = _get_collection_ids(conn, sc_name)
-                papers   = _query_papers_in_collections(conn, sc_ids)
+                sc_name = sc['collectionName']
+                sc_id   = sc['collectionID']
+                # Include the sub-collection and any of its own children
+                sc_all_ids = _expand_to_descendants(conn, [sc_id])
+                papers     = _query_papers_in_collections(conn, sc_all_ids)
 
-                # Determine category for this sub-collection.
-                # Priority: explicit --category_map override, then direct
-                # slug conversion from folder name (e.g. "Subtypes"→"subtypes",
-                # "Pharma"→"pharma").  No keyword heuristics — folder name IS
-                # the category.
+                # Category: explicit override → direct slug from folder name
                 if category_map and sc_name in category_map:
                     category = category_map[sc_name]
                 else:
                     category = _folder_name_to_category_slug(sc_name)
 
-                papers_by_category.setdefault(category, []).extend(papers)
-                print(f"  '{sc_name}' → category='{category}'  ({len(papers)} papers)")
+                if category not in SEED_CATEGORIES:
+                    print(f"  [SKIP] '{sc_name}' → slug='{category}' not in "
+                          f"SEED_CATEGORIES — skipped.  "
+                          f"Add to _ALIASES or use --category_map to remap.")
+                    continue
 
-        # Also include papers directly in the parent collection
+                papers_by_category.setdefault(category, []).extend(papers)
+                print(f"  '{sc_name}' → '{category}'  ({len(papers)} papers)")
+
+        # Also include papers directly in the parent collection(s)
         parent_papers = _query_papers_in_collections(conn, col_ids)
         if parent_papers:
-            # Unmatched parent-level papers go into 'all'
             papers_by_category.setdefault('all', []).extend(parent_papers)
-            print(f"\nDirect papers in '{collection_name}': {len(parent_papers)}")
+            print(f"\nDirect papers in '{collection_path}': {len(parent_papers)}")
 
         if not papers_by_category:
-            raise ValueError(f"No papers found in collection '{collection_name}'.")
+            raise ValueError(
+                f"No papers found in '{collection_path}'.  "
+                f"Check the collection path with --list_collections."
+            )
 
     finally:
         conn.close()
@@ -871,7 +946,15 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--zotero_collection', default=None,
-        help="Zotero collection name (partial match supported)",
+        help=(
+            "Zotero collection path for the SEED articles.\n"
+            "Use slash notation to pinpoint the right collection when\n"
+            "multiple collections share the same name:\n"
+            "  'seedCollection/T2D'       — unambiguous (recommended)\n"
+            "  'T2D'                      — matches any collection named T2D\n"
+            "The named collection's sub-folders define seed categories;\n"
+            "sub-folder names are mapped to category slugs automatically."
+        ),
     )
     parser.add_argument(
         '--zotero_db', default=DEFAULT_ZOTERO_DB,
@@ -917,9 +1000,14 @@ if __name__ == '__main__':
 
         cols = list_collections(db)
         print(f"\nZotero collections in {db}:\n")
+        print(f"  {'FULL PATH':<55}  ITEMS")
+        print(f"  {'-'*55}  -----")
         for c in cols:
-            parent = f"[{c['parentName']}] " if c['parentName'] else ''
-            print(f"  {parent}{c['collectionName']}  ({c['item_count']} items)")
+            print(f"  {c['full_path']:<55}  {c['item_count']}")
+        print(f"\n  Use the FULL PATH with --zotero_collection, e.g.:")
+        print(f"    --zotero_collection 'seedCollection/T2D'")
+        print(f"  Use the root-level name with --zotero_corpus, e.g.:")
+        print(f"    --zotero_corpus T2D")
         raise SystemExit(0)
 
     # ── Validate args ─────────────────────────────────────────────────────
@@ -949,7 +1037,7 @@ if __name__ == '__main__':
     if args.zotero_collection:
         run_from_zotero(
             phenotype=args.phenotype,
-            collection_name=args.zotero_collection,
+            collection_path=args.zotero_collection,
             output_path=args.output,
             db_path=args.zotero_db,
             category_map=cat_map,
