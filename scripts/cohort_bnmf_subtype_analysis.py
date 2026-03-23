@@ -586,6 +586,7 @@ def build_cohort_feature_matrix(
     raw_clinical_df,
     min_effect_size=0.0,
     specificity_tier_max=3,
+    include_raw_clinical=True,
 ):
     """
     Build the feature matrix for bNMF for a single cohort.
@@ -682,7 +683,29 @@ def build_cohort_feature_matrix(
                   f"cohort '{cohort}' in model '{model_key}'")
 
     # ------------------------------------------------------------------
-    # 3. Merge all feature blocks
+    # 3. Raw clinical supplement / fallback
+    #    Add all raw clinical features not already covered above.
+    #    Clinical features have real values for essentially all individuals
+    #    and break the rank-1 sparsity pattern of the genomic-only matrix.
+    # ------------------------------------------------------------------
+    if include_raw_clinical and raw_clinical_df is not None and not raw_clinical_df.empty:
+        already_clin = {c[len('clin_'):]
+                        for frm in frames
+                        for c in frm.columns if c.startswith('clin_')}
+        extra_cols = [c for c in raw_clinical_df.columns if c not in already_clin]
+        if extra_cols:
+            extra_block = raw_clinical_df.reindex(selected_iids)[extra_cols].copy()
+            extra_block.columns = [f'clin_{c}' for c in extra_cols]
+            frames.append(extra_block)
+            tag = ('fallback (no comparison file)'
+                   if feat_counts['n_clinical'] == 0 else 'supplement')
+            n_covered = extra_block.notna().any(axis=1).sum()
+            print(f"    Clinical (raw {tag}): {len(extra_cols)} features, "
+                  f"{n_covered}/{len(extra_block)} individuals have ≥1 value")
+            feat_counts['n_clinical'] += len(extra_cols)
+
+    # ------------------------------------------------------------------
+    # 4. Merge all feature blocks
     # ------------------------------------------------------------------
     if not frames:
         print(f"    [ERROR] No features available for cohort '{cohort}'")
@@ -1601,6 +1624,7 @@ def run_all_cohorts(
     min_variance=0.005,
     max_zero_fraction=0.80,
     max_features=500,
+    include_raw_clinical=True,
 ):
     """
     Run cohort bNMF for all (or specified) cohorts.
@@ -1717,6 +1741,7 @@ def run_all_cohorts(
                 raw_clinical_df=raw_clinical,
                 min_effect_size=min_effect_size,
                 specificity_tier_max=specificity_tier_max,
+                include_raw_clinical=include_raw_clinical,
             )
 
             if feature_matrix.empty or feature_matrix.shape[1] < 2:
@@ -2267,6 +2292,7 @@ if __name__ == '__main__':
         min_variance=args.min_variance,
         max_zero_fraction=args.max_zero_fraction,
         max_features=args.max_features,
+        include_raw_clinical=not args.no_raw_clinical,
     )
 
     if args.mode in ('per_cohort', 'both'):
