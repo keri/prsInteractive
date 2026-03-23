@@ -1,0 +1,44 @@
+{
+  "_comment": "Template for phenotype seed files. Copy and rename to {phenotype_slug}.json",
+  "_slug_note": "Filename should be the phenotype with spaces replaced by underscores, e.g. type_2_diabetes.json",
+  "_categories_note": "Six categories matching seedCollection sub-folder structure: Subtypes / Mechanisms / Pathways / Pharma / Protective / Comorbidities",
+
+  "phenotype": "your phenotype here",
+
+  "subtypes": [
+    "known subtype 1",
+    "endotype or subgroup name",
+    "classification system term"
+  ],
+
+  "mechanisms": [
+    "molecular mechanism 1",
+    "pathophysiology term 2",
+    "cellular process 3"
+  ],
+
+  "pathways": [
+    "signalling pathway 1",
+    "metabolic pathway 2",
+    "biological process 3"
+  ],
+
+  "pharma": [
+    "drug or medication 1",
+    "pharmaceutical intervention 2",
+    "surgical procedure 3"
+  ],
+
+  "protective": [
+    "lifestyle protective factor 1 (diet, exercise, fasting — NOT drugs)",
+    "dietary intervention 2",
+    "non-pharmacological prevention strategy 3"
+  ],
+
+  "comorbidities": [
+    "co-occurring condition 1",
+    "disease complication 2 (end-organ damage)",
+    "comorbid disease 3",
+    "clinically assessed outcome 4"
+  ]
+}
