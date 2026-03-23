@@ -56,7 +56,7 @@ from scipy.spatial.distance import pdist, squareform
 from scipy.stats import spearmanr
 from statsmodels.stats.multitest import multipletests
 from sklearn.decomposition import NMF
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, QuantileTransformer
 from sklearn.impute import SimpleImputer
 import matplotlib
 matplotlib.use('Agg')
@@ -353,10 +353,21 @@ def map_feature_to_concept(col_name):
 # PREPROCESSING
 # ============================================================================
 
-def impute_and_scale(df, imputer_strategy='median', n_neighbors=5):
+def impute_and_scale(df, imputer_strategy='median', n_neighbors=5,
+                     scale_method='quantile'):
     """
-    Impute missing values (median) then MinMax scale to [0, 1] for NMF.
+    Impute missing values (median) then scale to [0, 1] for NMF.
     Columns with >80% missing are dropped before imputation.
+
+    scale_method : 'quantile' (default) or 'minmax'
+        'quantile'  — QuantileTransformer(output_distribution='uniform').
+                      Maps each feature to a uniform [0,1] distribution by
+                      rank, removing the shared "average individual" direction
+                      that dominates MinMaxScaler for homogeneous subgroups.
+                      This breaks the near-rank-1 structure that causes NMF
+                      cluster collapse when the cohort is clinically similar.
+        'minmax'    — MinMaxScaler; preserves the raw value distribution but
+                      amplifies the correlated mean direction.
 
     Returns
     -------
@@ -374,9 +385,18 @@ def impute_and_scale(df, imputer_strategy='median', n_neighbors=5):
     imputer = SimpleImputer(strategy=imputer_strategy)
     arr = imputer.fit_transform(df.values)
 
-    scaler = MinMaxScaler()
-    arr = scaler.fit_transform(arr)
+    if scale_method == 'quantile':
+        # n_quantiles capped at n_samples to avoid sklearn warning
+        n_q = min(1000, arr.shape[0])
+        scaler = QuantileTransformer(
+            output_distribution='uniform',
+            n_quantiles=n_q,
+            random_state=42,
+        )
+    else:
+        scaler = MinMaxScaler()
 
+    arr = scaler.fit_transform(arr)
     return pd.DataFrame(arr, index=df.index, columns=keep_cols), keep_cols
 
 
@@ -475,7 +495,10 @@ def _run_single_nmf(X, k, random_state, l1_ratio=0.1, alpha_W=0.1, alpha_H=0.1,
     """
     model = NMF(
         n_components=k,
-        init='nndsvda',
+        init='random',          # random init allows 30 runs to explore different
+                                # solutions; nndsvda is deterministic-near-SVD and
+                                # locks all runs near the rank-1 fixed point for
+                                # homogeneous subgroups (root cause of collapse)
         beta_loss='kullback-leibler',
         solver='mu',
         max_iter=max_iter,

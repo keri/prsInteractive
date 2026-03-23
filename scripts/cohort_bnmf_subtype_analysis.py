@@ -1425,6 +1425,7 @@ def run_cohort_bnmf(
     max_zero_fraction=0.80,
     max_features=500,
     feature_weights=None,
+    scale_method='quantile',
 ):
     """
     Run consensus bNMF for one cohort and write all outputs.
@@ -1459,7 +1460,8 @@ def run_cohort_bnmf(
         return None
 
     # ── Preprocess ─────────────────────────────────────────────────────────
-    X_df, kept_cols = bnmf_core.impute_and_scale(feature_matrix)
+    X_df, kept_cols = bnmf_core.impute_and_scale(feature_matrix,
+                                                   scale_method=scale_method)
 
     # Remove near-constant and highly sparse columns before NMF
     X_df, kept_cols = _variance_sparsity_filter(
@@ -1625,6 +1627,7 @@ def run_all_cohorts(
     max_zero_fraction=0.80,
     max_features=500,
     include_raw_clinical=True,
+    scale_method='quantile',
 ):
     """
     Run cohort bNMF for all (or specified) cohorts.
@@ -1778,6 +1781,7 @@ def run_all_cohorts(
                 min_variance=min_variance,
                 max_zero_fraction=max_zero_fraction,
                 max_features=max_features,
+                scale_method=scale_method,
             )
 
             if result:
@@ -1851,6 +1855,7 @@ def run_combined_bnmf(
     include_prs_with_genomic=False,
     population='both',
     include_raw_clinical=True,
+    scale_method='quantile',
 ):
     """
     Combined cross-cohort bNMF subtype analysis.
@@ -1934,6 +1939,7 @@ def run_combined_bnmf(
             max_features=max_features,
             include_prs_with_genomic=include_prs_with_genomic,
             include_raw_clinical=include_raw_clinical,
+            scale_method=scale_method,
         )
         run_combined_bnmf(**kwargs, population='high_risk')
         run_combined_bnmf(**kwargs, population='low_control')
@@ -2022,6 +2028,7 @@ def run_combined_bnmf(
         alpha_W=alpha_W,
         alpha_H=alpha_H,
         feature_weights=resolved_weights,
+        scale_method=scale_method,
     )
 
     if result is None:
@@ -2242,6 +2249,13 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        "--scale_method", choices=['quantile', 'minmax'], default='quantile',
+        help="Feature scaling before NMF. 'quantile' (default) maps each feature "
+             "to uniform [0,1] by rank — removes the shared mean direction that "
+             "causes collapse in homogeneous subgroups. 'minmax' preserves raw "
+             "value distributions but amplifies correlated features.",
+    )
+    parser.add_argument(
         "--no_raw_clinical", action='store_true',
         help="Do not add raw clinical features to the combined matrix. "
              "By default all numeric clinical features are included alongside "
@@ -2293,6 +2307,7 @@ if __name__ == '__main__':
         max_zero_fraction=args.max_zero_fraction,
         max_features=args.max_features,
         include_raw_clinical=not args.no_raw_clinical,
+        scale_method=args.scale_method,
     )
 
     if args.mode in ('per_cohort', 'both'):
@@ -2303,6 +2318,5 @@ if __name__ == '__main__':
             **shared_kwargs,
             weight_features=args.weight_features,
             include_prs_with_genomic=args.include_prs_with_genomic,
-            include_raw_clinical=not args.no_raw_clinical,
             population=args.population,
         )
