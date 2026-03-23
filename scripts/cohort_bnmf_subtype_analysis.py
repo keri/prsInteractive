@@ -896,6 +896,7 @@ def build_deduplicated_feature_matrix(
     specificity_tier_max=3,
     include_prs_with_genomic=False,
     population='both',
+    include_raw_clinical=True,
 ):
     """
     Build a combined feature matrix across all cohorts without redundant columns.
@@ -1165,6 +1166,30 @@ def build_deduplicated_feature_matrix(
             }
         print(f"    Clinical  : {len(clin_best)} deduplicated features "
               f"(max |effect_size_r| across cohorts)")
+
+    # ── Raw clinical supplement / fallback ─────────────────────────────────
+    # Add ALL raw clinical features not already covered by the comparison file.
+    # Clinical features have real values for essentially all individuals —
+    # no combine_first imputation artifacts — so they provide genuine biological
+    # signal for cluster separation even when the genomic block is sparse.
+    # This is the primary fallback when clinical_comparison file is missing.
+    if include_raw_clinical and raw_clinical_df is not None and not raw_clinical_df.empty:
+        already_clin = {f[len('clin_'):] for f in feature_metadata if f.startswith('clin_')}
+        extra_cols = [c for c in raw_clinical_df.columns if c not in already_clin]
+        if extra_cols:
+            extra_block = raw_clinical_df.reindex(all_iids)[extra_cols].copy()
+            extra_block.columns = [f'clin_{c}' for c in extra_cols]
+            frames.append(extra_block)
+            for c in extra_cols:
+                feature_metadata[f'clin_{c}'] = {
+                    'cohort_origin': 'all',
+                    'type':          'clinical',
+                    'weight':        1.0,
+                }
+            n_covered = extra_block.notna().any(axis=1).sum()
+            tag = 'fallback (no comparison file)' if not clin_best else 'supplement'
+            print(f"    Clinical (raw {tag}): {len(extra_cols)} features, "
+                  f"{n_covered}/{len(extra_block)} individuals have ≥1 value")
 
     if not frames:
         return pd.DataFrame(), {}, per_cohort_iids
@@ -1800,6 +1825,7 @@ def run_combined_bnmf(
     max_features=500,
     include_prs_with_genomic=False,
     population='both',
+    include_raw_clinical=True,
 ):
     """
     Combined cross-cohort bNMF subtype analysis.
@@ -1882,6 +1908,7 @@ def run_combined_bnmf(
             min_variance=min_variance, max_zero_fraction=max_zero_fraction,
             max_features=max_features,
             include_prs_with_genomic=include_prs_with_genomic,
+            include_raw_clinical=include_raw_clinical,
         )
         run_combined_bnmf(**kwargs, population='high_risk')
         run_combined_bnmf(**kwargs, population='low_control')
@@ -1903,6 +1930,7 @@ def run_combined_bnmf(
         specificity_tier_max=specificity_tier_max,
         include_prs_with_genomic=include_prs_with_genomic,
         population=population,
+        include_raw_clinical=include_raw_clinical,
     )
 
     if combined_matrix.empty:
@@ -2189,6 +2217,13 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        "--no_raw_clinical", action='store_true',
+        help="Do not add raw clinical features to the combined matrix. "
+             "By default all numeric clinical features are included alongside "
+             "genomic features to provide real per-individual signal that is "
+             "not subject to combine_first imputation artifacts.",
+    )
+    parser.add_argument(
         "--min_variance", type=float, default=0.005,
         help="Drop features with variance < this after scaling (default: 0.005)",
     )
@@ -2242,5 +2277,6 @@ if __name__ == '__main__':
             **shared_kwargs,
             weight_features=args.weight_features,
             include_prs_with_genomic=args.include_prs_with_genomic,
+            include_raw_clinical=not args.no_raw_clinical,
             population=args.population,
         )
