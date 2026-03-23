@@ -647,7 +647,11 @@ def select_optimal_k(coph_df, method='elbow'):
 
     coph_df = coph_df.sort_values('k').reset_index(drop=True)
 
-    # Drop k values where the NMF collapsed (cophenetic = NaN)
+    # Drop k values where the NMF collapsed.
+    # Two collapse signals:
+    #   1. cophenetic = NaN  (C matrix was exactly degenerate → dist all-zero)
+    #   2. mean_collapse_frac >= 0.90  (>90% of individuals in the dominant
+    #      component across runs — consensus is stable but trivially so)
     valid = coph_df.dropna(subset=['cophenetic_correlation'])
     n_nan = len(coph_df) - len(valid)
     if n_nan > 0:
@@ -656,11 +660,20 @@ def select_optimal_k(coph_df, method='elbow'):
               f"(NMF collapse — all individuals assigned to one component). "
               f"These k values are excluded from optimal-k selection.")
 
+    if 'mean_collapse_frac' in valid.columns:
+        collapsed_mask = valid['mean_collapse_frac'] >= 0.90
+        if collapsed_mask.any():
+            collapsed_ks = valid.loc[collapsed_mask, 'k'].tolist()
+            print(f"  WARNING: k={collapsed_ks} excluded — NMF collapsed "
+                  f"(≥90% individuals in dominant component despite non-NaN cophenetic). "
+                  f"Consider increasing alpha_H or tightening feature filters.")
+            valid = valid[~collapsed_mask]
+
     if valid.empty:
         fallback_k = int(coph_df['k'].min())
         print(f"  WARNING: All k values collapsed. Falling back to k={fallback_k}. "
-              f"Results will not be meaningful — consider adjusting feature filters "
-              f"or alpha_H.")
+              f"Results will not be meaningful — consider increasing alpha_H "
+              f"(e.g. --alpha_H 0.5) or tightening feature filters.")
         return fallback_k
 
     coph_vals = valid['cophenetic_correlation'].values

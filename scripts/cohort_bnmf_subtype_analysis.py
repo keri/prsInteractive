@@ -1520,11 +1520,14 @@ def run_cohort_bnmf(
             os.path.join(fig_path, 'cophenetic_curve.png'),
             cohort,
         )
+        # Recompute C from W_list — it is not stored in k_results to save memory
+        C_optimal = bnmf_core._soft_consensus_matrix(k_results[optimal_k]['W_list'])
         plot_consensus_map(
-            k_results[optimal_k]['C'], optimal_k,
+            C_optimal, optimal_k,
             os.path.join(fig_path, f'consensus_map_k{optimal_k}.png'),
             cohort,
         )
+        del C_optimal
         if not profile_df.empty:
             plot_cluster_profile(
                 profile_df,
