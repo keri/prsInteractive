@@ -1190,7 +1190,7 @@ def build_deduplicated_feature_matrix(
 def _variance_sparsity_filter(
     df,
     min_variance=0.005,
-    max_zero_fraction=0.90,
+    max_zero_fraction=0.80,
     max_features=500,
 ):
     """
@@ -1374,8 +1374,9 @@ def run_cohort_bnmf(
     output_path=None,
     fig_path=None,
     min_variance=0.005,
-    max_zero_fraction=0.90,
+    max_zero_fraction=0.80,
     max_features=500,
+    feature_weights=None,
 ):
     """
     Run consensus bNMF for one cohort and write all outputs.
@@ -1388,8 +1389,15 @@ def run_cohort_bnmf(
                        unboundedly while W collapses to near-zero, causing everyone
                        to be assigned to cluster_1.  Default 0.1 matches alpha_W.
     min_variance     : float — drop columns with variance below this after scaling
-    max_zero_fraction: float — drop columns that are > this fraction zero
-    max_features     : int   — cap total features by variance (combined mode only)
+    max_zero_fraction: float — drop columns where more than this fraction of values
+                       are zero after scaling (default 0.80 — removes variants
+                       present in fewer than 20% of individuals)
+    max_features     : int   — cap total features by variance
+    feature_weights  : dict | None — {column_name: weight} applied to each feature
+                       AFTER impute/scale and variance filtering so weights genuinely
+                       influence the NMF rather than being washed out by MinMaxScaler.
+                       High-weight features get a proportionally larger range in the
+                       NMF input matrix.  None (default) = equal weighting.
 
     Returns
     -------
@@ -1412,6 +1420,21 @@ def run_cohort_bnmf(
         max_zero_fraction=max_zero_fraction,
         max_features=max_features,
     )
+    # ── Post-scale feature weighting ────────────────────────────────────────
+    # Applied AFTER MinMaxScaler so weights genuinely stretch the range of
+    # high-importance features rather than being normalised away.
+    # A feature with weight=5 will have values in [0, 5] instead of [0, 1],
+    # giving it 5× more influence in the NMF reconstruction objective.
+    if feature_weights:
+        applied = 0
+        for col in X_df.columns:
+            w = feature_weights.get(col, 1.0)
+            if w != 1.0 and w > 0:
+                X_df[col] = X_df[col] * w
+                applied += 1
+        if applied:
+            print(f"    Weights applied: {applied} features scaled post-normalisation")
+
     X = X_df.values
 
     if X.shape[1] < 2:
@@ -1548,7 +1571,7 @@ def run_all_cohorts(
     include_holdout_prs=True,
     population='both',
     min_variance=0.005,
-    max_zero_fraction=0.90,
+    max_zero_fraction=0.80,
     max_features=500,
 ):
     """
@@ -1768,9 +1791,9 @@ def run_combined_bnmf(
     low_control_threshold=LOW_CONTROL_BIN_THRESHOLD,
     cohorts_to_run=None,
     include_holdout_prs=True,
-    weight_features=True,
+    weight_features=False,
     min_variance=0.005,
-    max_zero_fraction=0.90,
+    max_zero_fraction=0.80,
     max_features=500,
     include_prs_with_genomic=False,
     population='both',
@@ -1892,21 +1915,25 @@ def run_combined_bnmf(
         prs_bins, cohorts, high_risk_threshold, low_control_threshold
     )
 
-    # ── Apply feature importance weighting ────────────────────────────────
-    # Multiply each column by its importance weight before imputation+scaling
-    # so the NMF sees stronger signal in high-importance features.
-    # PRS anchors (weight=1.0) are left unchanged.
+    # ── Feature weighting (post-scale, inside run_cohort_bnmf) ────────────
+    # Weights are passed to run_cohort_bnmf() and applied AFTER MinMaxScaler
+    # so they genuinely stretch high-importance feature ranges rather than
+    # being normalised away.  When weight_features=False (default), None is
+    # passed and all features are treated equally.
     nmf_matrix = combined_matrix.copy()
+    resolved_weights = None
     if weight_features and feature_metadata:
-        for col in nmf_matrix.columns:
-            w = feature_metadata.get(col, {}).get('weight', 1.0)
-            if w > 0:
-                nmf_matrix[col] = nmf_matrix[col] * w
-        print(f"    Feature importance weighting applied "
-              f"({sum(1 for m in feature_metadata.values() if m['weight'] > 0)} "
-              f"features with weight > 0)")
+        resolved_weights = {
+            col: feature_metadata[col].get('weight', 1.0)
+            for col in nmf_matrix.columns
+            if col in feature_metadata
+        }
+        print(f"    Feature importance weighting enabled "
+              f"({sum(1 for w in resolved_weights.values() if w != 1.0)} "
+              f"features with non-unit weight) — applied post-scaling inside NMF")
 
-        # Save weights alongside outputs
+    # Save weight metadata regardless (useful for inspection even when not applied)
+    if feature_metadata:
         os.makedirs(base_output, exist_ok=True)
         weight_df = pd.DataFrame([
             {'feature': col, **feature_metadata.get(col, {})}
@@ -1938,6 +1965,7 @@ def run_combined_bnmf(
         l1_ratio=l1_ratio,
         alpha_W=alpha_W,
         alpha_H=alpha_H,
+        feature_weights=resolved_weights,
     )
 
     if result is None:
@@ -2143,9 +2171,9 @@ if __name__ == '__main__':
 
     # ── Combined-mode feature options ─────────────────────────────────────
     parser.add_argument(
-        "--no_weight_features", action='store_true',
-        help="Disable importance weighting of features before NMF "
-             "(default: features are weighted by effect_size_r / matching_z_score)",
+        "--weight_features", action='store_true',
+        help="Enable importance weighting of features after scaling/filtering "
+             "(weights features by effect_size_r / matching_z_score; default: off)",
     )
     parser.add_argument(
         "--include_prs_with_genomic", action='store_true',
@@ -2162,8 +2190,8 @@ if __name__ == '__main__':
         help="Drop features with variance < this after scaling (default: 0.005)",
     )
     parser.add_argument(
-        "--max_zero_fraction", type=float, default=0.90,
-        help="Drop features where > this fraction of values are zero (default: 0.90)",
+        "--max_zero_fraction", type=float, default=0.80,
+        help="Drop features where > this fraction of values are zero (default: 0.80)",
     )
     parser.add_argument(
         "--max_features", type=int, default=500,
@@ -2209,7 +2237,7 @@ if __name__ == '__main__':
     if args.mode in ('combined', 'both'):
         run_combined_bnmf(
             **shared_kwargs,
-            weight_features=not args.no_weight_features,
+            weight_features=args.weight_features,
             include_prs_with_genomic=args.include_prs_with_genomic,
             population=args.population,
         )
