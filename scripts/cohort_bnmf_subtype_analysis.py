@@ -895,6 +895,7 @@ def build_deduplicated_feature_matrix(
     min_effect_size=0.0,
     specificity_tier_max=3,
     include_prs_with_genomic=False,
+    population='both',
 ):
     """
     Build a combined feature matrix across all cohorts without redundant columns.
@@ -919,7 +920,12 @@ def build_deduplicated_feature_matrix(
                       weight = max z-score.  Replaces the PRS anchor for cohorts
                       that have selected features (see above).
 
-    Individuals are the UNION of high-risk cases and low-control controls across all cohorts.
+    Individuals are determined by the population parameter:
+      'both'        — union of high-risk cases and low-control controls (default)
+      'high_risk'   — only high-risk cases
+      'low_control' — only low-risk controls
+      'separate'    — same as 'both' for the combined matrix (run two separate
+                      combined analyses via run_combined_bnmf if needed)
 
     Returns
     -------
@@ -927,6 +933,9 @@ def build_deduplicated_feature_matrix(
     feature_metadata : dict  {column_name: {'cohort_origin', 'type', 'weight'}}
     per_cohort_iids  : dict  {cohort: pd.Index of selected IIDs}
     """
+    # 'separate' has no meaning for a single combined matrix; treat as 'both'
+    _pop = 'both' if population == 'separate' else population
+
     per_cohort_iids = {}
     all_iids        = pd.Index([])
 
@@ -934,6 +943,7 @@ def build_deduplicated_feature_matrix(
     for cohort in cohorts:
         iids, _ = select_cohort_individuals(
             prs_bins, cohort,
+            population=_pop,
             high_risk_threshold=high_risk_threshold,
             low_control_threshold=low_control_threshold,
         )
@@ -1763,6 +1773,7 @@ def run_combined_bnmf(
     max_zero_fraction=0.90,
     max_features=500,
     include_prs_with_genomic=False,
+    population='both',
 ):
     """
     Combined cross-cohort bNMF subtype analysis.
@@ -1774,7 +1785,9 @@ def run_combined_bnmf(
 
     This avoids the cluster-collapse caused by cohort-prefixed redundant columns.
 
-    Individuals are the UNION of high-risk cases and low-control controls across all cohorts.
+    population : str  'both' | 'high_risk' | 'low_control' | 'separate'
+        Controls which individuals are included across all cohorts.
+        'separate' runs two combined analyses — one high_risk, one low_control.
 
     Post-analysis outputs
     ---------------------
@@ -1786,8 +1799,11 @@ def run_combined_bnmf(
     cohort_cluster_affinity.png  — heatmap of affinity matrix
     """
     scores_path = os.path.join(pheno_data, 'scores')
-    base_output = os.path.join(scores_path,  'combinedCohortBnmf')
-    base_fig    = os.path.join(pheno_data,   'figures', 'combinedCohortBnmf')
+    # Use a population-specific subdirectory so high_risk and low_control
+    # combined runs don't overwrite each other's outputs.
+    pop_suffix  = f'_{population}' if population != 'both' else ''
+    base_output = os.path.join(scores_path, f'combinedCohortBnmf{pop_suffix}')
+    base_fig    = os.path.join(pheno_data,  'figures', f'combinedCohortBnmf{pop_suffix}')
 
     print("\n" + "=" * 60)
     print("COMBINED CROSS-COHORT bNMF")
@@ -1820,8 +1836,34 @@ def run_combined_bnmf(
     prs_dict = _filter_prs_dict_to_cohorts(prs_dict, cohorts)
     print(f"\n[3] Cohorts contributing to combined matrix: {cohorts}")
 
+    # ── Handle 'separate' population: recurse for each sub-population ──────
+    if population == 'separate':
+        print("\n  population='separate' → running combined bNMF twice "
+              "(high_risk then low_control)")
+        kwargs = dict(
+            pheno_data=pheno_data, raw_features_file=raw_features_file,
+            filter_strategy=filter_strategy, use_set=use_set,
+            k_min=k_min, k_max=k_max, n_runs=n_runs,
+            k_select_method=k_select_method, l1_ratio=l1_ratio,
+            alpha_W=alpha_W, alpha_H=alpha_H,
+            min_effect_size=min_effect_size,
+            specificity_tier_max=specificity_tier_max,
+            high_risk_threshold=high_risk_threshold,
+            low_control_threshold=low_control_threshold,
+            cohorts_to_run=cohorts_to_run,
+            include_holdout_prs=include_holdout_prs,
+            weight_features=weight_features,
+            min_variance=min_variance, max_zero_fraction=max_zero_fraction,
+            max_features=max_features,
+            include_prs_with_genomic=include_prs_with_genomic,
+        )
+        run_combined_bnmf(**kwargs, population='high_risk')
+        run_combined_bnmf(**kwargs, population='low_control')
+        return
+
     # ── Build combined feature matrix (de-duplicated) ─────────────────────
     print("\n[4] Building de-duplicated feature matrix...")
+    print(f"    Population filter: '{population}'")
     combined_matrix, feature_metadata, per_cohort_iids = build_deduplicated_feature_matrix(
         cohorts=cohorts,
         prs_bins=prs_bins,
@@ -1834,6 +1876,7 @@ def run_combined_bnmf(
         min_effect_size=min_effect_size,
         specificity_tier_max=specificity_tier_max,
         include_prs_with_genomic=include_prs_with_genomic,
+        population=population,
     )
 
     if combined_matrix.empty:
@@ -2168,4 +2211,5 @@ if __name__ == '__main__':
             **shared_kwargs,
             weight_features=not args.no_weight_features,
             include_prs_with_genomic=args.include_prs_with_genomic,
+            population=args.population,
         )
