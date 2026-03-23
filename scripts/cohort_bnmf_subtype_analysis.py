@@ -518,9 +518,16 @@ def select_cohort_individuals(
             f"    [WARN] Very few low-controls ({stats['n_low_control']}) for '{cohort}'."
         )
 
-    print(f"    Individuals — high-risk: {stats['n_high_risk']:,}  "
-          f"low-control: {stats['n_low_control']:,}  "
-          f"total: {stats['n_total']:,}")
+    if population == 'high_risk':
+        pop_detail = (f"high-risk (cases): {stats['n_high_risk']:,}  "
+                      f"[low-control available: {stats['n_low_control']:,} — not used]")
+    elif population == 'low_control':
+        pop_detail = (f"low-control (controls): {stats['n_low_control']:,}  "
+                      f"[high-risk available: {stats['n_high_risk']:,} — not used]")
+    else:
+        pop_detail = (f"high-risk: {stats['n_high_risk']:,}  "
+                      f"low-control: {stats['n_low_control']:,}")
+    print(f"    Individuals — {pop_detail}  →  selected for NMF: {stats['n_total']:,}")
     return selected, stats
 
 
@@ -586,20 +593,25 @@ def build_cohort_feature_matrix(
     Combines:
       Clinical features — significant for this cohort (raw values from
                           raw_clinical_df), prefixed 'clin_'
-      Genomic features  — SHAP-important for this cohort (per-individual
-                          weighted contributions from prs_dict[model]),
-                          prefixed 'gen_'
+      Genomic features  — ALL per-variant weighted contribution columns from
+                          the cohort's PRS model (prs_dict[model]), prefixed
+                          'gen_'.  Every SNP-level column is included; near-
+                          constant and highly sparse features are removed by
+                          the variance/sparsity filter in run_cohort_bnmf().
 
     Parameters
     ----------
     cohort                : str
     selected_iids         : pd.Index of IIDs to include
     genomic_features_df   : output of load_cohort_genomic_features()
+                            (retained for API compatibility; not used for
+                            genomic feature selection in per-cohort mode)
     clinical_features_df  : output of load_cohort_clinical_features()
     prs_dict              : output of load_all_prs_feature_files()
     raw_clinical_df       : output of load_raw_clinical_data()
     min_effect_size       : float, minimum |effect_size_r| filter for clinical
-    specificity_tier_max  : int, maximum genomic specificity tier to include
+    specificity_tier_max  : int, not used in per-cohort mode (kept for API
+                            compatibility with combined mode)
 
     Returns
     -------
@@ -639,47 +651,35 @@ def build_cohort_feature_matrix(
             print(f"    [WARN] No clinical features found in data for cohort '{cohort}'")
 
     # ------------------------------------------------------------------
-    # 2. Genomic weighted-contribution features
+    # 2. Genomic features — ALL per-variant columns from the PRS model
+    #    Uses every SNP-level weighted contribution column (excludes meta
+    #    columns and principal components).  No SHAP pre-selection filter;
+    #    the variance/sparsity filter inside run_cohort_bnmf() removes
+    #    near-constant / highly-sparse features before NMF.
     # ------------------------------------------------------------------
-    if not genomic_features_df.empty and 'cohort' in genomic_features_df.columns:
-        cohort_gen = genomic_features_df[
-            genomic_features_df['cohort'] == cohort
-        ].copy()
+    model_key = _find_model_key(cohort, prs_dict)
+    if model_key is None:
+        print(f"    [WARN] No PRS model matched cohort '{cohort}'. "
+              f"Available models: {list(prs_dict.keys())}")
+    else:
+        prs_df = prs_dict[model_key]
+        prs_feature_cols = [
+            c for c in prs_df.columns
+            if c not in PRS_META_COLS and not c.startswith('PC')
+        ]
 
-        if 'specificity_tier' in cohort_gen.columns:
-            cohort_gen = cohort_gen[
-                cohort_gen['specificity_tier'] <= specificity_tier_max
-            ]
-
-        gen_features = cohort_gen['feature'].unique().tolist()
-
-        if gen_features:
-            model_key = _find_model_key(cohort, prs_dict)
-            if model_key is None:
-                print(f"    [WARN] No PRS model matched cohort '{cohort}'. "
-                      f"Available models: {list(prs_dict.keys())}")
-            else:
-                prs_df = prs_dict[model_key]
-                prs_feature_cols = [
-                    c for c in prs_df.columns
-                    if c not in PRS_META_COLS and not c.startswith('PC')
-                ]
-                available_gen = [f for f in gen_features if f in prs_feature_cols]
-
-                if available_gen:
-                    gen_sub = prs_df.loc[
-                        prs_df.index.isin(selected_iids), available_gen
-                    ].copy()
-                    gen_sub.columns = [f'gen_{c}' for c in gen_sub.columns]
-                    frames.append(gen_sub)
-                    feat_counts['n_genomic'] = len(available_gen)
-                    n_missing = len(gen_features) - len(available_gen)
-                    print(f"    Genomic   : {len(available_gen)} features used"
-                          f" (model '{model_key}')"
-                          + (f" ({n_missing} not in PRS columns)" if n_missing else ""))
-                else:
-                    print(f"    [WARN] No genomic features matched PRS columns "
-                          f"for cohort '{cohort}'")
+        if prs_feature_cols:
+            gen_sub = prs_df.loc[
+                prs_df.index.isin(selected_iids), prs_feature_cols
+            ].copy()
+            gen_sub.columns = [f'gen_{c}' for c in gen_sub.columns]
+            frames.append(gen_sub)
+            feat_counts['n_genomic'] = len(prs_feature_cols)
+            print(f"    Genomic   : {len(prs_feature_cols)} per-variant features "
+                  f"(all columns, model '{model_key}')")
+        else:
+            print(f"    [WARN] No per-variant feature columns found for "
+                  f"cohort '{cohort}' in model '{model_key}'")
 
     # ------------------------------------------------------------------
     # 3. Merge all feature blocks
@@ -712,16 +712,44 @@ def _save_fig(fig, path):
 
 
 def plot_cophenetic_curve(coph_df, output_path, cohort):
-    """Line plot of cophenetic correlation vs k."""
+    """Line plot of cophenetic correlation vs k.
+
+    Non-collapsed k values are plotted normally.  Collapsed k values (NaN
+    cophenetic) are shown as red X markers at y=0 so the user can see which
+    k values failed rather than having them silently absent from the plot.
+    """
     if coph_df.empty:
         return
     fig, ax = plt.subplots(figsize=(6, 4))
-    ax.plot(coph_df['k'], coph_df['cophenetic_correlation'],
-            marker='o', color='#1f77b4', linewidth=2, markersize=6)
+
+    valid   = coph_df.dropna(subset=['cophenetic_correlation'])
+    invalid = coph_df[coph_df['cophenetic_correlation'].isna()]
+
+    if not valid.empty:
+        ax.plot(valid['k'], valid['cophenetic_correlation'],
+                marker='o', color='#1f77b4', linewidth=2, markersize=6,
+                label='Stable')
+
+    if not invalid.empty:
+        ax.scatter(invalid['k'], [0] * len(invalid),
+                   marker='x', color='red', s=80, zorder=5,
+                   label='Collapsed (NaN)')
+        ax.legend(fontsize=8)
+
+    # Annotate collapse fraction if available
+    if 'mean_collapse_frac' in coph_df.columns:
+        for _, row in coph_df.iterrows():
+            y = row['cophenetic_correlation'] if not np.isnan(row['cophenetic_correlation']) else 0
+            ax.annotate(f"{row['mean_collapse_frac']:.0%}",
+                        xy=(row['k'], y), xytext=(0, 6),
+                        textcoords='offset points', ha='center', fontsize=7,
+                        color='red' if np.isnan(row['cophenetic_correlation']) else 'grey')
+
     ax.set_xlabel('Number of clusters (k)')
     ax.set_ylabel('Cophenetic correlation')
     ax.set_title(f'Consensus NMF Stability — {cohort}')
     ax.set_xticks(coph_df['k'])
+    ax.set_ylim(bottom=-0.05)
     ax.grid(True, alpha=0.3)
     plt.tight_layout()
     _save_fig(fig, output_path)
@@ -918,76 +946,150 @@ def build_deduplicated_feature_matrix(
     feature_metadata = {}
     frames           = []
 
-    # ── 1. Genomic features — collected first so we know which cohorts they
-    #       cover before deciding which PRS anchors are needed.
-    #       Deduplicated: one column per SNP, weight = max matching_z_score.
+    # ── 1. Genomic features — ALL per-variant columns from ALL models ──────
+    #
+    # Column deduplication rules (applied BEFORE combine_first):
+    #
+    #   a) HLA loci  — raw feature name contains '_' (e.g. DRB1_04, A_101).
+    #      The same allele may be selected by multiple models with slightly
+    #      different coefficients.  Biologically it is the SAME feature, so
+    #      we deduplicate: all models use the same gen_{feat} column name and
+    #      combine_first() fills real values from whichever model has them,
+    #      prioritising the model with the most features.
+    #
+    #   b) Non-HLA SNPs that appear in ONLY ONE model — no ambiguity, kept
+    #      as gen_{feat}.
+    #
+    #   c) Non-HLA SNPs that appear in 2+ models — same locus but the
+    #      weighted contribution differs between product and summed models
+    #      (different coefficients → different biological interpretation).
+    #      These are renamed gen_{feat}_prod / gen_{feat}_sum / gen_{feat}_main
+    #      so downstream analysis can treat them as distinct features.
+    #
+    # Because *.mixed.prs.csv files contain ALL genotyped individuals (not
+    # just those high-risk in that model), every individual in all_iids has a
+    # real value in each model file — NaN→0 imputation is needed only for the
+    # rare case where an individual is absent from a particular file entirely.
     # ──────────────────────────────────────────────────────────────────────
-    gen_best: dict[str, dict] = {}   # feature_name → {z_score, cohort, model_key}
+
+    def _model_suffix(model_key: str) -> str:
+        """Return _prod, _sum, or _<model_key> for use in disambiguation."""
+        mk = model_key.lower()
+        if 'product' in mk:
+            return '_prod'
+        if 'summed' in mk or mk.endswith('_sum'):
+            return '_sum'
+        return f'_{mk}'   # e.g. _main, _combined
+
+    # Build a lookup: feature_name → best z_score (for optional weighting)
+    feat_z_scores: dict[str, float] = {}
     if not genomic_features_df.empty and 'cohort' in genomic_features_df.columns:
+        z_col = 'matching_z_score' \
+                if 'matching_z_score' in genomic_features_df.columns else None
+        if z_col:
+            for _, row in genomic_features_df.iterrows():
+                f = row.get('feature')
+                z = abs(float(row[z_col])) if pd.notna(row.get(z_col)) else 0.0
+                if f and z > feat_z_scores.get(f, 0.0):
+                    feat_z_scores[f] = z
+
+    # Sort models: most features first so combine_first prioritises the
+    # richest model's real values for shared HLA columns.
+    sorted_models = sorted(
+        prs_dict.items(),
+        key=lambda kv: -len([c for c in kv[1].columns
+                              if c not in PRS_META_COLS and not c.startswith('PC')])
+    )
+
+    # Pre-scan: how many models contain each raw feature name?
+    from collections import Counter
+    feat_model_count: Counter = Counter()
+    model_feat_sets: dict[str, set] = {}
+    for model_key, prs_df in sorted_models:
+        feat_set = {c for c in prs_df.columns
+                    if c not in PRS_META_COLS and not c.startswith('PC')}
+        model_feat_sets[model_key] = feat_set
+        feat_model_count.update(feat_set)
+
+    # Features appearing in 2+ models AND lacking '_' → need model suffix
+    snp_needs_suffix: set[str] = {
+        f for f, cnt in feat_model_count.items()
+        if cnt > 1 and '_' not in f
+    }
+    if snp_needs_suffix:
+        print(f"    Disambiguation: {len(snp_needs_suffix)} non-HLA SNP(s) appear in "
+              f"multiple models → annotated with _prod/_sum/_<model> suffix")
+
+    gen_frames: list[tuple[str, pd.DataFrame]] = []
+    cohorts_with_genomic: set[str] = set()
+
+    for model_key, prs_df in sorted_models:
+        feature_cols = list(model_feat_sets[model_key])
+        if not feature_cols:
+            continue
+
+        suffix = _model_suffix(model_key)
+        blk = prs_df.loc[prs_df.index.isin(all_iids), feature_cols].copy()
+
+        # Rename each column according to the rules above
+        new_names = []
+        for c in blk.columns:
+            if c in snp_needs_suffix:
+                # Non-HLA duplicate → add model-type suffix
+                new_names.append(f'gen_{c}{suffix}')
+            else:
+                # HLA locus or unique SNP → no suffix; HLA deduped by combine_first
+                new_names.append(f'gen_{c}')
+        blk.columns = new_names
+        gen_frames.append((model_key, blk))
+
+        # Track cohorts covered by gen_ features (suppresses redundant PRS anchor)
         for cohort in cohorts:
-            g_sub = genomic_features_df[
-                genomic_features_df['cohort'] == cohort
-            ].copy()
-            if 'specificity_tier' in g_sub.columns:
-                g_sub = g_sub[g_sub['specificity_tier'] <= specificity_tier_max]
-            model_key = _find_model_key(cohort, prs_dict)
-            if model_key is None:
-                continue
-            z_col = 'matching_z_score' if 'matching_z_score' in g_sub.columns else None
-            for f in g_sub['feature'].unique():
-                z = abs(float(g_sub.loc[g_sub['feature'] == f, z_col].iloc[0])) \
-                    if z_col else 0.0
-                if f not in gen_best or z > gen_best[f]['z_score']:
-                    gen_best[f] = {
-                        'z_score':       z,
-                        'cohort_origin': cohort,
-                        'model_key':     model_key,
-                    }
+            if _find_model_key(cohort, {model_key: prs_df}) == model_key:
+                cohorts_with_genomic.add(cohort)
 
-    # Track which cohorts are represented by at least one gen_ feature.
-    # For those cohorts the PRS anchor is redundant (PRS ≈ Σ gen_ contributions)
-    # and is suppressed unless include_prs_with_genomic=True.
-    cohorts_with_genomic = {meta['cohort_origin'] for meta in gen_best.values()}
+    if gen_frames:
+        # combine_first across models:
+        #   • HLA columns (same name across models) → fills real values from
+        #     richer model first; no duplication.
+        #   • Non-HLA disambiguated columns (gen_feat_prod, gen_feat_sum) →
+        #     different names, so they accumulate as separate columns.
+        #   • Unique SNP columns → simply appended.
+        gen_block = gen_frames[0][1]
+        for _, blk in gen_frames[1:]:
+            gen_block = gen_block.combine_first(blk)
 
-    if gen_best:
-        from collections import defaultdict
-        model_features: dict = defaultdict(list)
-        for f, meta in gen_best.items():
-            model_features[meta['model_key']].append(f)
+        frames.append(gen_block)
 
-        gen_frames = []
-        for model_key, feats in model_features.items():
-            prs_df = prs_dict[model_key]
-            valid  = [f for f in feats
-                      if f in prs_df.columns
-                      and f not in PRS_META_COLS
-                      and not f.startswith('PC')]
-            if not valid:
-                continue
-            blk = prs_df.loc[prs_df.index.isin(all_iids), valid].copy()
-            blk.columns = [f'gen_{f}' for f in blk.columns]
-            gen_frames.append(blk)
+        n_models   = len(gen_frames)
+        n_feats    = gen_block.shape[1]
+        n_complete = int(gen_block.notna().all(axis=1).sum())
+        print(f"    Genomic   : {n_feats} per-variant features across {n_models} model(s) "
+              f"(HLA loci deduplicated; non-HLA duplicates suffixed)")
+        print(f"               {n_complete}/{len(all_iids)} individuals have real values "
+              f"in every feature; remainder filled by combine_first across models.")
 
-        if gen_frames:
-            gen_block = gen_frames[0]
-            for extra in gen_frames[1:]:
-                gen_block = gen_block.join(extra, how='outer')
-            frames.append(gen_block)
-            for f, meta in gen_best.items():
-                col = f'gen_{f}'
-                if col in gen_block.columns:
-                    feature_metadata[col] = {
-                        'cohort_origin': meta['cohort_origin'],
-                        'type':          'genomic',
-                        'weight':        meta['z_score'],
-                    }
-            print(f"    Genomic   : {len(gen_best)} deduplicated features "
-                  f"(best model per SNP by matching_z_score)")
-            if cohorts_with_genomic and not include_prs_with_genomic:
-                print(f"    PRS anchor suppressed for cohorts with gen_ features "
-                      f"({sorted(cohorts_with_genomic)}) — gen_ features replace "
-                      f"PRS to avoid sum+components redundancy. "
-                      f"Pass include_prs_with_genomic=True to override.")
+        for col in gen_block.columns:
+            # Strip gen_ prefix and any trailing _prod/_sum/_<model> suffix
+            # to look up the base feature name in feat_z_scores.
+            raw_feat = col[4:]   # remove 'gen_'
+            base     = raw_feat  # default: no suffix to strip
+            for mk, _ in sorted_models:
+                sfx = _model_suffix(mk)
+                if raw_feat.endswith(sfx):
+                    base = raw_feat[: -len(sfx)]
+                    break
+            feature_metadata[col] = {
+                'cohort_origin': 'combined',
+                'type':          'genomic',
+                'weight':        feat_z_scores.get(base, 1.0),
+            }
+
+        if cohorts_with_genomic and not include_prs_with_genomic:
+            print(f"    PRS anchor suppressed for cohorts with gen_ features "
+                  f"({sorted(cohorts_with_genomic)}) — gen_ features replace "
+                  f"PRS to avoid sum+components redundancy. "
+                  f"Pass include_prs_with_genomic=True to override.")
 
     # ── 2. PRS anchors — added ONLY for cohorts not covered by gen_ features.
     #       Each cohort's scaled_prs is a genuine non-redundant signal for
@@ -1258,6 +1360,7 @@ def run_cohort_bnmf(
     k_select_method='elbow',
     l1_ratio=0.1,
     alpha_W=0.1,
+    alpha_H=0.1,
     output_path=None,
     fig_path=None,
     min_variance=0.005,
@@ -1269,6 +1372,11 @@ def run_cohort_bnmf(
 
     Parameters
     ----------
+    alpha_H          : float — regularisation strength on H (feature loadings).
+                       Must be > 0 when features include sparse/binary-like columns
+                       (e.g. HLA allele contributions).  alpha_H=0 allows H to grow
+                       unboundedly while W collapses to near-zero, causing everyone
+                       to be assigned to cluster_1.  Default 0.1 matches alpha_W.
     min_variance     : float — drop columns with variance below this after scaling
     max_zero_fraction: float — drop columns that are > this fraction zero
     max_features     : int   — cap total features by variance (combined mode only)
@@ -1316,6 +1424,7 @@ def run_cohort_bnmf(
         n_runs=n_runs,
         l1_ratio=l1_ratio,
         alpha_W=alpha_W,
+        alpha_H=alpha_H,
     )
 
     if not k_results or coph_df.empty:
@@ -1413,13 +1522,14 @@ def run_all_cohorts(
     pheno_data,
     raw_features_file,
     filter_strategy='tiered',
-    use_set='holdout',
+    use_set='validation',
     k_min=2,
     k_max=6,
     n_runs=30,
     k_select_method='elbow',
     l1_ratio=0.1,
     alpha_W=0.1,
+    alpha_H=0.1,
     min_effect_size=0.0,
     specificity_tier_max=3,
     high_risk_threshold=HIGH_RISK_BIN_THRESHOLD,
@@ -1427,6 +1537,9 @@ def run_all_cohorts(
     cohorts_to_run=None,
     include_holdout_prs=True,
     population='both',
+    min_variance=0.005,
+    max_zero_fraction=0.90,
+    max_features=500,
 ):
     """
     Run cohort bNMF for all (or specified) cohorts.
@@ -1573,8 +1686,12 @@ def run_all_cohorts(
                 k_select_method=k_select_method,
                 l1_ratio=l1_ratio,
                 alpha_W=alpha_W,
+                alpha_H=alpha_H,
                 output_path=cohort_output,
                 fig_path=cohort_figs,
+                min_variance=min_variance,
+                max_zero_fraction=max_zero_fraction,
+                max_features=max_features,
             )
 
             if result:
@@ -1627,13 +1744,14 @@ def run_combined_bnmf(
     pheno_data,
     raw_features_file,
     filter_strategy='tiered',
-    use_set='holdout',
+    use_set='validation',
     k_min=2,
     k_max=6,
     n_runs=30,
     k_select_method='elbow',
     l1_ratio=0.1,
     alpha_W=0.1,
+    alpha_H=0.1,
     min_effect_size=0.0,
     specificity_tier_max=3,
     high_risk_threshold=HIGH_RISK_BIN_THRESHOLD,
@@ -1776,6 +1894,7 @@ def run_combined_bnmf(
         k_select_method=k_select_method,
         l1_ratio=l1_ratio,
         alpha_W=alpha_W,
+        alpha_H=alpha_H,
     )
 
     if result is None:
@@ -1873,9 +1992,10 @@ if __name__ == '__main__':
         help="Genomic feature specificity filter (default: tiered)",
     )
     parser.add_argument(
-        "--use_set", default='holdout',
+        "--use_set", default='validation',
         choices=['holdout', 'validation', 'all'],
-        help="Individual set used for clinical comparison output (default: holdout)",
+        help="Individual set used for bNMF discovery (default: validation); "
+             "holdout is preserved for replication",
     )
     parser.add_argument(
         "--min_effect_size", type=float, default=0.0,
@@ -1929,7 +2049,17 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--alpha_W", type=float, default=0.1,
-        help="Alpha_W regularisation parameter (default: 0.1)",
+        help="Alpha_W regularisation on W (basis matrix) (default: 0.1)",
+    )
+    parser.add_argument(
+        "--alpha_H", type=float, default=0.1,
+        help=(
+            "Alpha_H regularisation on H (feature loadings) (default: 0.1). "
+            "Must be > 0 when features include sparse/binary-like columns (e.g. "
+            "HLA allele contributions). Setting alpha_H=0 allows H values to grow "
+            "unconstrained, causing cluster collapse where everyone is assigned to "
+            "cluster_1."
+        ),
     )
 
     # ── Cohort selection ───────────────────────────────────────────────────
@@ -2018,12 +2148,16 @@ if __name__ == '__main__':
         k_select_method=args.k_select_method,
         l1_ratio=args.l1_ratio,
         alpha_W=args.alpha_W,
+        alpha_H=args.alpha_H,
         min_effect_size=args.min_effect_size,
         specificity_tier_max=args.specificity_tier_max,
         high_risk_threshold=args.high_risk_threshold,
         low_control_threshold=args.low_control_threshold,
         cohorts_to_run=args.cohorts,
         include_holdout_prs=not args.no_holdout_prs,
+        min_variance=args.min_variance,
+        max_zero_fraction=args.max_zero_fraction,
+        max_features=args.max_features,
     )
 
     if args.mode in ('per_cohort', 'both'):
@@ -2033,8 +2167,5 @@ if __name__ == '__main__':
         run_combined_bnmf(
             **shared_kwargs,
             weight_features=not args.no_weight_features,
-            min_variance=args.min_variance,
-            max_zero_fraction=args.max_zero_fraction,
-            max_features=args.max_features,
             include_prs_with_genomic=args.include_prs_with_genomic,
         )

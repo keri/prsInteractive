@@ -156,7 +156,7 @@ class ZoteroCorpus:
     # ── SQLite helpers ─────────────────────────────────────────────────────
 
     def _open_db(self) -> sqlite3.Connection:
-        uri = f'file:{self.db_path}?mode=ro'
+        uri = f'file:{self.db_path}?mode=ro&immutable=1'
         conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
         conn.row_factory = sqlite3.Row
         return conn

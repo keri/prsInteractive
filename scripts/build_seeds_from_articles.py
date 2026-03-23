@@ -88,12 +88,10 @@ PUBTATOR3_BASE = "https://www.ncbi.nlm.nih.gov/research/pubtator3-api"
 
 DEFAULT_ZOTERO_DB = os.path.expanduser("~/Zotero/zotero.sqlite")
 
-# Seed categories — must match the Zotero sub-folder names (slugified)
-# Expected structure:  T2D/{Subtypes, Mechanisms, Pathways, Pharma,
-#                           Protective, Comorbidities}
-# Also handles:  Clinical → comorbidities
-#                Complications → comorbidities
-#                Comorbities (typo) → comorbidities
+# Default seed categories — used as a fallback when no Zotero sub-folders are
+# found (flat collection or PMID file).  When sub-folders ARE present, the
+# actual category list is derived dynamically from the folder names so any
+# phenotype with any folder structure works without changing this constant.
 SEED_CATEGORIES = [
     'subtypes',       # disease subtypes and endotypes (SIDD, SIRD, MARD …)
     'mechanisms',     # molecular / cellular pathogenesis
@@ -181,8 +179,9 @@ def _get(url: str, params: dict | None = None, retries: int = 3,
 def _open_zotero_db(db_path: str) -> sqlite3.Connection:
     """
     Open Zotero SQLite in read-only mode (works even when Zotero is running).
+    Uses immutable=1 to bypass file locks held by the Zotero application.
     """
-    uri = f"file:{db_path}?mode=ro"
+    uri = f"file:{db_path}?mode=ro&immutable=1"
     try:
         conn = sqlite3.connect(uri, uri=True, check_same_thread=False)
         conn.row_factory = sqlite3.Row
@@ -394,23 +393,31 @@ def _extract_pmid(extra: str, url: str) -> str:
 
 def _folder_name_to_category_slug(name: str) -> str:
     """
-    Convert a Zotero sub-folder name directly to a seed category slug.
+    Convert a Zotero sub-folder name to a seed category slug.
 
-    The mapping is intentionally simple: lowercase + underscore normalisation.
-    No heuristic keyword matching — the folder name IS the category.
+    Only typo corrections and genuine abbreviations are normalised here.
+    Semantic remapping (e.g. 'Clinical' → 'comorbidities') is intentionally
+    NOT done — each folder becomes its own category so the script scales to
+    any phenotype with any folder structure.
 
-    Common aliases are resolved so minor naming variations still map cleanly:
+    Examples:
       'Subtypes'       → 'subtypes'
       'Pharma'         → 'pharma'
-      'Pharmaceutical' → 'pharma'
+      'Pharmaceutical' → 'pharma'      (abbreviation)
       'Protective'     → 'protective'
-      'Lifestyle'      → 'protective'
+      'Lifestyle'      → 'protective'  (synonym)
       'Mechanisms'     → 'mechanisms'
+      'Mechanism'      → 'mechanisms'  (singular → plural)
       'Pathways'       → 'pathways'
       'Comorbidities'  → 'comorbidities'
+      'Comorbities'    → 'comorbidities'  (typo)
+      'Clinical'       → 'clinical'    (own category — NOT remapped)
+      'Complications'  → 'complications'  (own category — NOT remapped)
     """
     slug = re.sub(r'[^a-z0-9]+', '_', name.strip().lower()).strip('_')
+    # Only typos and clear abbreviations — no semantic remapping
     _ALIASES: dict[str, str] = {
+        # pharma abbreviations
         'pharmaceutical':  'pharma',
         'pharmaceuticals': 'pharma',
         'drugs':           'pharma',
@@ -418,25 +425,76 @@ def _folder_name_to_category_slug(name: str) -> str:
         'pharmacotherapy': 'pharma',
         'treatment':       'pharma',
         'treatments':      'pharma',
+        # subtypes plural/synonyms
         'subtype':         'subtypes',
         'endotype':        'subtypes',
         'endotypes':       'subtypes',
         'heterogeneity':   'subtypes',
+        # mechanisms/pathways singular
         'mechanism':       'mechanisms',
         'pathway':         'pathways',
+        # protective synonyms
         'lifestyle':       'protective',
         'prevention':      'protective',
         'protective_factors': 'protective',
+        # comorbidities typos only
         'comorbidity':     'comorbidities',
         'co_morbidities':  'comorbidities',
         'comorbities':     'comorbidities',   # common Zotero typo
-        'complications':   'comorbidities',
-        'co_phenotypes':   'comorbidities',
-        'clinical':        'comorbidities',   # clinically-assessed outcomes
-        'clinical_measures': 'comorbidities',
-        'outcomes':        'comorbidities',
     }
     return _ALIASES.get(slug, slug)
+
+
+# ── PubMed E-utilities DOI→PMID resolver ──────────────────────────────────────
+
+EUTILS_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+
+def _doi_to_pmid_bulk(dois: list[str],
+                      ncbi_api_key: str | None = None) -> dict[str, str]:
+    """
+    Resolve a list of DOIs to PMIDs using PubMed E-utilities esearch.
+
+    Makes one request per DOI (the batch-search approach doesn't return
+    per-DOI mappings).  Rate: ~3 req/s without NCBI key, ~10/s with key.
+
+    Parameters
+    ----------
+    dois          : list of DOI strings (may include 'doi:' prefix)
+    ncbi_api_key  : optional NCBI API key for higher rate limits
+
+    Returns
+    -------
+    dict  {doi_lowercase: pmid_string}  — only entries where a PMID was found
+    """
+    result: dict[str, str] = {}
+    if not dois:
+        return result
+
+    print(f"  Resolving {len(dois)} DOIs → PMIDs via PubMed E-utilities ...")
+    for doi in dois:
+        doi_clean = re.sub(r'^doi:\s*', '', doi.strip(), flags=re.IGNORECASE)
+        if not doi_clean:
+            continue
+        params: dict = {
+            'db': 'pubmed',
+            'term': f'{doi_clean}[doi]',
+            'retmode': 'json',
+            'retmax': 1,
+        }
+        if ncbi_api_key:
+            params['api_key'] = ncbi_api_key
+
+        data = _get(f"{EUTILS_BASE}/esearch.fcgi", params=params)
+        time.sleep(0.35)   # stay within ~3 req/s without key
+
+        if data:
+            ids = data.get('esearchresult', {}).get('idlist', [])
+            if ids:
+                result[doi_clean.lower()] = ids[0]
+
+    found = len(result)
+    print(f"  DOI→PMID: resolved {found}/{len(dois)}")
+    return result
 
 
 # ── PubTator3 entity extraction ────────────────────────────────────────────────
@@ -498,29 +556,37 @@ def _aggregate_entities(entities: list[dict]) -> list[dict]:
 
 # ── Claude API classification ──────────────────────────────────────────────────
 
+def _get_category_description(cat: str, phenotype: str) -> str:
+    """
+    Return a human-readable description for a category slug.
+    Uses CATEGORY_DESCRIPTIONS when available; generates a generic fallback
+    for dynamically discovered categories not in the default list.
+    """
+    if cat in CATEGORY_DESCRIPTIONS:
+        return CATEGORY_DESCRIPTIONS[cat]
+    readable = cat.replace('_', ' ')
+    return f"terms related to {readable} aspects of {phenotype}"
+
+
 def _build_classification_prompt(phenotype: str, n_papers: int,
                                   min_freq: int, entity_list: str,
+                                  categories: list[str] | None = None,
                                   category_hint: str | None = None) -> str:
     """
-    Build the Claude entity-classification prompt dynamically from
-    SEED_CATEGORIES and CATEGORY_DESCRIPTIONS so the prompt always
-    reflects the current category schema.
+    Build the Claude entity-classification prompt.
+
+    Uses the provided `categories` list (dynamically derived from Zotero
+    sub-folders) so the prompt always reflects the actual folder structure
+    rather than a hardcoded schema.  Falls back to SEED_CATEGORIES when
+    `categories` is None (flat collection / PMID file workflow).
     """
+    cats = categories or SEED_CATEGORIES
     cat_lines = '\n'.join(
-        f"- {cat:<16}: {CATEGORY_DESCRIPTIONS[cat]}"
-        for cat in SEED_CATEGORIES
+        f"- {cat:<18}: {_get_category_description(cat, phenotype)}"
+        for cat in cats
     )
-    # Build an example JSON with one illustrative term per category
-    example_terms: dict[str, str] = {
-        'subtypes':      'SIDD',
-        'mechanisms':    'insulin resistance',
-        'pathways':      'PI3K AKT signalling',
-        'pharma':        'metformin',
-        'protective':    'Mediterranean diet',
-        'comorbidities': 'hypertension',
-    }
     example_json = json.dumps(
-        {cat: [example_terms.get(cat, 'example term')] for cat in SEED_CATEGORIES},
+        {cat: ['example term'] for cat in cats},
         indent=2,
     )
 
@@ -540,7 +606,7 @@ Classify each entity into the most appropriate category for the knowledge base.
 
 Categories:
 {cat_lines}
-- exclude         : entity is not relevant to {phenotype}, too generic, a \
+- exclude             : entity is not relevant to {phenotype}, too generic, a \
 species/cell-line name, or a common English word
 
 Extracted entities (entity text | entity type | frequency):
@@ -548,8 +614,7 @@ Extracted entities (entity text | entity type | frequency):
 
 Rules:
 1. Return ONLY a JSON object — no preamble, no markdown fences, no comments.
-2. Keys are exactly the {len(SEED_CATEGORIES)} category names listed above \
-(NOT 'exclude').
+2. Keys are exactly the {len(cats)} category names listed above (NOT 'exclude').
 3. Values are arrays of standardised term strings.
 4. Standardise terminology: use English, spell out Greek letters \
 (e.g. "beta-cell dysfunction" not "β-cell dysfunction").
@@ -569,6 +634,7 @@ def classify_with_claude(
     n_papers: int,
     api_key: str | None = None,
     category_hint: str | None = None,
+    categories: list[str] | None = None,
 ) -> dict[str, list[str]]:
     """
     Use Claude claude-opus-4-6 with adaptive thinking to classify extracted entities
@@ -580,7 +646,9 @@ def classify_with_claude(
     phenotype     : primary phenotype string
     n_papers      : total number of source papers (for prompt context)
     api_key       : Anthropic API key (falls back to ANTHROPIC_API_KEY env var)
-    category_hint : if not None, restrict output to this single category
+    category_hint : if not None, weight classification towards this category
+    categories    : category list derived from Zotero sub-folders;
+                    falls back to SEED_CATEGORIES when None
 
     Returns
     -------
@@ -599,11 +667,14 @@ def classify_with_claude(
         for e in top
     )
 
+    cats = categories or SEED_CATEGORIES
+
     prompt = _build_classification_prompt(
         phenotype=phenotype,
         n_papers=n_papers,
         min_freq=MIN_ENTITY_FREQ,
         entity_list=entity_lines,
+        categories=cats,
         category_hint=category_hint,
     )
 
@@ -611,31 +682,54 @@ def classify_with_claude(
 
     print(f"  Sending {len(top)} entities to Claude for classification...")
     try:
-        # Use streaming + adaptive thinking; get_final_message() collects everything
-        with client.messages.stream(
+        response = client.messages.create(
             model="claude-opus-4-6",
-            max_tokens=8192,
+            max_tokens=16000,
             thinking={"type": "adaptive"},
             messages=[{"role": "user", "content": prompt}],
-        ) as stream:
-            response = stream.get_final_message()
+        )
     except Exception as exc:
         print(f"  [WARN] Claude API error: {exc}")
         return {}
 
-    # Extract JSON from response
-    text = next(
-        (b.text for b in response.content if b.type == "text"),
-        ""
-    )
-    # Strip any accidental markdown code fences
-    text = re.sub(r'^```[a-z]*\n?', '', text.strip(), flags=re.MULTILINE)
-    text = re.sub(r'\n?```$', '', text.strip(), flags=re.MULTILINE)
+    def _extract_json_text(content_blocks) -> str:
+        """
+        Pull the JSON string out of the response.
+
+        Priority:
+        1. Non-empty text blocks (normal case).
+        2. Thinking block content — Claude sometimes places the final
+           JSON answer inside the thinking block when the text block is
+           empty (known edge-case with extended thinking).
+        """
+        # 1. Text blocks first
+        for block in content_blocks:
+            if block.type == "text" and block.text.strip():
+                return block.text
+        # 2. Thinking block fallback — find the last {...} in thinking content
+        for block in content_blocks:
+            if block.type == "thinking":
+                raw = getattr(block, 'thinking', '') or ''
+                # Grab the last JSON object in the thinking output
+                matches = re.findall(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)?\}',
+                                     raw, re.DOTALL)
+                if matches:
+                    return matches[-1]
+        return ""
+
+    text = _extract_json_text(response.content)
+
+    # Strip any residual <thinking>…</thinking> wrappers and markdown fences
+    text = re.sub(r'<thinking>.*?</thinking>\s*', '', text,
+                  flags=re.DOTALL | re.IGNORECASE).strip()
+    text = re.sub(r'^```[a-z]*\n?', '', text, flags=re.MULTILINE)
+    text = re.sub(r'\n?```$',        '', text, flags=re.MULTILINE)
+    text = text.strip()
 
     try:
         result = json.loads(text)
-        # Normalise: ensure all 7 categories present
-        return {cat: result.get(cat, []) for cat in SEED_CATEGORIES}
+        # Normalise: ensure all discovered categories are present
+        return {cat: result.get(cat, []) for cat in cats}
     except json.JSONDecodeError as exc:
         print(f"  [WARN] Could not parse Claude response as JSON: {exc}")
         print(f"  Response (first 500 chars): {text[:500]}")
@@ -644,13 +738,17 @@ def classify_with_claude(
 
 # ── Seeds builder ──────────────────────────────────────────────────────────────
 
-def _merge_seeds(existing: dict, new_terms: dict) -> dict:
+def _merge_seeds(existing: dict, new_terms: dict,
+                 categories: list[str] | None = None) -> dict:
     """
     Merge new_terms into existing seeds dict.
     Existing curated terms are preserved; new terms are appended if not present.
+    Uses the union of all categories seen across both dicts when categories
+    is None, so merging never silently drops a category.
     """
-    merged = {cat: list(existing.get(cat, [])) for cat in SEED_CATEGORIES}
-    for cat in SEED_CATEGORIES:
+    cats = categories or sorted(set(existing) | set(new_terms))
+    merged = {cat: list(existing.get(cat, [])) for cat in cats}
+    for cat in cats:
         existing_lower = {t.lower() for t in merged[cat]}
         for term in new_terms.get(cat, []):
             if term.lower() not in existing_lower:
@@ -664,7 +762,9 @@ def build_seeds_from_papers(
     phenotype: str,
     output_path: str,
     api_key: str | None = None,
+    ncbi_api_key: str | None = None,
     merge: bool = False,
+    categories: list[str] | None = None,
 ) -> dict:
     """
     Core routine: extract entities, classify, write seeds JSON.
@@ -676,7 +776,10 @@ def build_seeds_from_papers(
     phenotype          : primary phenotype string
     output_path        : output JSON file path
     api_key            : Anthropic API key
+    ncbi_api_key       : optional NCBI API key for higher E-utilities rate limits
     merge              : if True, merge with existing seeds file
+    categories         : ordered category list derived from Zotero sub-folders;
+                         falls back to SEED_CATEGORIES for flat/PMID workflows
 
     Returns
     -------
@@ -687,16 +790,35 @@ def build_seeds_from_papers(
     n_total = len(all_papers)
     print(f"\n  Total papers : {n_total}")
 
+    # ── DOI→PMID fallback for papers missing a PMID ───────────────────────
+    missing_pmid = [p for p in all_papers if not p['pmid'] and p.get('doi')]
+    if missing_pmid:
+        print(f"  [INFO] {len(missing_pmid)} papers missing PMID but have DOI — "
+              f"attempting DOI→PMID lookup ...")
+        doi_map = _doi_to_pmid_bulk(
+            [p['doi'] for p in missing_pmid],
+            ncbi_api_key=ncbi_api_key,
+        )
+        # Patch the PMID in every matching paper (across all categories)
+        for cat_papers in papers_by_category.values():
+            for p in cat_papers:
+                if not p['pmid'] and p.get('doi'):
+                    resolved = doi_map.get(p['doi'].lower().lstrip('doi:').strip())
+                    if resolved:
+                        p['pmid'] = resolved
+
     # ── PubTator3 entity extraction ────────────────────────────────────────
     all_pmids = [p['pmid'] for p in all_papers if p['pmid']]
     n_no_pmid = n_total - len(all_pmids)
     print(f"  With PMID    : {len(all_pmids)}  (without: {n_no_pmid})")
 
     if n_no_pmid:
-        print(f"  [NOTE] {n_no_pmid} papers have no PMID — "
+        print(f"  [NOTE] {n_no_pmid} papers still have no PMID — "
               f"their abstracts won't be entity-annotated.")
 
-    combined_seeds: dict[str, list[str]] = {cat: [] for cat in SEED_CATEGORIES}
+    # Use caller-supplied category list (from Zotero folders) or the default
+    cats = categories or SEED_CATEGORIES
+    combined_seeds: dict[str, list[str]] = {cat: [] for cat in cats}
 
     if 'all' in papers_by_category or len(papers_by_category) == 1:
         # Flat collection: extract all entities then classify
@@ -713,6 +835,7 @@ def build_seeds_from_papers(
             classified = classify_with_claude(
                 aggregated, phenotype, len(plist), api_key,
                 category_hint=key if key != 'all' else None,
+                categories=cats,
             )
             combined_seeds = classified if classified else combined_seeds
         else:
@@ -735,16 +858,18 @@ def build_seeds_from_papers(
                 classified = classify_with_claude(
                     aggregated, phenotype, len(plist), api_key,
                     category_hint=category,
+                    categories=cats,
                 )
                 # Prefer the matched category; fall back to any non-empty result
                 if classified.get(category):
                     combined_seeds[category].extend(classified[category])
                 else:
                     for cat, terms in classified.items():
-                        combined_seeds[cat].extend(terms)
+                        if cat in combined_seeds:
+                            combined_seeds[cat].extend(terms)
 
     # Deduplicate within each category
-    for cat in SEED_CATEGORIES:
+    for cat in cats:
         seen:  set  = set()
         dedup: list = []
         for t in combined_seeds[cat]:
@@ -761,9 +886,10 @@ def build_seeds_from_papers(
                 existing = json.load(f)
             existing_seeds = {
                 k: v for k, v in existing.items()
-                if isinstance(v, list) and k in SEED_CATEGORIES
+                if isinstance(v, list)
             }
-            combined_seeds = _merge_seeds(existing_seeds, combined_seeds)
+            combined_seeds = _merge_seeds(existing_seeds, combined_seeds,
+                                          categories=cats)
             print(f"\n  Merged with existing seeds at {output_path}")
         except Exception as exc:
             print(f"  [WARN] Could not read existing seeds for merge: {exc}")
@@ -786,9 +912,9 @@ def build_seeds_from_papers(
     total_terms = sum(len(v) for v in combined_seeds.values())
     print(f"\n  Seeds written: {output_path}")
     print(f"  Total terms  : {total_terms}")
-    for cat in SEED_CATEGORIES:
-        n = len(combined_seeds[cat])
-        sample = combined_seeds[cat][:4]
+    for cat in cats:
+        n = len(combined_seeds.get(cat, []))
+        sample = combined_seeds.get(cat, [])[:4]
         print(f"    {cat:<18} {n:>3} terms   {sample}")
 
     return combined_seeds
@@ -803,6 +929,7 @@ def run_from_zotero(
     db_path: str = DEFAULT_ZOTERO_DB,
     category_map: dict[str, str] | None = None,
     api_key: str | None = None,
+    ncbi_api_key: str | None = None,
     merge: bool = False,
 ) -> dict:
     """
@@ -822,6 +949,7 @@ def run_from_zotero(
                       if None, auto-detect from subcollection names via
                       _folder_name_to_category_slug()
     api_key         : Anthropic API key
+    ncbi_api_key    : optional NCBI API key for faster DOI→PMID resolution
     merge           : merge with existing seeds file
     """
     print(f"\nZotero database  : {db_path}")
@@ -860,17 +988,13 @@ def run_from_zotero(
                 sc_all_ids = _expand_to_descendants(conn, [sc_id])
                 papers     = _query_papers_in_collections(conn, sc_all_ids)
 
-                # Category: explicit override → direct slug from folder name
+                # Category: explicit override → slug derived from folder name
+                # Any slug is valid — categories are defined by the folders,
+                # not by a hardcoded list.
                 if category_map and sc_name in category_map:
                     category = category_map[sc_name]
                 else:
                     category = _folder_name_to_category_slug(sc_name)
-
-                if category not in SEED_CATEGORIES:
-                    print(f"  [SKIP] '{sc_name}' → slug='{category}' not in "
-                          f"SEED_CATEGORIES — skipped.  "
-                          f"Add to _ALIASES or use --category_map to remap.")
-                    continue
 
                 papers_by_category.setdefault(category, []).extend(papers)
                 print(f"  '{sc_name}' → '{category}'  ({len(papers)} papers)")
@@ -890,9 +1014,14 @@ def run_from_zotero(
     finally:
         conn.close()
 
+    # Preserve the order in which sub-folders appeared; exclude the 'all' key
+    # which is used for papers sitting directly in the parent collection.
+    discovered_categories = [c for c in papers_by_category if c != 'all'] or None
+
     return build_seeds_from_papers(
         papers_by_category, phenotype, output_path,
-        api_key=api_key, merge=merge,
+        api_key=api_key, ncbi_api_key=ncbi_api_key, merge=merge,
+        categories=discovered_categories,
     )
 
 
@@ -903,6 +1032,7 @@ def run_from_pmids(
     pmids_file: str,
     output_path: str,
     api_key: str | None = None,
+    ncbi_api_key: str | None = None,
     merge: bool = False,
 ) -> dict:
     """
@@ -918,7 +1048,7 @@ def run_from_pmids(
     papers = [{'title': '', 'abstract': '', 'doi': '', 'pmid': p} for p in pmids]
     return build_seeds_from_papers(
         {'all': papers}, phenotype, output_path,
-        api_key=api_key, merge=merge,
+        api_key=api_key, ncbi_api_key=ncbi_api_key, merge=merge,
     )
 
 
@@ -942,7 +1072,12 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--output', default=None,
-        help="Output JSON file path (e.g. scripts/phenotype_seeds/type_2_diabetes.json)",
+        help=(
+            "Output JSON file path.\n"
+            "If omitted, defaults to $PHENO_PATH/phenotype_seeds.json\n"
+            "(following the project PHENO_PATH convention).\n"
+            "Example: scripts/phenotype_seeds/type_2_diabetes.json"
+        ),
     )
     parser.add_argument(
         '--zotero_collection', default=None,
@@ -980,6 +1115,14 @@ if __name__ == '__main__':
         ),
     )
     parser.add_argument(
+        '--ncbi_api_key', default=None,
+        help=(
+            "NCBI API key for faster DOI→PMID resolution via E-utilities\n"
+            "(raises rate limit from ~3 to ~10 req/s).\n"
+            "Get a free key at: https://www.ncbi.nlm.nih.gov/account/"
+        ),
+    )
+    parser.add_argument(
         '--merge', action='store_true',
         help="Merge new terms into existing seeds file rather than overwrite",
     )
@@ -1013,16 +1156,26 @@ if __name__ == '__main__':
     # ── Validate args ─────────────────────────────────────────────────────
     if not args.phenotype:
         parser.error("--phenotype is required")
-    if not args.output:
-        parser.error("--output is required")
     if not args.zotero_collection and not args.pmids_file:
         parser.error("Either --zotero_collection or --pmids_file is required")
+
+    # Resolve output path: CLI → PHENO_PATH env var → error
+    output_path = args.output
+    if not output_path:
+        pheno_path_env = os.environ.get("PHENO_PATH")
+        if pheno_path_env:
+            output_path = os.path.join(pheno_path_env, "phenotype_seeds.json")
+        else:
+            parser.error(
+                "--output is required (or set the PHENO_PATH environment variable, "
+                "e.g. export PHENO_PATH=$PROJECT_ROOT/results/type_2_diabetes)"
+            )
 
     print("=" * 60)
     print("BUILD SEEDS FROM ARTICLES")
     print("=" * 60)
     print(f"  Phenotype : {args.phenotype}")
-    print(f"  Output    : {args.output}")
+    print(f"  Output    : {output_path}")
 
     # Parse category map
     cat_map: dict[str, str] | None = None
@@ -1038,17 +1191,19 @@ if __name__ == '__main__':
         run_from_zotero(
             phenotype=args.phenotype,
             collection_path=args.zotero_collection,
-            output_path=args.output,
+            output_path=output_path,
             db_path=args.zotero_db,
             category_map=cat_map,
             api_key=args.api_key,
+            ncbi_api_key=args.ncbi_api_key,
             merge=args.merge,
         )
     else:
         run_from_pmids(
             phenotype=args.phenotype,
             pmids_file=args.pmids_file,
-            output_path=args.output,
+            output_path=output_path,
             api_key=args.api_key,
+            ncbi_api_key=args.ncbi_api_key,
             merge=args.merge,
         )

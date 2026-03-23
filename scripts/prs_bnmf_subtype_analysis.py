@@ -445,10 +445,17 @@ def plot_association_heatmap(rho_pivot, output_path, title='PRS–Clinical Spear
 # bNMF CONSENSUS CLUSTERING
 # ============================================================================
 
-def _run_single_nmf(X, k, random_state, l1_ratio=0.1, alpha_W=0.1, max_iter=500):
+def _run_single_nmf(X, k, random_state, l1_ratio=0.1, alpha_W=0.1, alpha_H=0.1,
+                    max_iter=500):
     """
     Single NMF run with KL divergence (Kullback-Leibler) + sparsity
-    regularization (L1 on W for ARD-like sparsity).
+    regularization on both W and H.
+
+    alpha_H must be > 0 when features include sparse/binary-like columns
+    (e.g., HLA allele dosage contributions).  Without regularisation on H,
+    the MU solver can compensate for L1-shrunk W by growing H arbitrarily
+    large, producing degenerate components where almost all individuals are
+    assigned to cluster_1 (the catch-all component).
 
     Returns W (n_samples × k) and H (k × n_features).
     """
@@ -461,7 +468,7 @@ def _run_single_nmf(X, k, random_state, l1_ratio=0.1, alpha_W=0.1, max_iter=500)
         random_state=random_state,
         l1_ratio=l1_ratio,
         alpha_W=alpha_W,
-        alpha_H=0.0,
+        alpha_H=alpha_H,
         tol=1e-4,
     )
     W = model.fit_transform(X)
@@ -492,17 +499,29 @@ def _cophenetic_correlation(C):
     """
     Compute cophenetic correlation coefficient of the consensus matrix C.
     Higher values indicate more stable clustering.
+
+    Returns NaN when the consensus matrix is degenerate (near-constant), which
+    happens when all NMF runs collapse to a single dominant component.  The
+    caller should treat NaN as "unresolvable clustering for this k".
     """
     dist = 1 - C
     np.fill_diagonal(dist, 0)
+
+    # Degenerate check: if all distances are effectively zero every individual
+    # was always co-clustered → correlation is undefined.
+    if dist.max() < 1e-9:
+        return float('nan')
+
     condensed = squareform(dist, checks=False)
     Z = linkage(condensed, method='average')
     coph_dist = cophenet(Z, condensed)
-    return float(coph_dist[0])
+    val = float(coph_dist[0])
+    # scipy returns nan when condensed is constant (near-degenerate case)
+    return val
 
 
 def run_consensus_bnmf(X, k_min=2, k_max=8, n_runs=30,
-                       l1_ratio=0.1, alpha_W=0.1, max_iter=500,
+                       l1_ratio=0.1, alpha_W=0.1, alpha_H=0.1, max_iter=500,
                        verbose=True):
     """
     Consensus bNMF: for each k in [k_min, k_max], run NMF n_runs times,
@@ -529,6 +548,7 @@ def run_consensus_bnmf(X, k_min=2, k_max=8, n_runs=30,
                     random_state=run * 17 + k,
                     l1_ratio=l1_ratio,
                     alpha_W=alpha_W,
+                    alpha_H=alpha_H,
                     max_iter=max_iter,
                 )
                 W_list.append(W)
@@ -542,25 +562,53 @@ def run_consensus_bnmf(X, k_min=2, k_max=8, n_runs=30,
             print(f"  All runs failed for k={k}. Skipping.")
             continue
 
+        # ── Collapse detection ──────────────────────────────────────────────
+        # For each run, compute the fraction of individuals whose argmax W
+        # column is the dominant (most-used) component.  Values near 1.0
+        # mean every run put almost everyone in a single cluster.
+        collapse_fracs = []
+        for W in W_list:
+            row_sums = W.sum(axis=1, keepdims=True)
+            row_sums[row_sums == 0] = 1
+            W_norm = W / row_sums
+            labels = np.argmax(W_norm, axis=1)
+            dominant_frac = np.bincount(labels, minlength=k).max() / len(labels)
+            collapse_fracs.append(dominant_frac)
+        mean_collapse = float(np.mean(collapse_fracs))
+        collapsed = mean_collapse > 0.90
+        if collapsed and verbose:
+            print(f"    *** k={k}: NMF COLLAPSE detected — {mean_collapse:.1%} of "
+                  f"individuals assigned to dominant component on average across runs. "
+                  f"Cophenetic correlation will be undefined (NaN). "
+                  f"Consider reducing k_max, tightening feature filters, or "
+                  f"increasing alpha_H.")
+
         C = _soft_consensus_matrix(W_list)
         coph = _cophenetic_correlation(C)
+
+        if verbose and not collapsed:
+            pass  # normal path — printed below
 
         k_results[k] = {
             'C': C,
             'coph': coph,
             'W_list': W_list,
             'H_list': H_list,
+            'mean_collapse_frac': mean_collapse,
         }
         coph_records.append({
             'k': k,
             'cophenetic_correlation': coph,
             'mean_reconstruction_error': float(np.mean(errors)),
             'n_runs': len(W_list),
+            'mean_collapse_frac': mean_collapse,
         })
 
         if verbose:
-            print(f"    k={k}: cophenetic={coph:.4f}  "
-                  f"mean_error={np.mean(errors):.4f}")
+            coph_str = f"{coph:.4f}" if not np.isnan(coph) else "NaN (collapsed)"
+            print(f"    k={k}: cophenetic={coph_str}  "
+                  f"mean_error={np.mean(errors):.4f}  "
+                  f"collapse={mean_collapse:.1%}")
 
     coph_df = pd.DataFrame(coph_records)
     return k_results, coph_df
@@ -572,12 +620,33 @@ def select_optimal_k(coph_df, method='elbow'):
 
     method='max'   → k with highest cophenetic correlation
     method='elbow' → k at the "elbow" (largest second derivative drop)
+
+    NaN cophenetic values (produced by degenerate / collapsed NMF runs) are
+    excluded before selection.  If all k values are NaN the smallest k is
+    returned with a warning.
     """
     if coph_df.empty:
         raise ValueError("Empty cophenetic dataframe — no valid NMF runs.")
 
     coph_df = coph_df.sort_values('k').reset_index(drop=True)
-    coph_vals = coph_df['cophenetic_correlation'].values
+
+    # Drop k values where the NMF collapsed (cophenetic = NaN)
+    valid = coph_df.dropna(subset=['cophenetic_correlation'])
+    n_nan = len(coph_df) - len(valid)
+    if n_nan > 0:
+        nan_ks = coph_df.loc[coph_df['cophenetic_correlation'].isna(), 'k'].tolist()
+        print(f"  WARNING: k={nan_ks} produced NaN cophenetic correlation "
+              f"(NMF collapse — all individuals assigned to one component). "
+              f"These k values are excluded from optimal-k selection.")
+
+    if valid.empty:
+        fallback_k = int(coph_df['k'].min())
+        print(f"  WARNING: All k values collapsed. Falling back to k={fallback_k}. "
+              f"Results will not be meaningful — consider adjusting feature filters "
+              f"or alpha_H.")
+        return fallback_k
+
+    coph_vals = valid['cophenetic_correlation'].values
 
     if method == 'max':
         best_idx = int(np.argmax(coph_vals))
@@ -589,8 +658,9 @@ def select_optimal_k(coph_df, method='elbow'):
             d2 = np.diff(coph_vals, n=2)
             best_idx = int(np.argmin(d2)) + 1  # offset for double diff
 
-    optimal_k = int(coph_df.loc[best_idx, 'k'])
-    print(f"  Optimal k selected: {optimal_k} (method='{method}')")
+    optimal_k = int(valid.iloc[best_idx]['k'])
+    print(f"  Optimal k selected: {optimal_k} (method='{method}', "
+          f"from {len(valid)} non-collapsed k values)")
     return optimal_k
 
 
