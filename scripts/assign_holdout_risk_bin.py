@@ -699,7 +699,7 @@ if __name__ == "__main__":
     print(f"[PYTHON] Reading from: {pheno_data}")
 
 #   pheno='type2Diabetes'
-#   pheno_data = f'/your/directory/prsInteractive/results/{pheno}/productEpi'
+#   pheno_data = f'/path/to/prsInteractive/results/{pheno}/productEpi'
 
     
     if not pheno_data:

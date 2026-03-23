@@ -2,6 +2,7 @@
 
 import pandas as pd
 import numpy as np
+from itertools import combinations
 from statsmodels.stats.contingency_tables import mcnemar
 from scipy.stats import pearsonr, spearmanr, hypergeom, norm, ttest_rel, chi2_contingency
 from sklearn.metrics import cohen_kappa_score, roc_auc_score, roc_curve
@@ -352,97 +353,103 @@ def paired_ttest(data: pd.DataFrame, prs1_name: str, prs2_name: str,
         
 
 def delong_test(y_true: np.ndarray, scores1: np.ndarray, 
-                                scores2: np.ndarray) -> Dict:
-        """
-        DeLong's test for comparing AUCs of two correlated ROC curves.
+                scores2: np.ndarray) -> Dict:
+    """
+    DeLong's test for comparing AUCs of two correlated ROC curves.
+    
+    Based on:
+    DeLong et al. (1988) "Comparing the areas under two or more correlated 
+    receiver operating characteristic curves: a nonparametric approach"
+    """
+    print(f"\n{'='*70}")
+    print("DeLong Test (AUC Comparison)")
+    print(f"{'='*70}")
+    
+    # Calculate AUCs
+    auc1 = roc_auc_score(y_true, scores1)
+    auc2 = roc_auc_score(y_true, scores2)
+    
+    # Get number of positive and negative samples
+    n_pos = np.sum(y_true == 1)
+    n_neg = np.sum(y_true == 0)
+    
+    # Get indices
+    pos_idx = np.where(y_true == 1)[0]
+    neg_idx = np.where(y_true == 0)[0]
+    
+    # Calculate structural components (V matrices)
+    def structural_component(scores, pos_idx, neg_idx):
+        """Calculate V10 (structural component for AUC variance)."""
+        V = np.zeros((len(pos_idx), len(neg_idx)))
+        for i, p in enumerate(pos_idx):
+            for j, n in enumerate(neg_idx):
+                if scores[p] > scores[n]:
+                    V[i, j] = 1
+                elif scores[p] == scores[n]:
+                    V[i, j] = 0.5
+        return V
+    
+    V1 = structural_component(scores1, pos_idx, neg_idx)
+    V2 = structural_component(scores2, pos_idx, neg_idx)
+    
+    # Calculate variances and covariance
+    S_01_1 = np.var(np.mean(V1, axis=1))  # Variance across positives
+    S_10_1 = np.var(np.mean(V1, axis=0))  # Variance across negatives
+    
+    S_01_2 = np.var(np.mean(V2, axis=1))
+    S_10_2 = np.var(np.mean(V2, axis=0))
+    
+    # Covariances
+    S_01_12 = np.cov(np.mean(V1, axis=1), np.mean(V2, axis=1))[0, 1]
+    S_10_12 = np.cov(np.mean(V1, axis=0), np.mean(V2, axis=0))[0, 1]
+    
+    # Variance of each AUC and their difference
+    var_auc1 = (S_01_1 / n_pos) + (S_10_1 / n_neg)
+    var_auc2 = (S_01_2 / n_pos) + (S_10_2 / n_neg)
+    cov_aucs = (S_01_12 / n_pos) + (S_10_12 / n_neg)
+    
+    var_diff = var_auc1 + var_auc2 - 2 * cov_aucs
+    
+    # 95% confidence intervals for each AUC (DeLong SE, normal approximation)
+    z95 = norm.ppf(0.975)  # 1.96
+    ci1_lo = np.clip(auc1 - z95 * np.sqrt(var_auc1), 0, 1)
+    ci1_hi = np.clip(auc1 + z95 * np.sqrt(var_auc1), 0, 1)
+    ci2_lo = np.clip(auc2 - z95 * np.sqrt(var_auc2), 0, 1)
+    ci2_hi = np.clip(auc2 + z95 * np.sqrt(var_auc2), 0, 1)
+    
+    print(f"AUC 1: {auc1:.4f}  (95% CI: {ci1_lo:.4f} – {ci1_hi:.4f})")
+    print(f"AUC 2: {auc2:.4f}  (95% CI: {ci2_lo:.4f} – {ci2_hi:.4f})")
+    print(f"Δ AUC: {abs(auc1 - auc2):.4f}")
+    
+    # Z-statistic for difference
+    if var_diff > 0:
+        z_stat = (auc1 - auc2) / np.sqrt(var_diff)
+        p_value = 2 * (1 - norm.cdf(abs(z_stat)))
+    else:
+        z_stat = np.nan
+        p_value = np.nan
+        warnings.warn("Variance of AUC difference is non-positive")
         
-        Based on:
-        DeLong et al. (1988) "Comparing the areas under two or more correlated 
-        receiver operating characteristic curves: a nonparametric approach"
-        """
-        print(f"\n{'='*70}")
-        print("DeLong Test (AUC Comparison)")
-        print(f"{'='*70}")
+    print(f"z-statistic: {z_stat:.3f}")
+    print(f"P-value: {p_value:.4e}")
     
-        # Calculate AUCs
-        auc1 = roc_auc_score(y_true, scores1)
-        auc2 = roc_auc_score(y_true, scores2)
-    
-        print(f"AUC 1: {auc1:.4f}")
-        print(f"AUC 2: {auc2:.4f}")
-        print(f"Δ AUC: {abs(auc1 - auc2):.4f}")
-    
-        # Get number of positive and negative samples
-        n_pos = np.sum(y_true == 1)
-        n_neg = np.sum(y_true == 0)
-    
-        # Get indices
-        pos_idx = np.where(y_true == 1)[0]
-        neg_idx = np.where(y_true == 0)[0]
-    
-        # Calculate structural components (V matrices)
-        def structural_component(scores, pos_idx, neg_idx):
-                """Calculate V10 (structural component for AUC variance)."""
-                V = np.zeros((len(pos_idx), len(neg_idx)))
-                for i, p in enumerate(pos_idx):
-                        for j, n in enumerate(neg_idx):
-                                if scores[p] > scores[n]:
-                                        V[i, j] = 1
-                                elif scores[p] == scores[n]:
-                                        V[i, j] = 0.5
-                return V
-    
-        V1 = structural_component(scores1, pos_idx, neg_idx)
-        V2 = structural_component(scores2, pos_idx, neg_idx)
-    
-        # Calculate AUC from V (should match sklearn)
-        auc1_check = np.mean(V1)
-        auc2_check = np.mean(V2)
-    
-        # Calculate variances and covariance
-        S_01_1 = np.var(np.mean(V1, axis=1))  # Variance across positives
-        S_10_1 = np.var(np.mean(V1, axis=0))  # Variance across negatives
-    
-        S_01_2 = np.var(np.mean(V2, axis=1))
-        S_10_2 = np.var(np.mean(V2, axis=0))
-    
-        # Covariances
-        S_01_12 = np.cov(np.mean(V1, axis=1), np.mean(V2, axis=1))[0, 1]
-        S_10_12 = np.cov(np.mean(V1, axis=0), np.mean(V2, axis=0))[0, 1]
-    
-        # Variance of AUC difference
-        var_auc1 = (S_01_1 / n_pos) + (S_10_1 / n_neg)
-        var_auc2 = (S_01_2 / n_pos) + (S_10_2 / n_neg)
-        cov_aucs = (S_01_12 / n_pos) + (S_10_12 / n_neg)
-    
-        var_diff = var_auc1 + var_auc2 - 2 * cov_aucs
-    
-        # Z-statistic
-        if var_diff > 0:
-                z_stat = (auc1 - auc2) / np.sqrt(var_diff)
-                p_value = 2 * (1 - norm.cdf(abs(z_stat)))
-        else:
-                z_stat = np.nan
-                p_value = np.nan
-                warnings.warn("Variance of AUC difference is non-positive")
-            
-        print(f"z-statistic: {z_stat:.3f}")
-        print(f"P-value: {p_value:.4e}")
-    
-        if p_value < 0.05:
-                winner = "Model 1" if auc1 > auc2 else "Model 2"
-                print(f"   → {winner} has significantly better discrimination")
-        else:
-                print(f"   → No significant difference in discrimination")
-            
-        return {
-                'test': 'DeLong',
-                'statistic': z_stat,
-                'pvalue': p_value,
-                'conf_int': f'AUC1={auc1:.4f}, AUC2={auc2:.4f}',
-                'auc1': auc1,
-                'auc2': auc2
-        }
+    if p_value < 0.05:
+        winner = "Model 1" if auc1 > auc2 else "Model 2"
+        print(f"   → {winner} has significantly better discrimination")
+    else:
+        print(f"   → No significant difference in discrimination")
+        
+    return {
+        'test': 'DeLong',
+        'statistic': z_stat,
+        'pvalue': p_value,
+        'auc1': auc1,
+        'auc2': auc2,
+        'auc1_ci': (ci1_lo, ci1_hi),
+        'auc2_ci': (ci2_lo, ci2_hi),
+        'conf_int': f'AUC1={auc1:.4f} [{ci1_lo:.4f}–{ci1_hi:.4f}], '
+                    f'AUC2={auc2:.4f} [{ci2_lo:.4f}–{ci2_hi:.4f}]',
+    }
         
 
 def net_reclassification_index(data: pd.DataFrame, prs1_name: str,
@@ -672,13 +679,15 @@ def calculate_stat_tests(validation_prs_file: str, scores_path: str,
                 models_to_compare = [m for m in models_to_compare if m not in missing_models]
         
         # ── Generate all pairwise comparisons ──────────────────────────────────
-        prs_comparisons = []
-        
-        # Always compare main against others if main exists
-        if 'main' in models_to_compare:
-                for model in models_to_compare:
-                        if model != 'main':
-                                prs_comparisons.append(('main', model))
+#       prs_comparisons = []
+#       
+#       # Always compare main against others if main exists
+#       if 'main' in models_to_compare:
+#               for model in models_to_compare:
+#                       if model != 'main':
+#                               prs_comparisons.append(('main', model))
+            
+        prs_comparisons = list(combinations(models_to_compare, 2))
         
         # Compare product vs summed variants within same cohort
         # e.g., cardio_product vs cardio_summed, epi_product vs epi_summed
@@ -773,10 +782,13 @@ if __name__ == "__main__":
     prs_file = args.prs_file or os.environ.get("COMBINED_PRS_FILE")
     print(f"combined prs file : {prs_file}")
     
-    #pheno='celiacDisease'
-    #prs_file = f'/Users/kerimulterer/prsInteractive/results/{pheno}/combinedAnalysis/scores/combinedPRSGroups.filtered.csv'
-    #scores_path = f'/Users/kerimulterer/prsInteractive/results/{pheno}/combinedAnalysis/scores'
-    
+#   pheno='celiacDisease'
+#   prs_file = f'/to/directory/prsInteractive/results/{pheno}/combinedAnalysis/scores/combinedPRSGroups.filtered.csv'
+#   scores_path = f'/to/directory/prsInteractive/results/{pheno}/combinedAnalysis/scores'
+
+    print(f"[DEBUG] scores_path = {scores_path}")
+    print(f"[DEBUG] scores dir exists: {os.path.isdir(scores_path)}")
+
     results = calculate_stat_tests(prs_file, scores_path)
     
     df = pd.read_csv(prs_file)

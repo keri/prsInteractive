@@ -39,7 +39,7 @@
 set -euo pipefail
 
 PHENO="${1:?Usage: $0 <PHENO> [EPI_COMBO] [MODE]}"
-EPI_COMBO="${2:-sum}"
+EPI_COMBO="${2:-combined}"
 MODE="${3:-prs_scores}"
 
 # ------------------------------------------------------------------
@@ -59,24 +59,30 @@ source "${ENV_CONFIG}"
 # ------------------------------------------------------------------
 if [ "${EPI_COMBO}" == "sum" ]; then
     COMBO_FOLDER='summedEpi'
-else
+elif [ "${EPI_COMBO}" == "prod" ]; then
     COMBO_FOLDER='productEpi'
-fi
-
-PHENO_DATA="${RESULTS_PATH}/${PHENO}/${COMBO_FOLDER}"
-CONFIG_FILE="${PHENO_DATA}/pheno.config"
-
-if [ ! -d "${PHENO_DATA}" ]; then
-    echo "ERROR: Phenotype directory not found: ${PHENO_DATA}"
-    echo "Run envSetUp.sh first to create the phenotype environment."
+elif [ "${EPI_COMBO}" == "combined" ]; then
+    COMBO_FOLDER='combinedAnalysis'
+else
+    echo "Error: EPI_COMBO must be 'sum', 'prod', or 'combined'" >&2
     exit 1
 fi
 
-source "${CONFIG_FILE}"
+PHENO_DATA="${RESULTS_PATH}/${PHENO}/${COMBO_FOLDER}"
+#CONFIG_FILE="${PHENO_DATA}/pheno.config"
+
+if [ ! -d "${PHENO_DATA}" ]; then
+    echo "ERROR: Phenotype directory not found: ${PHENO_DATA}"
+    echo "Run combine_gxg_gplus_prs_analysis.py first to create the combined environment OR envSetup.sh if running epiSummed or epiProduct."
+    exit 1
+fi
+
+#source "${CONFIG_FILE}"
 
 # ------------------------------------------------------------------
 # Resolve clinical measures file
 # ------------------------------------------------------------------
+ENV_FILE="${RESULTS_PATH}/participant_environment.csv"
 CLINICAL_FILE="${ENV_FILE:-}"
 if [ -z "${CLINICAL_FILE}" ] || [ ! -f "${CLINICAL_FILE}" ]; then
     # Fallback: look for participant_environment.csv in data directory

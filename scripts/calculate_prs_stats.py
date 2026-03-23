@@ -311,6 +311,7 @@ def calculate_prs_stats(pheno_data, model_type='prs', include_all=False, models_
             
             print('columns used in analysis: ',cols_for_analysis)
             
+            print('cohorts to analyze: ',cohorts)
             for cohort in cohorts:
                 fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(
                     df[cols_for_analysis], cohort
@@ -318,7 +319,10 @@ def calculate_prs_stats(pheno_data, model_type='prs', include_all=False, models_
                 
 #               fp_fn_dict = calculate_fp_fn_tp_percentile_alt_coding(df[cohorts+['PHENOTYPE']],cohort)
                 # Use first cohort (should be scaled_prs_main) as reference
-                main_col = cohorts[0] if cohorts else 'scaled_prs_main'
+                if 'scaled_prs_main' in cohorts:
+                    main_col = 'scaled_prs_main'
+                else:
+                    main_col = cohorts[0]
                 performance_values = calculate_cases_exclusive(
                     df[cols_for_analysis], cohort,
                     threshold_percentile=80, case_value=case_value, main_col=main_col
@@ -401,7 +405,7 @@ if __name__ == '__main__':
     pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
     print(f"[PYTHON] Reading from: {pheno_data}")
     
-#   pheno_data = '/Users/kerimulterer/prsInteractive/results/celiacDisease/summedEpi'
+#   pheno_data = '/path/to/prsInteractive/results/celiacDisease/productEpi'
 
     
     if not pheno_data:

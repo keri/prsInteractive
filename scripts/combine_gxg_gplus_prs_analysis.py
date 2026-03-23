@@ -137,7 +137,7 @@ SUMMED_EPI   = "summedEpi"
 COMBINED_DIR = "combinedAnalysis"
 
 # ``main`` comes from both analyses but is identical → keep one copy only.
-SHARED_MODELS = {"main"}
+SHARED_MODELS = {"main","covariate","covar"}
 
 # Non-main models that exist in each analysis and will be suffixed.
 METHOD_MODELS = {"epi", "epi+main", "cardio", "all"}

@@ -3,7 +3,7 @@
 
 platform=${3:-"local"} 
 #PHENO=$1
-PHENO='type2Diabetes'
+PHENO='celiacDisease'
 threshold=${2:-1.99}
 EPI_COMBO=${4:-"sum"}
 #EPI_COMBO=${4:-"prod"}
@@ -172,11 +172,11 @@ Rscript "$SCRIPTS_DIR/glmPenalizedFinalModelling.R" \
 
 
 # Add entries
-#{
-#   echo "FEATURE_SCORES_FILE=$PHENO_DATA/scores/featureScoresReducedFinalModel.csv"
-#   echo "FINAL_MODEL_SCORES=$PHENO_DATA/scores/modelScoresReducedFinalModel.csv"
-#   echo "FINAL_MODEL_PROBABILITIES=$PHENO_DATA/scores/predictProbsReducedFinalModel.csv"
-#} >> "${PHENO_DATA}/pheno.config"
+{
+    echo "FEATURE_SCORES_FILE=$PHENO_DATA/scores/featureScoresReducedFinalModel.csv"
+    echo "FINAL_MODEL_SCORES=$PHENO_DATA/scores/modelScoresReducedFinalModel.csv"
+    echo "FINAL_MODEL_PROBABILITIES=$PHENO_DATA/scores/predictProbsReducedFinalModel.csv"
+} >> "${PHENO_DATA}/pheno.config"
 
 #filter non-additive gene-env features
 
@@ -192,43 +192,35 @@ if [ ! -f "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" ]; th
 fi
 
 
-#python "$SCRIPTS_DIR/calculate_prs_post_modelling.py" \
-#--pheno_data $PHENO_DATA \
-#--test_file $TEST_PATH \
-#--holdout_file $HOLDOUT_PATH \
-#--covar_file $COVAR_FILE \
-#--hla_file $HLA_FILE \
-#--test_env_gen_file $GENE_ENV_TEST \
-#--holdout_env_gen_file $GENE_ENV_HOLDOUT \
-#--holdout_combined_env_file $ALL_ENV_HOLDOUT \
-#--test_combined_env_file $ALL_ENV_TEST \
-#--pheno $PHENO \
-#--feature_scores_file_filtered "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" \
-#--withdrawal_path $WITHDRAWAL_PATH \
-#--epi_combo $EPI_COMBO
+python "$SCRIPTS_DIR/calculate_prs_post_modelling.py" \
+--pheno_data $PHENO_DATA \
+--test_file $TEST_PATH \
+--holdout_file $HOLDOUT_PATH \
+--covar_file $COVAR_FILE \
+--hla_file $HLA_FILE \
+--test_env_gen_file $GENE_ENV_TEST \
+--holdout_env_gen_file $GENE_ENV_HOLDOUT \
+--holdout_combined_env_file $ALL_ENV_HOLDOUT \
+--test_combined_env_file $ALL_ENV_TEST \
+--pheno $PHENO \
+--feature_scores_file_filtered "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" \
+--withdrawal_path $WITHDRAWAL_PATH \
+--epi_combo $EPI_COMBO
 
-#python "$SCRIPTS_DIR/combine_prs.py" \
-#--pheno_data $PHENO_DATA
+python "$SCRIPTS_DIR/combine_prs.py" \
+--pheno_data $PHENO_DATA
 
 #calculate peformance of trained models and PRS calculations for main v other
 #need PHENO_DATA exported or added as an --pheno_data argument
-#python "${SCRIPTS_DIR}/calculate_prs_stats.py" \
-#--pheno_data $PHENO_DATA
+python "${SCRIPTS_DIR}/calculate_prs_stats.py" \
+--pheno_data $PHENO_DATA
 
-#python "${SCRIPTS_DIR}/filter_statistically_distinct_models.py" \
-#--pheno_data $PHENO_DATA
-#
-#python "${SCRIPTS_DIR}/run_cohort_analysis_pipeline.py" \
-#--feature_scores_file_filtered "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" \
-#--pheno_data $PHENO_DATA \
-#--raw_features_file "$RESULTS_PATH/participant_environment.csv"
+python "${SCRIPTS_DIR}/run_cohort_analysis_pipeline.py" \
+--feature_scores_file_filtered "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" \
+--pheno_data $PHENO_DATA \
+--raw_features_file "$RESULTS_PATH/participant_environment.csv"
 
-#python "${SCRIPTS_DIR}/calculate_top_features_in_cohort.py" \
-#--pheno_data $PHENO_DATA \
-#--feature_scores_file_filtered "$PHENO_DATA/scores/featureScoresReducedFinalModel.filtered.csv" \
-#--threshold 1.99
-
-#RScript "$SCRIPTS_DIR/prsNagelkerkeIncremental.R" \
-#--pheno_data $PHENO_DATA
+RScript "$SCRIPTS_DIR/prsNagelkerkeIncremental.R" \
+--pheno_data $PHENO_DATA
 
 

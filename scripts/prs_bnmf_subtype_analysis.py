@@ -41,6 +41,7 @@ Outputs
 
 import os
 import sys
+import gc
 import glob
 import re
 import argparse
@@ -131,6 +132,12 @@ CLINICAL_KEYWORDS = {
     'ldl': 'ldl',
 }
 
+# Maximum number of individuals used to build the consensus matrix for
+# visualisation only.  The full n×n matrix is O(n²) memory; at n=67k that is
+# ~18 GB per k even in float32, which is unplottable anyway.  A random
+# subsample of this size gives a clear, representative heatmap.
+MAX_CONSENSUS_PLOT_N = 5000
+
 # Okabe-Ito colorblind-friendly palette
 CLUSTER_PALETTE = [
     '#E69F00', '#56B4E9', '#009E73', '#F0E442',
@@ -168,8 +175,8 @@ def _model_name_from_path(filepath, models_to_use):
     filename = os.path.basename(filepath)
     models_sorted = sorted(models_to_use, key=len, reverse=True)
     for model in models_sorted:
-        pattern = rf'(^|[._\-\s]){re.escape(model)}([._\-\s]|$)'
-        if re.search(pattern, filename):
+      pattern = rf'^{re.escape(model)}(\..+)?\.mixed\.prs\.csv$'
+      if re.search(pattern, filename):
             return model
     return None
 
@@ -297,33 +304,40 @@ def build_weighted_feature_matrix(prs_dict, important_features=None):
 
 
 def load_clinical_measures(clinical_file, iid_col='eid'):
-    """
-    Load participant_environment.csv (or any clinical measures CSV).
+  """
+  Load participant_environment.csv (or any clinical measures CSV).
 
-    Returns
-    -------
-    pd.DataFrame  indexed by IID
-    """
-    df = pd.read_csv(clinical_file, low_memory=False)
-    id_candidates = [iid_col, 'IID', 'Participant ID', 'participant_id', 'f.eid']
-    id_col_found = None
-    for c in id_candidates:
-        if c in df.columns:
-            id_col_found = c
-            break
-    if id_col_found is None:
-        raise ValueError(
-            f"Cannot identify ID column in {clinical_file}. "
-            f"Expected one of: {id_candidates}"
-        )
-    df = df.set_index(id_col_found)
-    df.index.name = 'IID'
-
-    # Keep only numeric columns
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    print(f"  Loaded clinical measures: {df.shape[0]} individuals, "
-          f"{len(numeric_cols)} numeric features")
-    return df[numeric_cols]
+  Returns
+  -------
+  pd.DataFrame  indexed by IID
+  """
+  df = pd.read_csv(clinical_file, low_memory=False)
+  
+  # Drop duplicate columns (keep first occurrence)
+  n_dupes = df.columns.duplicated().sum()
+  if n_dupes:
+    print(f"  Warning: dropping {n_dupes} duplicate column(s)")
+    df = df.loc[:, ~df.columns.duplicated()]
+    
+  id_candidates = [iid_col, 'IID', 'Participant ID', 'participant_id', 'f.eid']
+  id_col_found = None
+  for c in id_candidates:
+    if c in df.columns:
+      id_col_found = c
+      break
+  if id_col_found is None:
+    raise ValueError(
+      f"Cannot identify ID column in {clinical_file}. "
+      f"Expected one of: {id_candidates}"
+    )
+  df = df.set_index(id_col_found)
+  df.index.name = 'IID'
+  
+  # Keep only numeric columns
+  numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+  print(f"  Loaded clinical measures: {df.shape[0]} individuals, "
+      f"{len(numeric_cols)} numeric features")
+  return df[numeric_cols]
 
 
 def map_feature_to_concept(col_name):
@@ -471,8 +485,8 @@ def _run_single_nmf(X, k, random_state, l1_ratio=0.1, alpha_W=0.1, alpha_H=0.1,
         alpha_H=alpha_H,
         tol=1e-4,
     )
-    W = model.fit_transform(X)
-    H = model.components_
+    W = model.fit_transform(X).astype(np.float32)
+    H = model.components_.astype(np.float32)
     return W, H, model.reconstruction_err_
 
 
@@ -483,7 +497,7 @@ def _soft_consensus_matrix(W_list):
     Averages over all NMF runs to give a stable pairwise co-clustering measure.
     """
     n = W_list[0].shape[0]
-    C = np.zeros((n, n))
+    C = np.zeros((n, n), dtype=np.float32)
     for W in W_list:
         # Normalize rows to unit L1 (soft membership fractions)
         row_sums = W.sum(axis=1, keepdims=True)
@@ -583,14 +597,17 @@ def run_consensus_bnmf(X, k_min=2, k_max=8, n_runs=30,
                   f"Consider reducing k_max, tightening feature filters, or "
                   f"increasing alpha_H.")
 
+        # Build C only to compute cophenetic, then immediately free it.
+        # C is O(n_samples²) and is the primary memory bottleneck.
         C = _soft_consensus_matrix(W_list)
         coph = _cophenetic_correlation(C)
+        del C
+        gc.collect()
 
-        if verbose and not collapsed:
-            pass  # normal path — printed below
-
+        # Store W/H lists (O(n_samples × k) per run — much smaller than C).
+        # C is NOT stored here; it will be recomputed one k at a time for
+        # plotting after optimal k selection (see main).
         k_results[k] = {
-            'C': C,
             'coph': coph,
             'W_list': W_list,
             'H_list': H_list,
@@ -1234,11 +1251,14 @@ def main(
     X_scaled, retained_cols = impute_and_scale(combined)
     print(f"  After imputation/scaling: {X_scaled.shape}")
 
-    X_arr = X_scaled.values
+    # Cast to float32 to halve NMF working memory (sklearn NMF accepts float32).
+    X_arr = X_scaled.values.astype(np.float32)
     n_samples, n_features = X_arr.shape
+    print(f"  NMF input: {n_samples} samples × {n_features} features  "
+          f"({X_arr.nbytes / 1e6:.1f} MB, float32)")
 
     # Add small epsilon to avoid zero rows/cols (NMF requirement)
-    X_arr = X_arr + 1e-9
+    X_arr = X_arr + np.float32(1e-9)
 
     # ------------------------------------------------------------------
     # 7. Consensus bNMF
@@ -1253,18 +1273,39 @@ def main(
     coph_df.to_csv(os.path.join(out_dir, 'cophenetic_curve.csv'), index=False)
     plot_cophenetic_curve(coph_df, os.path.join(fig_dir, 'cophenetic_curve.png'))
 
-    for k in k_results:
-        C = k_results[k]['C']
-        plot_consensus_map(
-            C, k,
-            os.path.join(fig_dir, f'consensus_map_k{k}.png')
-        )
-
     # ------------------------------------------------------------------
-    # 8. Select optimal k and extract assignments
+    # 8. Select optimal k  (done here, before plotting, so we know which
+    #    k's W_list must be kept and which can be freed on the fly)
     # ------------------------------------------------------------------
     print(f"\n[8] Selecting optimal k ({k_select_method} method) ...")
     optimal_k = select_optimal_k(coph_df, method=k_select_method)
+
+    # Plot consensus maps by recomputing C one k at a time so we never hold
+    # more than one n×n matrix in memory at once.
+    # For large cohorts subsample for visualisation — the full n×n matrix is
+    # unreadable at n>10k and would be tens of GB (67k × 67k × 4 B ≈ 18 GB).
+    _rng = np.random.default_rng(42)
+    for k in sorted(k_results.keys()):
+        W_list_k = k_results[k]['W_list']
+        n_full = W_list_k[0].shape[0]
+        if n_full > MAX_CONSENSUS_PLOT_N:
+            idx = _rng.choice(n_full, MAX_CONSENSUS_PLOT_N, replace=False)
+            idx.sort()
+            W_list_plot = [W[idx] for W in W_list_k]
+            print(f"  Consensus map k={k}: subsampled {MAX_CONSENSUS_PLOT_N} "
+                  f"of {n_full} individuals for visualisation")
+        else:
+            W_list_plot = W_list_k
+        C_plot = _soft_consensus_matrix(W_list_plot)
+        plot_consensus_map(
+            C_plot, k,
+            os.path.join(fig_dir, f'consensus_map_k{k}.png')
+        )
+        del C_plot, W_list_plot
+        # Free W/H for non-optimal k immediately — no longer needed.
+        if k != optimal_k:
+            del k_results[k]['W_list'], k_results[k]['H_list']
+        gc.collect()
 
     assignments_df, H_df = get_consensus_cluster_assignments(
         k_results, optimal_k,
@@ -1376,12 +1417,12 @@ if __name__ == '__main__':
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
-        '--pheno_data', required=True,
-        help='Path to phenotype results directory (e.g. results/type2Diabetes/summedEpi)'
+      '--pheno_data', required=True,
+      help='Path to phenotype results directory (e.g. results/type2Diabetes/summedEpi)'
     )
     parser.add_argument(
-        '--clinical_file', required=True,
-        help='Path to clinical measures CSV (participant_environment.csv or similar)'
+      '--clinical_file', required=True,
+      help='Path to clinical measures CSV (participant_environment.csv or similar)'
     )
     parser.add_argument(
         '--mode', default='prs_scores',
@@ -1438,10 +1479,15 @@ if __name__ == '__main__':
     )
 
     args = parser.parse_args()
+    
+#   phenotype_name = 'type2Diabetes'
+#   pheno_data = f'/Users/kerimulterer/prsInteractive/results/{phenotype_name}/combinedAnalysis'
+#   clinical_file = '/Users/kerimulterer/prsInteractive/results/participant_environment.csv'
+#   important_features_file = f'/Users/kerimulterer/prsInteractive/results/{phenotype_name}/combinedAnalysis/scores/featureScoresReducedFinalModel.filtered.csv'
 
     pheno_data = args.pheno_data or os.environ.get('PHENO_DATA')
     if not pheno_data:
-        raise ValueError("Provide --pheno_data or set PHENO_DATA env var.")
+      raise ValueError("Provide --pheno_data or set PHENO_DATA env var.")
 
     main(
         pheno_data=pheno_data,
@@ -1458,3 +1504,19 @@ if __name__ == '__main__':
         cases_only=args.cases_only,
         max_iter=args.max_iter,
     )
+  
+# main(
+#   pheno_data=pheno_data,
+#   clinical_file=args.clinical_file,
+#   mode=args.mode,
+#   k_min=args.k_min,
+#   k_max=args.k_max,
+#   n_runs=args.n_runs,
+#   l1_ratio=args.l1_ratio,
+#   alpha_w=args.alpha_w,
+#   k_select_method=args.k_select_method,
+#   phenotype_name=args.phenotype_name,
+#   important_features_file=args.important_features_file,
+#   cases_only=args.cases_only,
+#   max_iter=args.max_iter,
+# )

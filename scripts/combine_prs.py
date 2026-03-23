@@ -226,7 +226,6 @@ def main(phenoPath):
 	#remove combined PRS from holdout if present
 	allFilesTemp = [f for f in allFilesTemp if 'combined' not in f]
 	
-	
 
 	for holdout in [False,True]:
 #	for holdout in [True]:
@@ -242,7 +241,8 @@ def main(phenoPath):
 			outputPrevalenceFile = f'{scoresPath}/combinedPrevalencePRSGroups.csv'
 			outputOddsRatioFile = f'{scoresPath}/combinedORPRSGroups.csv'
 			allFiles = [f for f in allFilesTemp if 'holdout' not in f]
-			
+		
+		print('reading from PRS files to combine : ',allFiles)
 		combinedDf,prsList = combine_prs_files(allFiles)
 		
 		
@@ -304,7 +304,7 @@ if __name__ == '__main__':
 	print(f"[PYTHON] Reading from: {pheno_data}")
 
 #	pheno = 'celiacDisease'
-#	pheno_data = f'/your/directory/prsInteractive/results/{pheno}/summedEpi'
+#	pheno_data = f'/to/directory/prsInteractive/results/{pheno}/summedEpi'
 		
 	if not pheno_data:
 		raise ValueError("You must provide a data pheno path via --pheno_data or set the PHENO_DATA environment variable.")

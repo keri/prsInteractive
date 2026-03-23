@@ -132,7 +132,7 @@ if __name__ == '__main__':
     print(f"[PYTHON] Reading from: {pheno_data}")
 #   
 #   pheno='type2Diabetes'
-#   pheno_data = f'/directory/path/prsInteractive/results/{pheno}/combinedAnalysis'
+#   pheno_data = f'/to/path/prsInteractive/results/{pheno}/combinedAnalysis'
     
     models_to_keep, filtered_data = filter_statistically_distinct_models(pheno_data, use_all=None)
     

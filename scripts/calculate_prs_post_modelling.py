@@ -75,9 +75,14 @@ def create_saturation_plots(df,featureScores,data_type,figurePath,prsPath):
 #   for data_type in ['main','epi']:
 #   if 'main' in data_type:
 #       n = 20
+        
+    nFeatures = featureScores[featureScores['coefs'] != 0].shape[0]
+    
 
     if 'all' in data_type:
         n=40
+    elif nFeatures < 40:
+        n = 1
     else:
         n = 20
 #   featureScores2 = featureScores[featureScores['model'] == data_type]
@@ -318,8 +323,8 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,test_combined_
         filteredFeatures = filteredFeatures[filteredFeatures['coefs'] != 0]
         
         
-#       for model in filteredFeatures['model'].unique().tolist() + ['covariate']:
-        for model in ['all','cardio']:
+        for model in filteredFeatures['model'].unique().tolist() + ['covariate']:
+#       for model in ['all','cardio']:
 #       for model in prs_models:
             if model == 'covariate':
                 prsFeatures = covarCoefs.copy()
@@ -345,13 +350,13 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,test_combined_
                 if holdout_str != 'holdout':
                     create_saturation_plots(mainEpiDf, prsFeatures, image_str, figurePath, prsPath)
                 #if model == 'all' then separate epi,main,epi+main,and cardio
-                if model == 'all':
-                    for sub_model in ['epi','main','epi+main','cardio']:
-                        subFeatures = filteredFeatures[filteredFeatures['model'] == sub_model]['feature'].tolist()
-                        sub_data = prsFeatures[prsFeatures['feature'].isin(subFeatures)]
-                        modelN = sub_data.shape[0]
-                        image_str = f'{model}.{modelN}{holdout_str}' 
-                        create_prs_direction(mainEpiDf,sub_data,f'{image_str}.{sub_model}.FromAll',figurePath,prsPath)
+#               if model == 'all':
+#                   for sub_model in ['epi','main','epi+main','cardio']:
+#                       subFeatures = filteredFeatures[filteredFeatures['model'] == sub_model]['feature'].tolist()
+#                       sub_data = prsFeatures[prsFeatures['feature'].isin(subFeatures)]
+#                       modelN = sub_data.shape[0]
+#                       image_str = f'{model}.{modelN}{holdout_str}' 
+#                       create_prs_direction(mainEpiDf,sub_data,f'{image_str}.{sub_model}.FromAll',figurePath,prsPath)
                         
 
 

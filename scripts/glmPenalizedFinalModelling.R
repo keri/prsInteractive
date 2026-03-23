@@ -1306,7 +1306,7 @@ dataset_list = list(
 # list('main',c(main_features,covariate_columns,hla_columns)),
 # list('epi',c(epi_features,covariate_columns,hla_columns)),
 # list('epi+main',c(main_features,epi_features,covariate_columns,hla_columns)),
-  list('cardio',c(env_genetic_features,covariate_columns)),
+# list('cardio',c(env_genetic_features,covariate_columns)),
 # list('all',c(env_genetic_features,main_features,epi_features,hla_columns,covariate_columns)),
 # list('env_main',c(env_main_features,covariate_columns)),
 # list('all+env_main',c(env_genetic_features,main_features,epi_features,env_main_features,hla_columns,covariate_columns)),
