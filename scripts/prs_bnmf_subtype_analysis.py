@@ -362,12 +362,14 @@ def impute_and_scale(df, imputer_strategy='median', n_neighbors=5,
     Column-type-aware scaling (detected from column-name prefix):
 
       gen_* (genomic features — dosage × beta coefficient)
-          Global p99 normalisation: all gen_ columns share one scale factor
-          (the 99th percentile of all non-zero gen_ values), so relative
-          magnitudes between variants and between individuals are preserved.
-          A SNP with beta=0.5 remains 5× more influential than beta=0.1;
-          dosage=2 stays twice dosage=1.  Negatives clipped to 0; values
-          >p99 clipped to 1 to handle rare outliers.
+          Per-column QuantileTransformer (uniform [0,1] by rank).
+          Each SNP contribution is ranked within the subgroup so the most
+          risk-increasing genotype maps to 1.0 and the most risk-reducing
+          (including negative/protective contributions) maps to 0.0.
+          This eliminates the sparsity collapse caused by clipping negatives
+          to 0: with p99-clipping, protective SNPs (negative weight) have
+          zero variance after clipping and are filtered out; positive-weight
+          SNPs with low MAF have 80%+ zeros and also collapse NMF.
 
       clin_* and all other columns (clinical measures, PRS anchors)
           scale_method='quantile' (default): QuantileTransformer maps each
@@ -400,17 +402,23 @@ def impute_and_scale(df, imputer_strategy='median', n_neighbors=5,
 
     result = pd.DataFrame(index=df.index, columns=keep_cols, dtype=float)
 
-    # ── Genomic: global p99 normalisation ──────────────────────────────────
+    # ── Genomic: per-column quantile normalisation ─────────────────────────
+    # Rank each SNP contribution within the subgroup → uniform [0, 1].
+    # Negatives (protective variants) are included in the ranking rather than
+    # clipped to 0; this removes the sparsity that causes NMF to collapse.
     if gen_cols:
-        gen_arr = df_imp[gen_cols].values.clip(min=0)   # negatives → 0
-        nonzero = gen_arr[gen_arr > 0]
-        p99 = float(np.percentile(nonzero, 99)) if len(nonzero) else 1.0
-        if p99 == 0:
-            p99 = 1.0
-        gen_arr = np.clip(gen_arr / p99, 0.0, 1.0)
-        result[gen_cols] = gen_arr
-        print(f"    Genomic scaling: global p99={p99:.4f} "
-              f"({len(gen_cols)} gen_ columns, negatives clipped to 0)")
+        n_q = min(1000, df_imp.shape[0])
+        qt_gen = QuantileTransformer(
+            output_distribution='uniform',
+            n_quantiles=n_q,
+            random_state=42,
+        )
+        result[gen_cols] = qt_gen.fit_transform(df_imp[gen_cols].values)
+        neg_frac = (df_imp[gen_cols].values < 0).mean()
+        print(f"    Genomic scaling: per-column quantile normalisation "
+              f"({len(gen_cols)} gen_ columns; "
+              f"{neg_frac*100:.1f}% of raw values were negative — "
+              f"now included in ranking)")
 
     # ── Clinical / PRS anchors: per-column quantile or minmax ──────────────
     if other_cols:

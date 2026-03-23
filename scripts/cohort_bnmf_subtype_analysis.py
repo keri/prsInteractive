@@ -557,21 +557,18 @@ def _find_model_key(cohort, prs_dict):
 
 def _filter_prs_dict_to_cohorts(prs_dict, cohorts):
     """
-    Keep only PRS model entries whose name corresponds to a valid cohort.
-    Drops covariates, all_*, all+env_combined, and any other model that does
-    not match a cohort name — mirroring the use_all filter in the clinical
-    comparison pipeline.
+    Keep only PRS model entries whose name EXACTLY matches a valid cohort
+    (case-insensitive).
+
+    Substring matching was deliberately removed: it caused composite models
+    such as 'epi+main_product' and 'epi+main_summed' to match the 'main'
+    cohort (because 'main' is a substring of those names), loading an extra
+    two models and triplicating every single SNP from the main cohort.
     """
-    filtered = {
-        k: v for k, v in prs_dict.items()
-        if any(
-            c.lower() == k.lower() or
-            c.lower() in k.lower() or
-            k.lower() in c.lower()
-            for c in cohorts
-        )
-    }
-    excluded = sorted(set(prs_dict.keys()) - set(filtered.keys()))
+    cohort_set = {c.lower() for c in cohorts}
+    filtered   = {k: v for k, v in prs_dict.items()
+                  if k.lower() in cohort_set}
+    excluded   = sorted(set(prs_dict.keys()) - set(filtered.keys()))
     if excluded:
         print(f"  Excluded non-cohort PRS models: {excluded}")
     return filtered
@@ -791,8 +788,19 @@ def plot_consensus_map(C, k, output_path, cohort):
 
 def plot_cluster_profile(profile_df, output_path, cohort, top_n=20):
     """
-    Heatmap of per-cluster median profiles (top N features by variance
-    across clusters).
+    Heatmap of per-cluster feature profiles.
+
+    After QuantileTransformer normalization all raw medians are ~0.5, so
+    raw medians are uninformative.  Instead we z-score each feature's
+    cluster medians across clusters (z = (median_k - mean_k) / std_k).
+    This shows which features are *relatively* higher or lower in each
+    cluster compared with the overall average, regardless of the absolute
+    scaled value.
+
+    Feature selection uses between-cluster variance of raw medians (computed
+    before z-scoring) so we pick the features that actually differ between
+    clusters.  Annotations show the z-score and raw median in brackets so
+    the reader can see both the direction and the absolute level.
     """
     if profile_df.empty:
         return
@@ -801,7 +809,7 @@ def plot_cluster_profile(profile_df, output_path, cohort, top_n=20):
     if not median_cols:
         return
 
-    # characterize_clusters() already uses 'cluster' as index; handle both cases
+    # Build raw-median matrix (clusters × features)
     if profile_df.index.name == 'cluster':
         profile_matrix = profile_df[median_cols].copy()
     elif 'cluster' in profile_df.columns:
@@ -810,19 +818,47 @@ def plot_cluster_profile(profile_df, output_path, cohort, top_n=20):
         profile_matrix = profile_df[median_cols].copy()
     profile_matrix.columns = [c.replace('_median', '') for c in median_cols]
 
+    # Select top features by between-cluster variance of raw medians
     if len(profile_matrix.columns) > top_n:
         top_feats = profile_matrix.var(axis=0).nlargest(top_n).index.tolist()
         profile_matrix = profile_matrix[top_feats]
 
-    fig_h = max(4, len(profile_matrix.columns) * 0.35)
-    fig_w = max(4, len(profile_matrix) * 1.5)
+    # Z-score each feature across clusters so all features are on the same
+    # scale and the plot shows relative enrichment / depletion per cluster.
+    feat_mean = profile_matrix.mean(axis=0)
+    feat_std  = profile_matrix.std(axis=0).replace(0, np.nan)
+    z_matrix  = (profile_matrix - feat_mean) / feat_std
+    z_matrix  = z_matrix.fillna(0)   # constant features → z=0 (not discriminating)
+
+    # Annotation: "z\n(raw)" per cell  e.g.  "+1.23\n(0.61)"
+    annot = pd.DataFrame(index=z_matrix.index, columns=z_matrix.columns, dtype=object)
+    for feat in z_matrix.columns:
+        for clust in z_matrix.index:
+            z   = z_matrix.loc[clust, feat]
+            raw = profile_matrix.loc[clust, feat]
+            annot.loc[clust, feat] = f'{z:+.2f}\n({raw:.2f})'
+
+    # Clip z for colormap symmetry (outliers can dominate otherwise)
+    z_clipped = z_matrix.clip(-3, 3)
+
+    fig_h = max(4, len(profile_matrix.columns) * 0.45)
+    fig_w = max(4, len(profile_matrix) * 1.8)
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
     sns.heatmap(
-        profile_matrix.T, cmap='RdBu_r', center=0,
-        ax=ax, annot=True, fmt='.2f', annot_kws={'size': 7},
-        linewidths=0.5, cbar_kws={'label': 'Median (scaled)'},
+        z_clipped.T,
+        cmap='RdBu_r', center=0, vmin=-3, vmax=3,
+        ax=ax,
+        annot=annot.T, fmt='',
+        annot_kws={'size': 6},
+        linewidths=0.5,
+        cbar_kws={'label': 'Z-score of cluster median (raw median in brackets)'},
     )
-    ax.set_title(f'Cluster Profiles (top {len(profile_matrix.columns)} features) — {cohort}')
+    ax.set_title(
+        f'Cluster Profiles — {cohort}\n'
+        f'(top {len(profile_matrix.columns)} features by between-cluster variance; '
+        f'colour = z-score across clusters)',
+        fontsize=9,
+    )
     ax.set_xlabel('Cluster')
     ax.set_ylabel('Feature')
     plt.tight_layout()
@@ -831,40 +867,79 @@ def plot_cluster_profile(profile_df, output_path, cohort, top_n=20):
 
 def plot_feature_loadings(H_df, output_path, cohort, top_n=20):
     """
-    Per-cluster horizontal bar charts of top feature loadings.
-    Clinical features are shown in red, genomic in blue.
+    Per-cluster horizontal bar charts of cluster-specific feature loadings.
+
+    Raw NMF H-matrix values measure absolute feature importance per cluster
+    but features shared across all clusters look equally uninformative even
+    if they are the dominant signal.  We z-score each feature's loading
+    across clusters (z = (H_k - mean_H) / std_H) so bars show how much
+    more (positive z, red) or less (negative z, blue) each feature loads in
+    this cluster relative to the cross-cluster average.
+
+    Top N features per cluster are selected by absolute z-score so features
+    that truly distinguish this cluster rise to the top.  Clinical features
+    are outlined with a darker border to distinguish them from genomic features
+    that share the same hue.
     """
     if H_df.empty:
         return
 
+    # Z-score each feature across clusters
+    feat_mean = H_df.mean(axis=0)
+    feat_std  = H_df.std(axis=0).replace(0, np.nan)
+    H_z = ((H_df - feat_mean) / feat_std).fillna(0)
+
     n_clusters = len(H_df)
     fig, axes = plt.subplots(
         1, n_clusters,
-        figsize=(n_clusters * 5, max(4, min(top_n * 0.35, 12))),
+        figsize=(n_clusters * 5, max(4, min(top_n * 0.38, 14))),
     )
     if n_clusters == 1:
         axes = [axes]
 
-    for ax, (cluster_label, row) in zip(axes, H_df.iterrows()):
-        top = row.nlargest(top_n)
-        colours = ['#d62728' if f.startswith('clin_') else '#1f77b4'
-                   for f in top.index]
-        labels  = [f.replace('clin_', 'C: ').replace('gen_', 'G: ')
-                   for f in top.index]
+    for ax, cluster_label in zip(axes, H_z.index):
+        z_row = H_z.loc[cluster_label]
+        # Top N by absolute z-score — features that most distinguish this cluster
+        top = z_row.abs().nlargest(top_n)
+        top_z = z_row[top.index]   # preserve sign
 
-        ax.barh(range(len(top)), top.values, color=colours, alpha=0.85)
-        ax.set_yticks(range(len(top)))
+        colours = []
+        for f in top_z.index:
+            is_clin = f.startswith('clin_')
+            if top_z[f] >= 0:
+                colours.append('#d62728' if is_clin else '#1f77b4')   # red / blue (enriched)
+            else:
+                colours.append('#f4a3a3' if is_clin else '#aec7e8')   # pale (depleted)
+
+        labels = [f.replace('clin_', 'C: ').replace('gen_', 'G: ')
+                  for f in top_z.index]
+
+        bars = ax.barh(range(len(top_z)), top_z.values, color=colours, alpha=0.88)
+        # Darker edge for clinical features
+        for bar, f in zip(bars, top_z.index):
+            if f.startswith('clin_'):
+                bar.set_edgecolor('#7f0000')
+                bar.set_linewidth(0.8)
+        ax.axvline(0, color='black', linewidth=0.6, linestyle='--')
+        ax.set_yticks(range(len(top_z)))
         ax.set_yticklabels(labels, fontsize=7)
         ax.invert_yaxis()
         ax.set_title(cluster_label, fontsize=9)
-        ax.set_xlabel('Loading')
+        ax.set_xlabel('Z-score of NMF loading')
 
     legend_handles = [
-        mpatches.Patch(facecolor='#d62728', label='Clinical'),
-        mpatches.Patch(facecolor='#1f77b4', label='Genomic'),
+        mpatches.Patch(facecolor='#d62728', edgecolor='#7f0000', linewidth=0.8,
+                       label='Clinical (enriched)'),
+        mpatches.Patch(facecolor='#f4a3a3', edgecolor='#7f0000', linewidth=0.8,
+                       label='Clinical (depleted)'),
+        mpatches.Patch(facecolor='#1f77b4', label='Genomic (enriched)'),
+        mpatches.Patch(facecolor='#aec7e8', label='Genomic (depleted)'),
     ]
-    axes[-1].legend(handles=legend_handles, loc='lower right', fontsize=8)
-    plt.suptitle(f'Top Feature Loadings — {cohort}', fontsize=11)
+    axes[-1].legend(handles=legend_handles, loc='lower right', fontsize=7)
+    plt.suptitle(
+        f'Cluster-specific Feature Loadings (z-scored across clusters) — {cohort}',
+        fontsize=10,
+    )
     plt.tight_layout()
     _save_fig(fig, output_path)
 
@@ -994,11 +1069,13 @@ def build_deduplicated_feature_matrix(
     #   b) Non-HLA SNPs that appear in ONLY ONE model — no ambiguity, kept
     #      as gen_{feat}.
     #
-    #   c) Non-HLA SNPs that appear in 2+ models — same locus but the
-    #      weighted contribution differs between product and summed models
-    #      (different coefficients → different biological interpretation).
-    #      These are renamed gen_{feat}_prod / gen_{feat}_sum / gen_{feat}_main
-    #      so downstream analysis can treat them as distinct features.
+    #   c) SNP pairs (two rs-IDs joined by '_') that appear in 2+ models —
+    #      same pair but different coefficients across product vs summed models.
+    #      These are renamed gen_{feat}_{cohort_suffix} using the full cohort
+    #      name, e.g. gen_rs123_rs456_epi_prod / gen_rs123_rs456_cardio_sum.
+    #      Single SNPs (no '_') should only appear in the 'main' model after
+    #      composite models (epi+main_*) are excluded by the cohort filter;
+    #      they receive no suffix → gen_rs826962.
     #
     # Because *.mixed.prs.csv files contain ALL genotyped individuals (not
     # just those high-risk in that model), every individual in all_iids has a
@@ -1007,13 +1084,16 @@ def build_deduplicated_feature_matrix(
     # ──────────────────────────────────────────────────────────────────────
 
     def _model_suffix(model_key: str) -> str:
-        """Return _prod, _sum, or _<model_key> for use in disambiguation."""
+        """Return the full cohort-qualified suffix, e.g. _epi_prod, _cardio_sum, _main.
+
+        Using the full cohort name avoids ambiguity: _prod alone could mean
+        epi_product or cardio_product.  We compress only the verbose trailing
+        words 'product'→'prod' and 'summed'→'sum' so the result is short but
+        still unambiguous (e.g. epi_product → _epi_prod, cardio_summed → _cardio_sum).
+        """
         mk = model_key.lower()
-        if 'product' in mk:
-            return '_prod'
-        if 'summed' in mk or mk.endswith('_sum'):
-            return '_sum'
-        return f'_{mk}'   # e.g. _main, _combined
+        mk = mk.replace('_product', '_prod').replace('_summed', '_sum')
+        return f'_{mk}'   # e.g. _epi_prod, _cardio_sum, _main
 
     # Build a lookup: feature_name → best z_score (for optional weighting)
     feat_z_scores: dict[str, float] = {}
@@ -1493,6 +1573,46 @@ def run_cohort_bnmf(
 
     print(f"\n  Consensus bNMF: {X.shape[0]:,} individuals × {X.shape[1]} features")
 
+    # ── PCA structure diagnostic ────────────────────────────────────────────
+    # Run a quick truncated PCA before NMF to assess intrinsic dimensionality.
+    # If PC1 explains >70-80% of variance the feature matrix is near rank-1
+    # and NMF will always collapse regardless of parameters.  The cumulative
+    # variance curve shows how many components are needed to capture the
+    # signal and gives an upper bound on meaningful k values for NMF.
+    try:
+        from sklearn.decomposition import TruncatedSVD
+        _n_pca = min(20, X.shape[1] - 1, X.shape[0] - 1)
+        # Centre X before SVD — QuantileTransformer gives each feature mean ~0.5,
+        # so uncentred SVD would have PC1 capture the mean direction (~0.5 for
+        # everyone) rather than actual variance between individuals.
+        _X_c = X - X.mean(axis=0)
+        _svd = TruncatedSVD(n_components=_n_pca, random_state=42)
+        _svd.fit(_X_c)
+        _ev = _svd.explained_variance_ratio_
+        _cumev = np.cumsum(_ev)
+        print(f"  PCA structure (top {_n_pca} components):")
+        print(f"    PC1={_ev[0]*100:.1f}%  PC2={_ev[1]*100:.1f}%  "
+              f"PC3={_ev[2]*100:.1f}%  PC4={_ev[3]*100:.1f}%  "
+              f"PC5={_ev[4]*100:.1f}%")
+        for thresh in (0.50, 0.70, 0.90):
+            n_needed = int(np.searchsorted(_cumev, thresh)) + 1
+            print(f"    Components to explain {thresh*100:.0f}% variance: {n_needed}")
+        if _ev[0] > 0.70:
+            print(f"    *** WARNING: PC1 explains {_ev[0]*100:.1f}% of variance — "
+                  f"feature matrix is near rank-1. NMF cluster separation will be "
+                  f"poor regardless of k or regularisation. Consider using only "
+                  f"clinical features or checking feature diversity.")
+        elif _ev[0] > 0.40:
+            print(f"    NOTE: PC1 explains {_ev[0]*100:.1f}% — moderate dominance. "
+                  f"NMF may find {min(k_max, n_needed)}-{min(k_max, n_needed+2)} "
+                  f"meaningful clusters.")
+        else:
+            print(f"    Good multi-dimensional structure detected — "
+                  f"NMF should find meaningful clusters.")
+        del _X_c, _svd, _ev, _cumev
+    except Exception as _pca_exc:
+        print(f"  [WARN] PCA diagnostic failed: {_pca_exc}")
+
     # Cap k_max to avoid degenerate factorisations
     k_max_eff = min(k_max, X.shape[0] // 5, X.shape[1] - 1)
     k_max_eff = max(k_max_eff, k_min)
@@ -1598,6 +1718,88 @@ def run_cohort_bnmf(
         'optimal_k':   optimal_k,
         'n':           len(assignments_df),
     }
+
+
+# ============================================================================
+# REPLOT FROM SAVED CSVs
+# ============================================================================
+
+def replot_figures_from_saved_csvs(pheno_data, top_n=20):
+    """
+    Regenerate cluster_profile.png and feature_loadings.png for every
+    result directory that already has the corresponding CSV files.
+
+    Scans both per-cohort directories:
+        {pheno_data}/scores/cohortBnmf/{cohort}/{population}/
+    and combined directories:
+        {pheno_data}/scores/combinedCohortBnmf_{population}/
+
+    No NMF is re-run — only plotting functions are called.
+    """
+    scores_root = os.path.join(pheno_data, 'scores')
+    figs_root   = os.path.join(pheno_data, 'figures')
+    n_replotted = 0
+
+    def _replot_dir(result_dir, fig_dir, cohort_label):
+        nonlocal n_replotted
+        profile_csv  = os.path.join(result_dir, 'cluster_profile.csv')
+        loadings_csv = os.path.join(result_dir, 'feature_loadings.csv')
+        os.makedirs(fig_dir, exist_ok=True)
+
+        if os.path.exists(profile_csv):
+            try:
+                profile_df = pd.read_csv(profile_csv, index_col='cluster')
+                plot_cluster_profile(
+                    profile_df,
+                    os.path.join(fig_dir, 'cluster_profile.png'),
+                    cohort_label,
+                    top_n=top_n,
+                )
+                n_replotted += 1
+            except Exception as exc:
+                print(f"  [WARN] cluster_profile replot failed for {cohort_label}: {exc}")
+
+        if os.path.exists(loadings_csv):
+            try:
+                H_df = pd.read_csv(loadings_csv, index_col=0)
+                plot_feature_loadings(
+                    H_df,
+                    os.path.join(fig_dir, 'feature_loadings.png'),
+                    cohort_label,
+                    top_n=top_n,
+                )
+                n_replotted += 1
+            except Exception as exc:
+                print(f"  [WARN] feature_loadings replot failed for {cohort_label}: {exc}")
+
+    # ── Per-cohort directories ───────────────────────────────────────────────
+    cohort_bnmf_root = os.path.join(scores_root, 'cohortBnmf')
+    if os.path.isdir(cohort_bnmf_root):
+        for cohort in sorted(os.listdir(cohort_bnmf_root)):
+            cohort_dir = os.path.join(cohort_bnmf_root, cohort)
+            if not os.path.isdir(cohort_dir):
+                continue
+            for population in sorted(os.listdir(cohort_dir)):
+                pop_dir = os.path.join(cohort_dir, population)
+                if not os.path.isdir(pop_dir):
+                    continue
+                fig_dir = os.path.join(figs_root, 'cohortBnmf', cohort, population)
+                label   = f'{cohort}/{population}'
+                print(f"  Replotting {label} ...")
+                _replot_dir(pop_dir, fig_dir, label)
+
+    # ── Combined directories ─────────────────────────────────────────────────
+    for entry in sorted(os.listdir(scores_root)):
+        if not entry.startswith('combinedCohortBnmf'):
+            continue
+        combined_dir = os.path.join(scores_root, entry)
+        if not os.path.isdir(combined_dir):
+            continue
+        fig_dir = os.path.join(figs_root, entry)
+        print(f"  Replotting {entry} ...")
+        _replot_dir(combined_dir, fig_dir, entry)
+
+    print(f"\nReplot complete — {n_replotted} figure(s) regenerated.")
 
 
 # ============================================================================
@@ -1824,6 +2026,284 @@ def run_all_cohorts(
     print(f"Figures  → {base_fig}/{{cohort}}/")
 
     return overview_df
+
+
+# ============================================================================
+# PCA STRUCTURE ANALYSIS
+# ============================================================================
+
+def run_pca_analysis(
+    pheno_data,
+    raw_features_file,
+    filter_strategy='tiered',
+    use_set='validation',
+    min_effect_size=0.0,
+    specificity_tier_max=3,
+    high_risk_threshold=HIGH_RISK_BIN_THRESHOLD,
+    low_control_threshold=LOW_CONTROL_BIN_THRESHOLD,
+    cohorts_to_run=None,
+    include_holdout_prs=True,
+    min_variance=0.005,
+    max_zero_fraction=0.80,
+    max_features=500,
+    include_prs_with_genomic=False,
+    population='high_risk',
+    include_raw_clinical=True,
+    scale_method='quantile',
+    n_pca_components=30,
+):
+    """
+    Build the same combined feature matrix used by run_combined_bnmf, scale
+    it identically, then run PCA to assess intrinsic dimensionality before
+    committing to NMF.
+
+    Outputs (scores/combinedPCA_{population}/)
+    -------------------------------------------
+    pca_scores.csv        — individual × PC coordinates (PC1..PCn)
+    pca_loadings.csv      — feature × PC component weights
+    pca_variance.csv      — explained variance ratio per PC + cumulative
+
+    Figures (figures/combinedPCA_{population}/)
+    --------------------------------------------
+    pca_scree.png         — per-PC explained variance + cumulative curve
+    pca_scatter_cohort.png — PC1 vs PC2 coloured by cohort membership
+    pca_scatter_prs.png   — PC1 vs PC2 coloured by combined PRS bin
+    pca_loadings.png      — top feature loadings for PC1–PC4
+    """
+    from sklearn.decomposition import TruncatedSVD
+
+    scores_path = os.path.join(pheno_data, 'scores')
+    pop_suffix  = f'_{population}' if population != 'both' else ''
+    base_output = os.path.join(scores_path,           f'combinedPCA{pop_suffix}')
+    base_fig    = os.path.join(pheno_data, 'figures', f'combinedPCA{pop_suffix}')
+    os.makedirs(base_output, exist_ok=True)
+    os.makedirs(base_fig,    exist_ok=True)
+
+    print("\n" + "=" * 60)
+    print("COMBINED PCA STRUCTURE ANALYSIS")
+    print("=" * 60)
+    print(f"  population : {population}")
+    print(f"  use_set    : {use_set}")
+
+    # ── Load shared data (identical to run_combined_bnmf) ─────────────────
+    print("\n[1] Loading feature definitions...")
+    genomic_df  = load_cohort_genomic_features(scores_path, filter_strategy)
+    clinical_df = load_cohort_clinical_features(scores_path, use_set)
+
+    print("\n[2] Loading individual-level data...")
+    prs_bins     = load_prs_bins(scores_path, use_set)
+    raw_clinical = load_raw_clinical_data(raw_features_file)
+    prs_dict     = load_all_prs_feature_files(
+        scores_path, include_holdout=include_holdout_prs, use_set=use_set)
+
+    bin_cols    = [c for c in prs_bins.columns
+                   if c.startswith('bin_') and 'combined' not in c]
+    all_cohorts = [c.replace('bin_', '') for c in bin_cols]
+    cohorts     = ([c for c in all_cohorts if c in cohorts_to_run]
+                   if cohorts_to_run else all_cohorts)
+    prs_dict    = _filter_prs_dict_to_cohorts(prs_dict, cohorts)
+    print(f"\n[3] Cohorts: {cohorts}")
+
+    # ── Build combined feature matrix ─────────────────────────────────────
+    print("\n[4] Building combined feature matrix...")
+    combined_matrix, _, _ = build_deduplicated_feature_matrix(
+        cohorts=cohorts,
+        prs_bins=prs_bins,
+        genomic_features_df=genomic_df,
+        clinical_features_df=clinical_df,
+        prs_dict=prs_dict,
+        raw_clinical_df=raw_clinical,
+        high_risk_threshold=high_risk_threshold,
+        low_control_threshold=low_control_threshold,
+        min_effect_size=min_effect_size,
+        specificity_tier_max=specificity_tier_max,
+        include_prs_with_genomic=include_prs_with_genomic,
+        population=population,
+        include_raw_clinical=include_raw_clinical,
+    )
+
+    if combined_matrix.empty:
+        print("  [ERROR] Combined feature matrix is empty. Aborting.")
+        return
+
+    print(f"\n[5] Scaling ({scale_method}) and filtering...")
+    X_df, _retained = bnmf_core.impute_and_scale(
+        combined_matrix, scale_method=scale_method)
+    X_df, _cols = _variance_sparsity_filter(
+        X_df, min_variance=min_variance,
+        max_zero_fraction=max_zero_fraction, max_features=max_features)
+    print(f"  Matrix for PCA: {X_df.shape[0]:,} individuals × {X_df.shape[1]} features")
+
+    # ── Cohort membership flags for colouring ─────────────────────────────
+    membership_flags = build_cohort_membership_flags(
+        prs_bins, cohorts, high_risk_threshold, low_control_threshold)
+
+    # Assign a primary cohort label per individual (first high-risk cohort found)
+    def _primary_cohort(iid):
+        if iid not in membership_flags.index:
+            return 'none'
+        row = membership_flags.loc[iid]
+        hr_cols = [c for c in row.index if c.startswith('is_high_risk_')]
+        for col in hr_cols:
+            if row[col]:
+                return col.replace('is_high_risk_', '')
+        lc_cols = [c for c in row.index if c.startswith('is_low_control_')]
+        for col in lc_cols:
+            if row[col]:
+                return col.replace('is_low_control_', '') + '_low'
+        return 'other'
+
+    cohort_labels = pd.Series(
+        [_primary_cohort(iid) for iid in X_df.index],
+        index=X_df.index, name='primary_cohort',
+    )
+    # Count how many cohorts each individual is high-risk in
+    hr_flag_cols = [c for c in membership_flags.columns
+                    if c.startswith('is_high_risk_')]
+    n_cohorts_hr = membership_flags.reindex(X_df.index)[hr_flag_cols].sum(axis=1).fillna(0)
+
+    # ── Run PCA (centred TruncatedSVD) ────────────────────────────────────
+    print("\n[6] Running PCA...")
+    X = X_df.values.astype(np.float32)
+    X_c = X - X.mean(axis=0)
+    n_components = min(n_pca_components, X.shape[1] - 1, X.shape[0] - 1)
+    svd = TruncatedSVD(n_components=n_components, random_state=42)
+    scores = svd.fit_transform(X_c)       # n_individuals × n_components
+    loadings = svd.components_            # n_components × n_features
+    ev  = svd.explained_variance_ratio_
+    cev = np.cumsum(ev)
+
+    print(f"  Explained variance:")
+    print(f"    PC1={ev[0]*100:.1f}%  PC2={ev[1]*100:.1f}%  "
+          f"PC3={ev[2]*100:.1f}%  PC4={ev[3]*100:.1f}%  PC5={ev[4]*100:.1f}%")
+    for thresh in (0.50, 0.70, 0.90):
+        n_needed = int(np.searchsorted(cev, thresh)) + 1
+        print(f"    PCs to explain {thresh*100:.0f}%: {n_needed}")
+    if ev[0] > 0.50:
+        print(f"  *** PC1 explains {ev[0]*100:.1f}% — strong single dominant direction. "
+              f"NMF cluster separation will be limited.")
+    elif ev[0] > 0.25:
+        print(f"  NOTE: PC1 explains {ev[0]*100:.1f}% — moderate. Check scatter plots "
+              f"for visible sub-clusters.")
+    else:
+        print(f"  Good multi-dimensional structure — NMF should find meaningful clusters.")
+
+    # ── Save CSVs ──────────────────────────────────────────────────────────
+    pc_cols = [f'PC{i+1}' for i in range(n_components)]
+    scores_df = pd.DataFrame(scores, index=X_df.index, columns=pc_cols)
+    scores_df['primary_cohort'] = cohort_labels
+    scores_df['n_cohorts_high_risk'] = n_cohorts_hr
+    scores_df.to_csv(os.path.join(base_output, 'pca_scores.csv'))
+
+    loadings_df = pd.DataFrame(loadings, index=pc_cols, columns=X_df.columns)
+    loadings_df.to_csv(os.path.join(base_output, 'pca_loadings.csv'))
+
+    variance_df = pd.DataFrame({
+        'PC': pc_cols,
+        'explained_variance_ratio': ev,
+        'cumulative_variance': cev,
+    })
+    variance_df.to_csv(os.path.join(base_output, 'pca_variance.csv'), index=False)
+    print(f"  CSVs → {base_output}")
+
+    # ── Figure 1: Scree + cumulative variance ─────────────────────────────
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
+    pc_nums = list(range(1, n_components + 1))
+
+    axes[0].bar(pc_nums, ev * 100, color='#1f77b4', alpha=0.8)
+    axes[0].set_xlabel('Principal Component')
+    axes[0].set_ylabel('Explained variance (%)')
+    axes[0].set_title('Per-PC Explained Variance')
+    axes[0].axhline(ev[0] * 100, color='red', linestyle='--', linewidth=0.8, alpha=0.5)
+
+    axes[1].plot(pc_nums, cev * 100, marker='o', color='#1f77b4',
+                 linewidth=2, markersize=4)
+    for thresh in (50, 70, 90):
+        n_needed = int(np.searchsorted(cev, thresh / 100)) + 1
+        axes[1].axhline(thresh, color='grey', linestyle=':', linewidth=0.8)
+        axes[1].annotate(f'{thresh}% @ PC{n_needed}',
+                         xy=(n_needed, thresh), xytext=(4, 2),
+                         textcoords='offset points', fontsize=7, color='grey')
+    axes[1].set_xlabel('Number of Components')
+    axes[1].set_ylabel('Cumulative variance (%)')
+    axes[1].set_title('Cumulative Explained Variance')
+    axes[1].set_ylim(0, 105)
+
+    plt.suptitle(f'PCA Structure — combined {population} ({X_df.shape[0]:,} individuals × '
+                 f'{X_df.shape[1]} features)', fontsize=10)
+    plt.tight_layout()
+    _save_fig(fig, os.path.join(base_fig, 'pca_scree.png'))
+
+    # ── Figure 2: PC1 vs PC2 coloured by cohort ───────────────────────────
+    unique_cohorts = sorted(cohort_labels.unique())
+    palette = plt.cm.get_cmap('tab10', len(unique_cohorts))
+    colour_map = {c: palette(i) for i, c in enumerate(unique_cohorts)}
+
+    fig, ax = plt.subplots(figsize=(9, 7))
+    for cohort_name in unique_cohorts:
+        mask = cohort_labels == cohort_name
+        ax.scatter(
+            scores[mask, 0], scores[mask, 1],
+            c=[colour_map[cohort_name]], label=cohort_name,
+            alpha=0.4, s=8, linewidths=0,
+        )
+    ax.set_xlabel(f'PC1  ({ev[0]*100:.1f}%)')
+    ax.set_ylabel(f'PC2  ({ev[1]*100:.1f}%)')
+    ax.set_title(f'PC1 vs PC2 — coloured by primary cohort\n'
+                 f'({population}, {X_df.shape[0]:,} individuals)')
+    ax.legend(fontsize=7, markerscale=3, loc='best')
+    plt.tight_layout()
+    _save_fig(fig, os.path.join(base_fig, 'pca_scatter_cohort.png'))
+
+    # ── Figure 3: PC1 vs PC2 coloured by number of cohorts (high-risk) ────
+    fig, ax = plt.subplots(figsize=(8, 6))
+    sc = ax.scatter(
+        scores[:, 0], scores[:, 1],
+        c=n_cohorts_hr.values, cmap='viridis',
+        alpha=0.4, s=8, linewidths=0,
+    )
+    plt.colorbar(sc, ax=ax, label='# cohorts individual is high-risk in')
+    ax.set_xlabel(f'PC1  ({ev[0]*100:.1f}%)')
+    ax.set_ylabel(f'PC2  ({ev[1]*100:.1f}%)')
+    ax.set_title(f'PC1 vs PC2 — coloured by multi-cohort high-risk membership\n'
+                 f'({population}, {X_df.shape[0]:,} individuals)')
+    plt.tight_layout()
+    _save_fig(fig, os.path.join(base_fig, 'pca_scatter_ncohorts.png'))
+
+    # ── Figure 4: Top feature loadings for PC1–PC4 ────────────────────────
+    n_show   = min(4, n_components)
+    top_n_ft = 20
+    fig, axes = plt.subplots(1, n_show, figsize=(n_show * 5, 7))
+    if n_show == 1:
+        axes = [axes]
+    for i, ax in enumerate(axes[:n_show]):
+        pc_load = pd.Series(loadings[i], index=X_df.columns)
+        top_pos = pc_load.nlargest(top_n_ft // 2)
+        top_neg = pc_load.nsmallest(top_n_ft // 2)
+        top     = pd.concat([top_pos, top_neg]).sort_values()
+        colours = ['#d62728' if f.startswith('clin_') else '#1f77b4'
+                   for f in top.index]
+        labels  = [f.replace('clin_', 'C: ').replace('gen_', 'G: ')
+                   for f in top.index]
+        ax.barh(range(len(top)), top.values, color=colours, alpha=0.85)
+        ax.axvline(0, color='black', linewidth=0.6, linestyle='--')
+        ax.set_yticks(range(len(top)))
+        ax.set_yticklabels(labels, fontsize=6)
+        ax.set_title(f'PC{i+1}  ({ev[i]*100:.1f}%)', fontsize=9)
+        ax.set_xlabel('Loading')
+    legend_handles = [
+        mpatches.Patch(facecolor='#d62728', label='Clinical'),
+        mpatches.Patch(facecolor='#1f77b4', label='Genomic'),
+    ]
+    axes[-1].legend(handles=legend_handles, fontsize=7, loc='lower right')
+    plt.suptitle(f'Top Feature Loadings per PC — combined {population}', fontsize=10)
+    plt.tight_layout()
+    _save_fig(fig, os.path.join(base_fig, 'pca_loadings.png'))
+
+    print(f"\n  Figures → {base_fig}")
+    print("\n" + "=" * 60)
+    print("PCA COMPLETE")
+    print("=" * 60)
 
 
 # ============================================================================
@@ -2209,14 +2689,21 @@ if __name__ == '__main__':
     # ── Analysis mode ──────────────────────────────────────────────────────
     parser.add_argument(
         "--mode", default='both',
-        choices=['per_cohort', 'combined', 'both'],
+        choices=['per_cohort', 'combined', 'both', 'pca'],
         help=(
             "Analysis mode (default: both):\n"
             "  per_cohort — run bNMF separately within each cohort\n"
-            "  combined   — run a single bNMF on the union of all cohorts,\n"
-            "               producing comparable clusters + pathway outputs\n"
-            "  both       — run per-cohort then combined"
+            "  combined   — run a single bNMF on the union of all cohorts\n"
+            "  both       — run per-cohort then combined\n"
+            "  pca        — build combined feature matrix and run PCA only;\n"
+            "               no NMF. Assesses intrinsic dimensionality before\n"
+            "               committing to NMF. Outputs scree plot, PC scatter\n"
+            "               coloured by cohort, and top feature loadings per PC."
         ),
+    )
+    parser.add_argument(
+        "--n_pca_components", type=int, default=30,
+        help="Number of PCA components to compute in --mode pca (default: 30)",
     )
     parser.add_argument(
         "--population", default='both',
@@ -2275,6 +2762,21 @@ if __name__ == '__main__':
         help="Cap total features by variance before NMF (default: 500)",
     )
 
+    parser.add_argument(
+        "--figures_only", action='store_true',
+        help=(
+            "Skip NMF entirely — reload saved cluster_profile.csv and "
+            "feature_loadings.csv from existing result directories and "
+            "regenerate only the PNG figures. Useful for updating plot "
+            "styles without re-running the full analysis. "
+            "Only --pheno_data is required in this mode."
+        ),
+    )
+    parser.add_argument(
+        "--top_n_features", type=int, default=20,
+        help="Number of top features to show in cluster profile and loadings plots (default: 20)",
+    )
+
     args = parser.parse_args()
 
     pheno_data        = args.pheno_data        or os.environ.get("PHENO_DATA")
@@ -2282,6 +2784,15 @@ if __name__ == '__main__':
 
     if not pheno_data:
         raise ValueError("Provide --pheno_data or set the PHENO_DATA env var")
+
+    # ── Figures-only shortcut ────────────────────────────────────────────────
+    if args.figures_only:
+        print("=" * 60)
+        print("REPLOT FIGURES FROM SAVED CSVs")
+        print("=" * 60)
+        replot_figures_from_saved_csvs(pheno_data, top_n=args.top_n_features)
+        raise SystemExit(0)
+
     if not raw_features_file:
         raise ValueError("Provide --raw_features_file or set the RAW_FEATURES_FILE env var")
 
@@ -2310,13 +2821,35 @@ if __name__ == '__main__':
         scale_method=args.scale_method,
     )
 
-    if args.mode in ('per_cohort', 'both'):
-        run_all_cohorts(**shared_kwargs, population=args.population)
-
-    if args.mode in ('combined', 'both'):
-        run_combined_bnmf(
-            **shared_kwargs,
-            weight_features=args.weight_features,
+    if args.mode == 'pca':
+        run_pca_analysis(
+            pheno_data=pheno_data,
+            raw_features_file=raw_features_file,
+            filter_strategy=args.filter_strategy,
+            use_set=args.use_set,
+            min_effect_size=args.min_effect_size,
+            specificity_tier_max=args.specificity_tier_max,
+            high_risk_threshold=args.high_risk_threshold,
+            low_control_threshold=args.low_control_threshold,
+            cohorts_to_run=args.cohorts,
+            include_holdout_prs=not args.no_holdout_prs,
+            min_variance=args.min_variance,
+            max_zero_fraction=args.max_zero_fraction,
+            max_features=args.max_features,
             include_prs_with_genomic=args.include_prs_with_genomic,
             population=args.population,
+            include_raw_clinical=not args.no_raw_clinical,
+            scale_method=args.scale_method,
+            n_pca_components=args.n_pca_components,
         )
+    else:
+        if args.mode in ('per_cohort', 'both'):
+            run_all_cohorts(**shared_kwargs, population=args.population)
+
+        if args.mode in ('combined', 'both'):
+            run_combined_bnmf(
+                **shared_kwargs,
+                weight_features=args.weight_features,
+                include_prs_with_genomic=args.include_prs_with_genomic,
+                population=args.population,
+            )
