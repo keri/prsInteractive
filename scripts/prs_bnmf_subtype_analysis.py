@@ -345,15 +345,23 @@ def impute_and_scale(df, imputer_strategy='median', n_neighbors=5,
     Impute missing values (median) then scale to [0, 1] for NMF.
     Columns with >80% missing are dropped before imputation.
 
-    scale_method : 'quantile' (default) or 'minmax'
-        'quantile'  — QuantileTransformer(output_distribution='uniform').
-                      Maps each feature to a uniform [0,1] distribution by
-                      rank, removing the shared "average individual" direction
-                      that dominates MinMaxScaler for homogeneous subgroups.
-                      This breaks the near-rank-1 structure that causes NMF
-                      cluster collapse when the cohort is clinically similar.
-        'minmax'    — MinMaxScaler; preserves the raw value distribution but
-                      amplifies the correlated mean direction.
+    Column-type-aware scaling (detected from column-name prefix):
+
+      gen_* (genomic features — dosage × beta coefficient)
+          Global p99 normalisation: all gen_ columns share one scale factor
+          (the 99th percentile of all non-zero gen_ values), so relative
+          magnitudes between variants and between individuals are preserved.
+          A SNP with beta=0.5 remains 5× more influential than beta=0.1;
+          dosage=2 stays twice dosage=1.  Negatives clipped to 0; values
+          >p99 clipped to 1 to handle rare outliers.
+
+      clin_* and all other columns (clinical measures, PRS anchors)
+          scale_method='quantile' (default): QuantileTransformer maps each
+          feature to uniform [0,1] by rank, removing the shared "average
+          individual" direction that dominates MinMaxScaler in homogeneous
+          subgroups and causes NMF cluster collapse.
+          scale_method='minmax': MinMaxScaler; preserves raw distributions
+          but amplifies correlated features.
 
     Returns
     -------
@@ -369,21 +377,42 @@ def impute_and_scale(df, imputer_strategy='median', n_neighbors=5,
     df = df[keep_cols]
 
     imputer = SimpleImputer(strategy=imputer_strategy)
-    arr = imputer.fit_transform(df.values)
+    arr_imp = imputer.fit_transform(df.values)
+    df_imp  = pd.DataFrame(arr_imp, index=df.index, columns=keep_cols)
 
-    if scale_method == 'quantile':
-        # n_quantiles capped at n_samples to avoid sklearn warning
-        n_q = min(1000, arr.shape[0])
-        scaler = QuantileTransformer(
-            output_distribution='uniform',
-            n_quantiles=n_q,
-            random_state=42,
-        )
-    else:
-        scaler = MinMaxScaler()
+    # ── Split columns by type ───────────────────────────────────────────────
+    gen_cols   = [c for c in keep_cols if c.startswith('gen_')]
+    other_cols = [c for c in keep_cols if not c.startswith('gen_')]
 
-    arr = scaler.fit_transform(arr)
-    return pd.DataFrame(arr, index=df.index, columns=keep_cols), keep_cols
+    result = pd.DataFrame(index=df.index, columns=keep_cols, dtype=float)
+
+    # ── Genomic: global p99 normalisation ──────────────────────────────────
+    if gen_cols:
+        gen_arr = df_imp[gen_cols].values.clip(min=0)   # negatives → 0
+        nonzero = gen_arr[gen_arr > 0]
+        p99 = float(np.percentile(nonzero, 99)) if len(nonzero) else 1.0
+        if p99 == 0:
+            p99 = 1.0
+        gen_arr = np.clip(gen_arr / p99, 0.0, 1.0)
+        result[gen_cols] = gen_arr
+        print(f"    Genomic scaling: global p99={p99:.4f} "
+              f"({len(gen_cols)} gen_ columns, negatives clipped to 0)")
+
+    # ── Clinical / PRS anchors: per-column quantile or minmax ──────────────
+    if other_cols:
+        other_arr = df_imp[other_cols].values
+        if scale_method == 'quantile':
+            n_q = min(1000, other_arr.shape[0])
+            scaler = QuantileTransformer(
+                output_distribution='uniform',
+                n_quantiles=n_q,
+                random_state=42,
+            )
+        else:
+            scaler = MinMaxScaler()
+        result[other_cols] = scaler.fit_transform(other_arr)
+
+    return result, keep_cols
 
 
 # ============================================================================
