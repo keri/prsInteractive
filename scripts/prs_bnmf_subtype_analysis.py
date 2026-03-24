@@ -596,14 +596,27 @@ def _cophenetic_correlation(C):
 
 def _pca_feature_selection(X_df, n_pcs=20, top_per_pc=5):
     """
-    Select features that load most strongly on the top PCs.
+    Select features proportional to each PC's explained variance ratio.
 
-    For each of the top n_pcs principal components, takes the top_per_pc
-    features by absolute loading. Returns the union across all PCs
-    (deduplicated), preserving column order from X_df.
+    Instead of a fixed top_per_pc allocation for every PC, the number of
+    features drawn from PC_i is weighted by its share of the total explained
+    variance across the n_pcs components:
 
-    This ensures selected features span different axes of variation rather
-    than clustering around a single dominant direction (variance-ranking flaw).
+        n_i = max(1, round(evr[i] / sum(evr) * total_budget))
+
+    where total_budget = n_pcs * top_per_pc.
+
+    Example with top_per_pc=5, n_pcs=10, total_budget=50:
+        PC1 explains 20% of the n_pcs variance  →  ~10 features
+        PC5 explains  8%                         →   ~4 features
+        PC10 explains 2%                         →   ~1 feature
+
+    High-variance PCs represent stronger biological signals and contribute
+    more features; low-variance PCs contribute fewer but are still
+    represented so rare axes of variation are not discarded entirely.
+
+    Returns X_df restricted to the deduplicated union of selected features,
+    preserving original column order.
     """
     from sklearn.decomposition import TruncatedSVD
     X = X_df.values.astype(np.float32)
@@ -611,16 +624,33 @@ def _pca_feature_selection(X_df, n_pcs=20, top_per_pc=5):
     n_comp = min(n_pcs, X.shape[1] - 1, X.shape[0] - 1)
     if n_comp < 1:
         return X_df
+
     svd = TruncatedSVD(n_components=n_comp, random_state=42)
     svd.fit(X_centered)
-    selected = set()
+
+    evr          = svd.explained_variance_ratio_   # shape (n_comp,)
+    total_evr    = evr.sum()
+    total_budget = n_comp * top_per_pc
+
+    selected  = set()
+    alloc_log = []
     for i in range(n_comp):
-        top_idx = np.argsort(np.abs(svd.components_[i]))[-top_per_pc:]
+        n_for_pc = max(1, round(evr[i] / total_evr * total_budget))
+        top_idx  = np.argsort(np.abs(svd.components_[i]))[-n_for_pc:]
         selected.update(top_idx.tolist())
+        alloc_log.append((i + 1, evr[i] * 100, n_for_pc))
+
     # Preserve original column order
     kept = [X_df.columns[i] for i in sorted(selected)]
+
+    # Print per-PC allocation summary (top 5) so the user can audit
+    summary = '  '.join(f'PC{pc}:{pct:.1f}%→{n}f'
+                        for pc, pct, n in alloc_log[:5])
+    if n_comp > 5:
+        summary += f'  … (+{n_comp - 5} more PCs)'
     print(f"    PC feature selection: {len(kept)} features selected "
-          f"(top {top_per_pc} per PC × {n_comp} PCs, deduplicated)")
+          f"(budget={total_budget}, proportional to variance)")
+    print(f"      {summary}")
     return X_df[kept]
 
 
