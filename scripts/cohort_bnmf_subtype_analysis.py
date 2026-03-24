@@ -591,6 +591,7 @@ def build_cohort_feature_matrix(
     min_effect_size=0.0,
     specificity_tier_max=3,
     include_raw_clinical=True,
+    include_clinical=True,
 ):
     """
     Build the feature matrix for bNMF for a single cohort.
@@ -629,7 +630,7 @@ def build_cohort_feature_matrix(
     # ------------------------------------------------------------------
     # 1. Clinical features
     # ------------------------------------------------------------------
-    if not clinical_features_df.empty and 'cohort' in clinical_features_df.columns:
+    if include_clinical and not clinical_features_df.empty and 'cohort' in clinical_features_df.columns:
         cohort_clin = clinical_features_df[
             clinical_features_df['cohort'] == cohort
         ].copy()
@@ -692,7 +693,7 @@ def build_cohort_feature_matrix(
     #    Clinical features have real values for essentially all individuals
     #    and break the rank-1 sparsity pattern of the genomic-only matrix.
     # ------------------------------------------------------------------
-    if include_raw_clinical and raw_clinical_df is not None and not raw_clinical_df.empty:
+    if include_clinical and include_raw_clinical and raw_clinical_df is not None and not raw_clinical_df.empty:
         already_clin = {c[len('clin_'):]
                         for frm in frames
                         for c in frm.columns if c.startswith('clin_')}
@@ -1873,6 +1874,7 @@ def run_all_cohorts(
     max_zero_fraction=0.80,
     max_features=1000,
     include_raw_clinical=True,
+    genomic_only=False,
     scale_method='quantile',
     feature_select_method='variance',
     n_pcs_for_features=20,
@@ -1999,6 +2001,7 @@ def run_all_cohorts(
                 min_effect_size=min_effect_size,
                 specificity_tier_max=specificity_tier_max,
                 include_raw_clinical=include_raw_clinical,
+                include_clinical=not genomic_only,
             )
 
             if feature_matrix.empty or feature_matrix.shape[1] < 2:
@@ -3146,6 +3149,7 @@ if __name__ == '__main__':
         max_zero_fraction=args.max_zero_fraction,
         max_features=args.max_features,
         include_raw_clinical=not args.no_raw_clinical,
+        genomic_only=args.genomic_only,
         scale_method=args.scale_method,
         feature_select_method=args.feature_select_method,
         n_pcs_for_features=args.n_pcs_for_features,
