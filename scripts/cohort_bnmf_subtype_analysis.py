@@ -3200,7 +3200,6 @@ if __name__ == '__main__':
                         'include_prs_with_genomic': args.include_prs_with_genomic,
                         'population': args.population,
                         'clinical_only': args.clinical_only,
-                        'genomic_only': args.genomic_only,
                         'per_cohort_features': (per_cohort_selected
                                                 if args.mode == 'both' else None),
                     },
@@ -3213,7 +3212,6 @@ if __name__ == '__main__':
                     include_prs_with_genomic=args.include_prs_with_genomic,
                     population=args.population,
                     clinical_only=args.clinical_only,
-                    genomic_only=args.genomic_only,
                     per_cohort_features=(per_cohort_selected
                                          if args.mode == 'both' else None),
                 )
