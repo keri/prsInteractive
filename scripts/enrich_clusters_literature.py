@@ -203,6 +203,8 @@ class ZoteroCorpus:
                 MAX(CASE WHEN f.fieldName = 'title'        THEN idv.value END) AS title,
                 MAX(CASE WHEN f.fieldName = 'abstractNote' THEN idv.value END) AS abstract,
                 MAX(CASE WHEN f.fieldName = 'DOI'          THEN idv.value END) AS doi,
+                MAX(CASE WHEN f.fieldName = 'PMID'         THEN idv.value END) AS pmid_field,
+                MAX(CASE WHEN f.fieldName = 'PMCID'        THEN idv.value END) AS pmcid_field,
                 MAX(CASE WHEN f.fieldName = 'extra'        THEN idv.value END) AS extra,
                 MAX(CASE WHEN f.fieldName = 'url'          THEN idv.value END) AS url
             FROM items i
@@ -322,76 +324,109 @@ class ZoteroCorpus:
 
     @staticmethod
     def _fetch_pmc_fulltext(pmid: str, api_key: str | None = None,
-                             cache: dict | None = None) -> str:
+                             cache: dict | None = None,
+                             doi: str = '',
+                             pmcid: str = '') -> str:
         """
-        Fetch full text from PubMed Central for a given PMID.
+        Fetch full text from PubMed Central given any combination of identifiers.
 
-        Pipeline
-        --------
-        1. elink — convert PMID → PMCID (confirms OA full text exists in PMC)
-        2. efetch — download full-text XML for the PMCID
-        3. Parse body text, strip XML tags
+        Resolution order (first that yields a PMCID wins):
+        A. pmcid supplied directly — skip lookup entirely (fastest)
+        B. pmid supplied  → elink (PMID→PMCID) via E-utilities
+        C. doi supplied   → idconv API (DOI→PMCID) — most reliable for papers
+           added to Zotero via DOI rather than PubMed import
+        Then:
+        D. efetch (PMCID → full-text XML)
+        E. Parse body text, strip XML tags
 
         Returns plain text or '' if the paper is not in PMC / not open access.
         Respects NCBI rate limits (10 req/s with key, 3 req/s without).
         """
-        if not pmid:
+        if not pmid and not doi and not pmcid:
             return ''
 
-        cache_key = f'pmc_{pmid}'
+        cache_key = f'pmc_{pmcid or pmid or doi}'
         if cache is not None and cache_key in cache:
             return cache[cache_key]
 
         _headers = {'User-Agent': 'ZoteroCorpus/1.0 (research; contact via GitHub)'}
         _base    = {'api_key': api_key} if api_key else {}
         _sleep   = 0.12 if api_key else 0.4
+        resolved_pmcid = pmcid   # may already be set
 
-        # ── Step 1: PMID → PMCID ──────────────────────────────────────────
-        try:
-            r = requests.get(
-                f'{NCBI_BASE}/elink.fcgi',
-                params={**_base, 'dbfrom': 'pubmed', 'db': 'pmc',
-                        'id': pmid, 'retmode': 'json'},
-                headers=_headers, timeout=15,
-            )
-            time.sleep(_sleep)
-            if r.status_code != 200:
-                return ''
-            data = r.json()
-            pmcids: list[str] = []
-            for ls in data.get('linksets', []):
-                for ld in ls.get('linksetdbs', []):
-                    if ld.get('dbto') == 'pmc':
-                        pmcids.extend(str(x) for x in ld.get('links', []))
-            if not pmcids:
-                if cache is not None:
-                    cache[cache_key] = ''
-                return ''
-        except Exception:
+        # ── Path A: direct PMCID — no lookup needed ────────────────────────
+        # (resolved_pmcid already set above)
+
+        # ── Path B: PMID → PMCID via elink ────────────────────────────────
+        if pmid and not resolved_pmcid:
+            try:
+                r = requests.get(
+                    f'{NCBI_BASE}/elink.fcgi',
+                    params={**_base, 'dbfrom': 'pubmed', 'db': 'pmc',
+                            'id': pmid, 'retmode': 'json'},
+                    headers=_headers, timeout=15,
+                )
+                time.sleep(_sleep)
+                if r.status_code == 200:
+                    data = r.json()
+                    for ls in data.get('linksets', []):
+                        for ld in ls.get('linksetdbs', []):
+                            if ld.get('dbto') == 'pmc':
+                                links = ld.get('links', [])
+                                if links:
+                                    resolved_pmcid = str(links[0])
+                                    break
+            except Exception:
+                pass
+
+        # ── Path C: DOI → PMCID via idconv ────────────────────────────────
+        if doi and not resolved_pmcid:
+            try:
+                r = requests.get(
+                    'https://www.ncbi.nlm.nih.gov/pmc/utils/idconv/v1.0/',
+                    params={'ids': doi, 'format': 'json',
+                            'tool': 'ZoteroCorpus', 'email': 'research@github'},
+                    headers=_headers, timeout=15,
+                )
+                time.sleep(_sleep)
+                if r.status_code == 200:
+                    data = r.json()
+                    for rec in data.get('records', []):
+                        if rec.get('pmcid'):
+                            resolved_pmcid = rec['pmcid']  # e.g. 'PMC1234567'
+                            break
+            except Exception:
+                pass
+
+        if not resolved_pmcid:
+            if cache is not None:
+                cache[cache_key] = ''
             return ''
 
-        # ── Step 2: fetch full-text XML ────────────────────────────────────
+        # ── Fetch full-text XML ────────────────────────────────────────────
         try:
             r = requests.get(
                 f'{NCBI_BASE}/efetch.fcgi',
-                params={**_base, 'db': 'pmc', 'id': pmcids[0],
+                params={**_base, 'db': 'pmc', 'id': resolved_pmcid,
                         'rettype': 'full', 'retmode': 'xml'},
                 headers=_headers, timeout=45,
             )
             time.sleep(_sleep)
             if r.status_code != 200:
+                if cache is not None:
+                    cache[cache_key] = ''
                 return ''
             xml = r.text
         except Exception:
             return ''
 
-        # ── Step 3: extract body text ──────────────────────────────────────
+        # ── Extract body text ──────────────────────────────────────────────
         body = re.search(r'<body[^>]*>(.*?)</body>', xml, re.DOTALL)
         raw  = body.group(1) if body else xml
         # Remove front/back matter if body tag absent
         raw  = re.sub(r'<(?:front|back)>.*?</(?:front|back)>', '', raw,
                       flags=re.DOTALL)
-        text = re.sub(r'<[^>]+>', ' ', raw)          # strip tags
+        text = re.sub(r'<[^>]+>', ' ', raw)
         text = re.sub(r'\s+', ' ', text).strip()
 
         if cache is not None:
@@ -523,8 +558,14 @@ class ZoteroCorpus:
         abs_only: list[str] = []   # keys of papers that ended up abstract-only
 
         for p in papers:
-            pmid     = self._extract_pmid(p.get('extra') or '',
-                                          p.get('url') or '')
+            # Prefer dedicated Zotero fields; fall back to parsing extra/url
+            pmid     = (p.get('pmid_field') or '').strip() or \
+                       self._extract_pmid(p.get('extra') or '', p.get('url') or '')
+            pmcid    = (p.get('pmcid_field') or '').strip()
+            # Normalise PMCID: some Zotero entries store 'PMC1234567', efetch
+            # wants just the numeric part (or the full PMC-prefixed form is fine
+            # for idconv; efetch prefers numeric, but PMC-prefixed also works).
+            # Keep as-is — efetch accepts both 'PMC1234567' and '1234567'.
             doi      = self._extract_doi(p.get('doi') or '',
                                          p.get('extra') or '',
                                          p.get('url') or '')
@@ -541,6 +582,7 @@ class ZoteroCorpus:
             self.papers[key] = {
                 'itemID':       p['itemID'],
                 'pmid':         pmid,
+                'pmcid':        pmcid,
                 'doi':          doi,
                 'title':        p.get('title') or '',
                 'abstract':     p.get('abstract') or '',
@@ -556,26 +598,42 @@ class ZoteroCorpus:
         n_pmc = 0
         n_uw  = 0
 
+        # Diagnostic: show identifier coverage before attempting fetches
+        n_with_pmcid = sum(1 for k in abs_only if self.papers[k]['pmcid'])
+        n_with_pmid  = sum(1 for k in abs_only if self.papers[k]['pmid'])
+        n_with_doi   = sum(1 for k in abs_only if self.papers[k]['doi'])
+        n_no_id      = sum(1 for k in abs_only
+                           if not self.papers[k]['pmcid']
+                           and not self.papers[k]['pmid']
+                           and not self.papers[k]['doi'])
+        print(f"    Abstract-only identifier coverage: "
+              f"{n_with_pmcid} PMCID (direct fetch), "
+              f"{n_with_pmid} PMID, {n_with_doi} DOI, "
+              f"{n_no_id} none (title-only, skipped)")
+
         if (ncbi_api_key or unpaywall_email) and abs_only:
-            try_pmc = bool(ncbi_api_key)      # PMC works without key too but
-            #   we only attempt it when the caller explicitly provides a key to
-            #   avoid hammering NCBI at the anonymous 3 req/s limit for hundreds
-            #   of papers — the corpus could have 400+ abstract-only entries.
+            try_pmc = bool(ncbi_api_key)
             try_uw  = bool(unpaywall_email)
 
             n_abs = len(abs_only)
             print(f"    Fetching full text for {n_abs} abstract-only papers "
-                  f"(PMC={'yes' if try_pmc else 'no'}, "
+                  f"(PMC={'yes (PMID+DOI→PMCID)' if try_pmc else 'no'}, "
                   f"Unpaywall={'yes' if try_uw else 'no'}) ...")
 
             for i, key in enumerate(abs_only, 1):
                 paper = self.papers[key]
                 text  = ''
 
-                # ── PMC first ─────────────────────────────────────────────
-                if try_pmc and paper['pmid'] and not text:
+                # ── PMC first: PMCID direct → PMID elink → DOI idconv ────
+                if try_pmc and (paper['pmcid'] or paper['pmid'] or paper['doi']) \
+                        and not text:
                     text = self._fetch_pmc_fulltext(
-                        paper['pmid'], ncbi_api_key, fetch_cache)
+                        pmid=paper['pmid'],
+                        api_key=ncbi_api_key,
+                        cache=fetch_cache,
+                        doi=paper['doi'],
+                        pmcid=paper['pmcid'],
+                    )
                     if text:
                         n_pmc += 1
 
