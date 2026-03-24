@@ -594,41 +594,70 @@ def _cophenetic_correlation(C):
     return val
 
 
-def _pca_feature_selection(X_df, n_pcs=20, top_per_pc=5):
+def _pca_feature_selection(X_df, n_pcs=20, top_per_pc=5, variance_target=None):
     """
     Select features proportional to each PC's explained variance ratio.
 
-    Instead of a fixed top_per_pc allocation for every PC, the number of
-    features drawn from PC_i is weighted by its share of the total explained
-    variance across the n_pcs components:
+    Two modes:
+
+    1. Fixed n_pcs (variance_target=None, default):
+       Uses exactly n_pcs components.  total_budget = n_pcs * top_per_pc.
+
+    2. Variance-target mode (variance_target=0.0–1.0):
+       Runs a full SVD (up to min(n_features-1, 500) components) and
+       automatically determines how many PCs are needed to explain at least
+       variance_target of the total variance.  The budget is then set to
+       n_pcs_needed * top_per_pc so the feature count scales with the
+       intrinsic dimensionality of the data.
+
+       This is important for genomic data where each PC explains <1% of
+       variance and a fixed n_pcs=200 may still fall far short of 50%.
+
+    In both modes, per-PC feature allocation is proportional to explained
+    variance so high-variance PCs contribute more features:
 
         n_i = max(1, round(evr[i] / sum(evr) * total_budget))
 
-    where total_budget = n_pcs * top_per_pc.
-
-    Example with top_per_pc=5, n_pcs=10, total_budget=50:
-        PC1 explains 20% of the n_pcs variance  →  ~10 features
-        PC5 explains  8%                         →   ~4 features
-        PC10 explains 2%                         →   ~1 feature
-
-    High-variance PCs represent stronger biological signals and contribute
-    more features; low-variance PCs contribute fewer but are still
-    represented so rare axes of variation are not discarded entirely.
-
-    Returns X_df restricted to the deduplicated union of selected features,
-    preserving original column order.
+    Returns X_df restricted to the deduplicated union, preserving column order.
     """
     from sklearn.decomposition import TruncatedSVD
     X = X_df.values.astype(np.float32)
     X_centered = X - X.mean(axis=0)
-    n_comp = min(n_pcs, X.shape[1] - 1, X.shape[0] - 1)
-    if n_comp < 1:
+    max_possible = min(X.shape[1] - 1, X.shape[0] - 1)
+    if max_possible < 1:
         return X_df
 
-    svd = TruncatedSVD(n_components=n_comp, random_state=42)
-    svd.fit(X_centered)
+    if variance_target is not None:
+        # ── Auto-detect n_pcs needed to explain variance_target ───────────
+        # Cap at 500 to keep SVD tractable; for genomic data 500 PCs is
+        # typically enough to reach 50–70% of variance.
+        n_search = min(max_possible, 500)
+        print(f"    PC feature selection: scanning up to {n_search} PCs "
+              f"to reach {variance_target*100:.0f}% explained variance …")
+        svd = TruncatedSVD(n_components=n_search, random_state=42)
+        svd.fit(X_centered)
+        cumvar = np.cumsum(svd.explained_variance_ratio_)
+        hits   = np.where(cumvar >= variance_target)[0]
+        if len(hits):
+            n_comp = int(hits[0]) + 1
+            reached = cumvar[n_comp - 1] * 100
+            print(f"      → {n_comp} PCs explain {reached:.1f}% variance "
+                  f"(target {variance_target*100:.0f}%)")
+        else:
+            n_comp = n_search
+            reached = cumvar[-1] * 100
+            print(f"      → target not reached in {n_search} PCs; "
+                  f"using all {n_search} PCs ({reached:.1f}% variance)")
+        evr        = svd.explained_variance_ratio_[:n_comp]
+        components = svd.components_[:n_comp]
+    else:
+        # ── Fixed n_pcs mode ───────────────────────────────────────────────
+        n_comp = min(n_pcs, max_possible)
+        svd = TruncatedSVD(n_components=n_comp, random_state=42)
+        svd.fit(X_centered)
+        evr        = svd.explained_variance_ratio_
+        components = svd.components_
 
-    evr          = svd.explained_variance_ratio_   # shape (n_comp,)
     total_evr    = evr.sum()
     total_budget = n_comp * top_per_pc
 
@@ -636,20 +665,23 @@ def _pca_feature_selection(X_df, n_pcs=20, top_per_pc=5):
     alloc_log = []
     for i in range(n_comp):
         n_for_pc = max(1, round(evr[i] / total_evr * total_budget))
-        top_idx  = np.argsort(np.abs(svd.components_[i]))[-n_for_pc:]
+        top_idx  = np.argsort(np.abs(components[i]))[-n_for_pc:]
         selected.update(top_idx.tolist())
         alloc_log.append((i + 1, evr[i] * 100, n_for_pc))
 
     # Preserve original column order
     kept = [X_df.columns[i] for i in sorted(selected)]
 
-    # Print per-PC allocation summary (top 5) so the user can audit
+    # Print per-PC allocation summary (top 5)
     summary = '  '.join(f'PC{pc}:{pct:.1f}%→{n}f'
                         for pc, pct, n in alloc_log[:5])
     if n_comp > 5:
         summary += f'  … (+{n_comp - 5} more PCs)'
+    mode_str = (f'target={variance_target*100:.0f}% variance, {n_comp} PCs'
+                if variance_target is not None
+                else f'{n_comp} PCs fixed')
     print(f"    PC feature selection: {len(kept)} features selected "
-          f"(budget={total_budget}, proportional to variance)")
+          f"(budget={total_budget}, {mode_str})")
     print(f"      {summary}")
     return X_df[kept]
 
@@ -659,7 +691,8 @@ def run_consensus_bnmf(X, k_min=2, k_max=8, n_runs=30,
                        verbose=True,
                        feature_select_method='variance',
                        n_pcs_for_features=20,
-                       top_features_per_pc=5):
+                       top_features_per_pc=5,
+                       variance_target=None):
     """
     Consensus bNMF: for each k in [k_min, k_max], run NMF n_runs times,
     build the soft consensus matrix, and compute cophenetic correlation.

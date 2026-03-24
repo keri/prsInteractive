@@ -1509,6 +1509,7 @@ def run_cohort_bnmf(
     feature_select_method='variance',
     n_pcs_for_features=20,
     top_features_per_pc=5,
+    variance_target=None,
 ):
     """
     Run consensus bNMF for one cohort and write all outputs.
@@ -1557,7 +1558,8 @@ def run_cohort_bnmf(
     # ── PC-guided feature selection ─────────────────────────────────────────
     if feature_select_method == 'pca' and X_df.shape[1] > top_features_per_pc:
         X_df = bnmf_core._pca_feature_selection(
-            X_df, n_pcs=n_pcs_for_features, top_per_pc=top_features_per_pc)
+            X_df, n_pcs=n_pcs_for_features, top_per_pc=top_features_per_pc,
+            variance_target=variance_target)
         kept_cols = X_df.columns.tolist()
 
     # ── Post-scale feature weighting ────────────────────────────────────────
@@ -1857,6 +1859,7 @@ def run_all_cohorts(
     feature_select_method='variance',
     n_pcs_for_features=20,
     top_features_per_pc=5,
+    variance_target=None,
 ):
     """
     Run cohort bNMF for all (or specified) cohorts.
@@ -2014,6 +2017,7 @@ def run_all_cohorts(
                 feature_select_method=feature_select_method,
                 n_pcs_for_features=n_pcs_for_features,
                 top_features_per_pc=top_features_per_pc,
+                variance_target=variance_target,
             )
 
             if result:
@@ -2409,6 +2413,7 @@ def run_combined_bnmf(
     feature_select_method='variance',
     n_pcs_for_features=20,
     top_features_per_pc=5,
+    variance_target=None,
 ):
     """
     Combined cross-cohort bNMF subtype analysis.
@@ -2611,6 +2616,7 @@ def run_combined_bnmf(
         feature_select_method=feature_select_method,
         n_pcs_for_features=n_pcs_for_features,
         top_features_per_pc=top_features_per_pc,
+        variance_target=variance_target,
     )
 
     if result is None:
@@ -2958,6 +2964,16 @@ if __name__ == '__main__':
         "--top_features_per_pc", type=int, default=5,
         help="Features to take per PC when --feature_select_method=pca (default: 5)",
     )
+    parser.add_argument(
+        "--variance_target", type=float, default=None,
+        help=(
+            "When --feature_select_method=pca, auto-detect how many PCs are needed "
+            "to explain this fraction of variance (e.g. 0.5 for 50%%) and use that "
+            "many PCs for feature selection. Overrides --n_pcs_for_features. "
+            "Recommended for genomic data where each PC explains <1%% of variance "
+            "and a fixed n_pcs may fall far short of 50%% explained. (default: None)"
+        ),
+    )
 
     # ── Parameter sweep ────────────────────────────────────────────────────
     parser.add_argument(
@@ -3034,6 +3050,7 @@ if __name__ == '__main__':
         feature_select_method=args.feature_select_method,
         n_pcs_for_features=args.n_pcs_for_features,
         top_features_per_pc=args.top_features_per_pc,
+        variance_target=args.variance_target,
     )
 
     if args.mode == 'pca':
