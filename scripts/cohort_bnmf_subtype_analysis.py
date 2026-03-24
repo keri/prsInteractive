@@ -90,6 +90,13 @@ MIN_INDIVIDUALS = 30            # minimum cohort size to attempt bNMF
 
 CLUSTER_PALETTE = bnmf_core.CLUSTER_PALETTE
 
+# Regex that matches SNP pair feature names (two rs-IDs joined by '_'),
+# e.g. rs123_rs456 or RS123_RS456.  Used by build_deduplicated_feature_matrix
+# to decide which features need a model suffix (SNP pairs that appear in 2+
+# models produce genuinely different values: product vs sum of dosages).
+# Single SNPs (no '_') are always deduplicated via combine_first instead.
+_SNP_PAIR_RE = re.compile(r'^rs\d+_rs\d+$', re.IGNORECASE)
+
 # Metadata columns present in *.mixed.prs.csv that are not features
 PRS_META_COLS = {
     'prs', 'scaled_prs', 'high_risk', 'PHENOTYPE', 'centile_bin',
@@ -1059,23 +1066,25 @@ def build_deduplicated_feature_matrix(
     #
     # Column deduplication rules (applied BEFORE combine_first):
     #
-    #   a) HLA loci  — raw feature name contains '_' (e.g. DRB1_04, A_101).
+    #   a) HLA loci  — raw feature name contains '_' but does NOT match the
+    #      rs\d+_rs\d+ pattern (e.g. DRB1_04, A_101).
     #      The same allele may be selected by multiple models with slightly
     #      different coefficients.  Biologically it is the SAME feature, so
     #      we deduplicate: all models use the same gen_{feat} column name and
     #      combine_first() fills real values from whichever model has them,
     #      prioritising the model with the most features.
     #
-    #   b) Non-HLA SNPs that appear in ONLY ONE model — no ambiguity, kept
-    #      as gen_{feat}.
+    #   b) Single SNPs (no '_' in name, e.g. rs826962) appearing in ANY
+    #      number of models — always deduplicated via combine_first (same
+    #      physical dosage regardless of which model holds it; after
+    #      QuantileTransformer the ranks are identical).  No suffix added.
     #
-    #   c) SNP pairs (two rs-IDs joined by '_') that appear in 2+ models —
-    #      same pair but different coefficients across product vs summed models.
-    #      These are renamed gen_{feat}_{cohort_suffix} using the full cohort
-    #      name, e.g. gen_rs123_rs456_epi_prod / gen_rs123_rs456_cardio_sum.
-    #      Single SNPs (no '_') should only appear in the 'main' model after
-    #      composite models (epi+main_*) are excluded by the cohort filter;
-    #      they receive no suffix → gen_rs826962.
+    #   c) SNP pairs (rs\d+_rs\d+ pattern, e.g. rs123_rs456) that appear in
+    #      2+ models — same pair but different interaction values across
+    #      product vs summed models (product = dosage_A × dosage_B vs
+    #      sum = dosage_A + dosage_B).  These are renamed
+    #      gen_{feat}_{cohort_suffix}, e.g. gen_rs123_rs456_epi_prod /
+    #      gen_rs123_rs456_cardio_sum, so both are retained.
     #
     # Because *.mixed.prs.csv files contain ALL genotyped individuals (not
     # just those high-risk in that model), every individual in all_iids has a
@@ -1125,14 +1134,17 @@ def build_deduplicated_feature_matrix(
         model_feat_sets[model_key] = feat_set
         feat_model_count.update(feat_set)
 
-    # Features appearing in 2+ models AND lacking '_' → need model suffix
+    # Only SNP pairs (rs123_rs456) appearing in 2+ models need a suffix.
+    # Single SNPs (no '_') are deduplicated via combine_first just like HLA
+    # loci: the same physical dosage is the same feature regardless of which
+    # model holds it.
     snp_needs_suffix: set[str] = {
         f for f, cnt in feat_model_count.items()
-        if cnt > 1 and '_' not in f
+        if cnt > 1 and _SNP_PAIR_RE.match(f)
     }
     if snp_needs_suffix:
-        print(f"    Disambiguation: {len(snp_needs_suffix)} non-HLA SNP(s) appear in "
-              f"multiple models → annotated with _prod/_sum/_<model> suffix")
+        print(f"    Disambiguation: {len(snp_needs_suffix)} SNP pair(s) appear in "
+              f"multiple models → annotated with cohort suffix")
 
     gen_frames: list[tuple[str, pd.DataFrame]] = []
     cohorts_with_genomic: set[str] = set()
@@ -1680,6 +1692,10 @@ def run_cohort_bnmf(
     if output_path:
         os.makedirs(output_path, exist_ok=True)
 
+        # Save selected feature list so combined mode can reuse it
+        pd.DataFrame({'feature': kept_cols}).to_csv(
+            os.path.join(output_path, 'selected_features.csv'), index=False)
+
         assignments_df.to_csv(
             os.path.join(output_path, 'cluster_assignments.csv'))
         H_df.to_csv(
@@ -1736,14 +1752,15 @@ def run_cohort_bnmf(
         if 'membership_entropy' in assignments_df.columns else float('nan')
 
     return {
-        'assignments': assignments_df,
-        'H_df':        H_df,
-        'coph_df':     coph_df,
-        'profile_df':  profile_df,
-        'optimal_k':   optimal_k,
-        'n':           len(assignments_df),
-        'cophenetic':  _cophenetic,
-        'mean_entropy': _mean_entropy,
+        'assignments':       assignments_df,
+        'H_df':              H_df,
+        'coph_df':           coph_df,
+        'profile_df':        profile_df,
+        'optimal_k':         optimal_k,
+        'n':                 len(assignments_df),
+        'cophenetic':        _cophenetic,
+        'mean_entropy':      _mean_entropy,
+        'selected_features': kept_cols,
     }
 
 
@@ -1881,6 +1898,8 @@ def run_all_cohorts(
     Returns
     -------
     pd.DataFrame  overview table (one row per cohort × population)
+    dict          {cohort_name: [feature_list]} — features selected by each
+                  per-cohort NMF (union used by combined mode)
     """
     scores_path  = os.path.join(pheno_data, 'scores')
     base_output  = os.path.join(scores_path, 'cohortBnmf')
@@ -1938,6 +1957,7 @@ def run_all_cohorts(
     # When population='separate', each cohort is run twice (high_risk then
     # low_control) with independent bNMF analyses saved to separate subdirs.
     overview_rows = []
+    per_cohort_selected: dict[str, list] = {}
     pop_runs = (['high_risk', 'low_control']
                 if population == 'separate' else [population])
 
@@ -2034,6 +2054,8 @@ def run_all_cohorts(
                     **sel_stats,
                     **feat_counts,
                 })
+                if result.get('selected_features'):
+                    per_cohort_selected[cohort] = result['selected_features']
             else:
                 overview_rows.append({
                     'cohort':     cohort,
@@ -2062,7 +2084,7 @@ def run_all_cohorts(
     print(f"Outputs  → {base_output}/{{cohort}}/")
     print(f"Figures  → {base_fig}/{{cohort}}/")
 
-    return overview_df
+    return overview_df, per_cohort_selected
 
 
 # ============================================================================
@@ -2418,6 +2440,7 @@ def run_combined_bnmf(
     top_features_per_pc=5,
     variance_target=None,
     max_pcs_scan=300,
+    per_cohort_features=None,
 ):
     """
     Combined cross-cohort bNMF subtype analysis.
@@ -2571,6 +2594,45 @@ def run_combined_bnmf(
         print(f"  Genomic-only: {len(gen_cols)} gen_* features retained, "
               f"{dropped_clin} clin_* and other features dropped")
 
+    # ── Per-cohort feature reuse ────────────────────────────────────────────
+    # When called from --mode both, use the union of features already selected
+    # by the per-cohort NMF runs rather than re-running PCA on the full matrix.
+    # Per-cohort feature names (e.g. gen_rs1_rs2) are mapped to combined names
+    # by trying the bare name first, then the cohort-suffixed name.
+    union_cols: list[str] = []
+    if per_cohort_features:
+        def _cohort_suffix(name: str) -> str:
+            n = name.lower().replace('_product', '_prod').replace('_summed', '_sum')
+            return f'_{n}'
+
+        seen: set[str] = set()
+        for cohort_name, feat_list in per_cohort_features.items():
+            sfx = _cohort_suffix(cohort_name)
+            for f in feat_list:
+                # Try bare name (single SNPs, HLA, clinical)
+                if f in nmf_matrix.columns and f not in seen:
+                    union_cols.append(f)
+                    seen.add(f)
+                # Try cohort-suffixed name (SNP pairs that got a suffix in combined)
+                elif f.startswith('gen_'):
+                    bare = f[4:]
+                    suffixed = f'gen_{bare}{sfx}'
+                    if suffixed in nmf_matrix.columns and suffixed not in seen:
+                        union_cols.append(suffixed)
+                        seen.add(suffixed)
+
+        if union_cols:
+            nmf_matrix = nmf_matrix[union_cols]
+            print(f"  Per-cohort feature reuse: {len(union_cols)} features "
+                  f"(union of per-cohort selected features; skipping combined PCA)")
+        else:
+            print("  [WARN] per_cohort_features provided but no columns matched "
+                  "combined matrix — falling back to combined PCA feature selection")
+            per_cohort_features = None  # fall back
+
+    # Track whether per-cohort features were successfully applied
+    used_per_cohort = bool(per_cohort_features and union_cols)
+
     resolved_weights = None
     if weight_features and feature_metadata:
         resolved_weights = {
@@ -2594,8 +2656,32 @@ def run_combined_bnmf(
     # ── Run bNMF on combined matrix ────────────────────────────────────────
     print("\n[5] Running bNMF on combined matrix...")
     print(f"    Matrix shape before impute/scale: {nmf_matrix.shape}")
-    print(f"    Variance/sparsity filter params: "
-          f"min_var={min_variance}, max_zero={max_zero_fraction}, cap={max_features}")
+
+    # When per-cohort features are reused, skip the variance/sparsity filter
+    # and PCA feature selection inside run_cohort_bnmf — per-cohort PCAs
+    # already identified which features are most informative within each cohort.
+    if not used_per_cohort:
+        print(f"    Variance/sparsity filter params: "
+              f"min_var={min_variance}, max_zero={max_zero_fraction}, cap={max_features}")
+        _eff_min_variance     = min_variance
+        _eff_max_zero         = max_zero_fraction
+        _eff_max_features     = max_features
+        _eff_feat_select      = feature_select_method
+        _eff_n_pcs            = n_pcs_for_features
+        _eff_top_per_pc       = top_features_per_pc
+        _eff_variance_target  = variance_target
+        _eff_max_pcs_scan     = max_pcs_scan
+    else:
+        # Bypass all feature filtering — columns were already selected per-cohort
+        _eff_min_variance     = 0.0
+        _eff_max_zero         = 1.0
+        _eff_max_features     = nmf_matrix.shape[1]
+        _eff_feat_select      = 'variance'   # variance with 0 threshold = no-op
+        _eff_n_pcs            = n_pcs_for_features
+        _eff_top_per_pc       = top_features_per_pc
+        _eff_variance_target  = None
+        _eff_max_pcs_scan     = max_pcs_scan
+
     os.makedirs(base_output, exist_ok=True)
     os.makedirs(base_fig,    exist_ok=True)
 
@@ -2603,9 +2689,9 @@ def run_combined_bnmf(
         cohort='combined',
         feature_matrix=nmf_matrix,
         prs_bins=prs_bins,
-        min_variance=min_variance,
-        max_zero_fraction=max_zero_fraction,
-        max_features=max_features,
+        min_variance=_eff_min_variance,
+        max_zero_fraction=_eff_max_zero,
+        max_features=_eff_max_features,
         output_path=base_output,
         fig_path=base_fig,
         k_min=k_min,
@@ -2617,11 +2703,11 @@ def run_combined_bnmf(
         alpha_H=alpha_H,
         feature_weights=resolved_weights,
         scale_method=scale_method,
-        feature_select_method=feature_select_method,
-        n_pcs_for_features=n_pcs_for_features,
-        top_features_per_pc=top_features_per_pc,
-        variance_target=variance_target,
-        max_pcs_scan=max_pcs_scan,
+        feature_select_method=_eff_feat_select,
+        n_pcs_for_features=_eff_n_pcs,
+        top_features_per_pc=_eff_top_per_pc,
+        variance_target=_eff_variance_target,
+        max_pcs_scan=_eff_max_pcs_scan,
     )
 
     if result is None:
@@ -3092,8 +3178,11 @@ if __name__ == '__main__':
             genomic_only=args.genomic_only,
         )
     else:
+        per_cohort_selected: dict[str, list] = {}
+
         if args.mode in ('per_cohort', 'both'):
-            run_all_cohorts(**shared_kwargs, population=args.population)
+            _, per_cohort_selected = run_all_cohorts(
+                **shared_kwargs, population=args.population)
 
         if args.mode in ('combined', 'both'):
             if args.sweep:
@@ -3108,6 +3197,8 @@ if __name__ == '__main__':
                         'population': args.population,
                         'clinical_only': args.clinical_only,
                         'genomic_only': args.genomic_only,
+                        'per_cohort_features': (per_cohort_selected
+                                                if args.mode == 'both' else None),
                     },
                     output_dir=sweep_dir,
                 )
@@ -3119,4 +3210,6 @@ if __name__ == '__main__':
                     population=args.population,
                     clinical_only=args.clinical_only,
                     genomic_only=args.genomic_only,
+                    per_cohort_features=(per_cohort_selected
+                                         if args.mode == 'both' else None),
                 )
