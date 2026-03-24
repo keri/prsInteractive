@@ -1506,6 +1506,9 @@ def run_cohort_bnmf(
     max_features=500,
     feature_weights=None,
     scale_method='quantile',
+    feature_select_method='variance',
+    n_pcs_for_features=20,
+    top_features_per_pc=5,
 ):
     """
     Run consensus bNMF for one cohort and write all outputs.
@@ -1550,6 +1553,13 @@ def run_cohort_bnmf(
         max_zero_fraction=max_zero_fraction,
         max_features=max_features,
     )
+
+    # ── PC-guided feature selection ─────────────────────────────────────────
+    if feature_select_method == 'pca' and X_df.shape[1] > top_features_per_pc:
+        X_df = bnmf_core._pca_feature_selection(
+            X_df, n_pcs=n_pcs_for_features, top_per_pc=top_features_per_pc)
+        kept_cols = X_df.columns.tolist()
+
     # ── Post-scale feature weighting ────────────────────────────────────────
     # Applied AFTER MinMaxScaler so weights genuinely stretch the range of
     # high-importance features rather than being normalised away.
@@ -1715,6 +1725,13 @@ def run_cohort_bnmf(
             cohort,
         )
 
+    # Compute summary metrics for sweep / reporting
+    _coph_row = coph_df[coph_df['k'] == optimal_k]
+    _cophenetic = float(_coph_row['cophenetic_correlation'].iloc[0]) \
+        if not _coph_row.empty else float('nan')
+    _mean_entropy = float(assignments_df['membership_entropy'].mean()) \
+        if 'membership_entropy' in assignments_df.columns else float('nan')
+
     return {
         'assignments': assignments_df,
         'H_df':        H_df,
@@ -1722,6 +1739,8 @@ def run_cohort_bnmf(
         'profile_df':  profile_df,
         'optimal_k':   optimal_k,
         'n':           len(assignments_df),
+        'cophenetic':  _cophenetic,
+        'mean_entropy': _mean_entropy,
     }
 
 
@@ -1835,6 +1854,9 @@ def run_all_cohorts(
     max_features=500,
     include_raw_clinical=True,
     scale_method='quantile',
+    feature_select_method='variance',
+    n_pcs_for_features=20,
+    top_features_per_pc=5,
 ):
     """
     Run cohort bNMF for all (or specified) cohorts.
@@ -1989,6 +2011,9 @@ def run_all_cohorts(
                 max_zero_fraction=max_zero_fraction,
                 max_features=max_features,
                 scale_method=scale_method,
+                feature_select_method=feature_select_method,
+                n_pcs_for_features=n_pcs_for_features,
+                top_features_per_pc=top_features_per_pc,
             )
 
             if result:
@@ -2057,6 +2082,7 @@ def run_pca_analysis(
     scale_method='quantile',
     n_pca_components=30,
     clinical_only=False,
+    genomic_only=False,
 ):
     """
     Build the same combined feature matrix used by run_combined_bnmf, scale
@@ -2080,7 +2106,7 @@ def run_pca_analysis(
 
     scores_path = os.path.join(pheno_data, 'scores')
     pop_suffix  = f'_{population}' if population != 'both' else ''
-    feat_suffix = '_clinical_only' if clinical_only else ''
+    feat_suffix = '_clinical_only' if clinical_only else ('_genomic_only' if genomic_only else '')
     base_output = os.path.join(scores_path,           f'combinedPCA{pop_suffix}{feat_suffix}')
     base_fig    = os.path.join(pheno_data, 'figures', f'combinedPCA{pop_suffix}{feat_suffix}')
     os.makedirs(base_output, exist_ok=True)
@@ -2091,7 +2117,9 @@ def run_pca_analysis(
     print("=" * 60)
     print(f"  population    : {population}")
     print(f"  use_set       : {use_set}")
-    print(f"  features      : {'clinical only' if clinical_only else 'genomic + clinical'}")
+    _feat_desc = ('clinical only' if clinical_only else
+                  ('genomic only' if genomic_only else 'genomic + clinical'))
+    print(f"  features      : {_feat_desc}")
 
     # ── Load shared data (identical to run_combined_bnmf) ─────────────────
     print("\n[1] Loading feature definitions...")
@@ -2144,6 +2172,16 @@ def run_pca_analysis(
         combined_matrix = combined_matrix[clin_cols]
         print(f"  Clinical-only: retained {len(clin_cols)} clin_* columns, "
               f"dropped all gen_* and PRS anchor columns.")
+
+    # ── Genomic-only filter ────────────────────────────────────────────────
+    if genomic_only:
+        gen_cols = [c for c in combined_matrix.columns if c.startswith('gen_')]
+        if not gen_cols:
+            print("  [ERROR] No genomic (gen_*) columns found in combined matrix.")
+            return
+        combined_matrix = combined_matrix[gen_cols]
+        print(f"  Genomic-only: retained {len(gen_cols)} gen_* columns, "
+              f"dropped all clin_* and PRS anchor columns.")
 
     print(f"\n[5] Scaling ({scale_method}) and filtering...")
     X_df, _retained = bnmf_core.impute_and_scale(
@@ -2367,6 +2405,10 @@ def run_combined_bnmf(
     include_raw_clinical=True,
     scale_method='quantile',
     clinical_only=False,
+    genomic_only=False,
+    feature_select_method='variance',
+    n_pcs_for_features=20,
+    top_features_per_pc=5,
 ):
     """
     Combined cross-cohort bNMF subtype analysis.
@@ -2395,7 +2437,7 @@ def run_combined_bnmf(
     # Use a population-specific subdirectory so high_risk and low_control
     # combined runs don't overwrite each other's outputs.
     pop_suffix  = f'_{population}' if population != 'both' else ''
-    clin_suffix = '_clinical_only' if clinical_only else ''
+    clin_suffix = '_clinical_only' if clinical_only else ('_genomic_only' if genomic_only else '')
     base_output = os.path.join(scores_path, f'combinedCohortBnmf{pop_suffix}{clin_suffix}')
     base_fig    = os.path.join(pheno_data,  'figures', f'combinedCohortBnmf{pop_suffix}{clin_suffix}')
 
@@ -2508,6 +2550,18 @@ def run_combined_bnmf(
         print(f"  Clinical-only: {len(clin_cols)} clin_* features retained, "
               f"{dropped_gen} gen_* features dropped")
 
+    # ── Genomic-only mode: drop all clinical features ──────────────────────
+    if genomic_only:
+        gen_cols = [c for c in nmf_matrix.columns if c.startswith('gen_')]
+        if not gen_cols:
+            print("  [ERROR] No genomic (gen_*) columns found. "
+                  "Genomic features require PRS model files.")
+            return None
+        dropped_clin = len(nmf_matrix.columns) - len(gen_cols)
+        nmf_matrix = nmf_matrix[gen_cols]
+        print(f"  Genomic-only: {len(gen_cols)} gen_* features retained, "
+              f"{dropped_clin} clin_* and other features dropped")
+
     resolved_weights = None
     if weight_features and feature_metadata:
         resolved_weights = {
@@ -2554,6 +2608,9 @@ def run_combined_bnmf(
         alpha_H=alpha_H,
         feature_weights=resolved_weights,
         scale_method=scale_method,
+        feature_select_method=feature_select_method,
+        n_pcs_for_features=n_pcs_for_features,
+        top_features_per_pc=top_features_per_pc,
     )
 
     if result is None:
@@ -2618,6 +2675,71 @@ def run_combined_bnmf(
     print(f"  Figures  → {base_fig}/")
 
     return result
+
+
+# ============================================================================
+# PARAMETER SWEEP
+# ============================================================================
+
+def run_parameter_sweep(base_run_fn, base_kwargs, output_dir, alpha_grid=None):
+    """
+    Grid search over alpha_W × alpha_H combinations.
+    Runs base_run_fn(**base_kwargs, alpha_W=a_w, alpha_H=a_h) for each combo,
+    collects optimal_k, cophenetic, mean_entropy, and composite score, saves
+    parameter_sweep.csv and a heatmap figure.
+
+    Score = cophenetic_at_optimal_k × (1 − mean_entropy_at_optimal_k)
+    Higher = more stable AND more confident cluster assignments.
+    """
+    if alpha_grid is None:
+        alpha_grid = [0.01, 0.05, 0.1, 0.2]
+
+    records = []
+    for a_w in alpha_grid:
+        for a_h in alpha_grid:
+            print(f"\n  Sweep: alpha_W={a_w}, alpha_H={a_h}")
+            try:
+                result = base_run_fn(**base_kwargs, alpha_W=a_w, alpha_H=a_h)
+                if result is None:
+                    records.append({'alpha_W': a_w, 'alpha_H': a_h,
+                                    'optimal_k': None, 'cophenetic': None,
+                                    'mean_entropy': None, 'score': None})
+                    continue
+                coph  = result.get('cophenetic', np.nan)
+                entr  = result.get('mean_entropy', np.nan)
+                k_opt = result.get('optimal_k', None)
+                score = coph * (1 - entr) if (not np.isnan(coph) and not np.isnan(entr)) else np.nan
+                records.append({'alpha_W': a_w, 'alpha_H': a_h,
+                                 'optimal_k': k_opt, 'cophenetic': round(coph, 4),
+                                 'mean_entropy': round(entr, 4),
+                                 'score': round(score, 4)})
+            except Exception as exc:
+                print(f"    [WARN] alpha_W={a_w}, alpha_H={a_h} failed: {exc}")
+                records.append({'alpha_W': a_w, 'alpha_H': a_h,
+                                 'optimal_k': None, 'cophenetic': None,
+                                 'mean_entropy': None, 'score': None})
+
+    sweep_df = pd.DataFrame(records).sort_values('score', ascending=False)
+    os.makedirs(output_dir, exist_ok=True)
+    sweep_df.to_csv(os.path.join(output_dir, 'parameter_sweep.csv'), index=False)
+    print(f"\n  Parameter sweep complete. Best combination:")
+    print(sweep_df.head(3).to_string(index=False))
+
+    # Heatmap of scores
+    try:
+        pivot = sweep_df.pivot(index='alpha_W', columns='alpha_H', values='score')
+        fig, ax = plt.subplots(figsize=(6, 5))
+        sns.heatmap(pivot, annot=True, fmt='.3f', cmap='YlOrRd', ax=ax,
+                    cbar_kws={'label': 'Score (cophenetic × (1−entropy))'})
+        ax.set_title('Parameter sweep: alpha_W × alpha_H')
+        sweep_fig = os.path.join(output_dir, 'parameter_sweep.png')
+        fig.savefig(sweep_fig, dpi=150, bbox_inches='tight')
+        plt.close(fig)
+        print(f"  Heatmap → {sweep_fig}")
+    except Exception as exc:
+        print(f"  [WARN] Could not save sweep heatmap: {exc}")
+
+    return sweep_df
 
 
 # ============================================================================
@@ -2752,8 +2874,13 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         "--clinical_only", action='store_true',
-        help="PCA mode only: restrict matrix to clin_* columns (no genomic features). "
-             "Useful for assessing clinical feature dimensionality independently.",
+        help="Restrict matrix to clin_* columns (no genomic features). "
+             "Mutually exclusive with --genomic_only.",
+    )
+    parser.add_argument(
+        "--genomic_only", action='store_true',
+        help="Restrict matrix to gen_* columns (no clinical features). "
+             "Mutually exclusive with --clinical_only.",
     )
     parser.add_argument(
         "--population", default='both',
@@ -2812,6 +2939,35 @@ if __name__ == '__main__':
         help="Cap total features by variance before NMF (default: 500)",
     )
 
+    # ── PC-guided feature selection ────────────────────────────────────────
+    parser.add_argument(
+        "--feature_select_method", choices=['variance', 'pca'], default='variance',
+        help=(
+            "Feature selection method applied after variance/sparsity filter "
+            "(default: variance):\n"
+            "  variance — top features by variance (existing behaviour)\n"
+            "  pca      — PC-guided: union of top features loading on each PC,\n"
+            "             spanning different axes of variation"
+        ),
+    )
+    parser.add_argument(
+        "--n_pcs_for_features", type=int, default=20,
+        help="Number of PCs to use when --feature_select_method=pca (default: 20)",
+    )
+    parser.add_argument(
+        "--top_features_per_pc", type=int, default=5,
+        help="Features to take per PC when --feature_select_method=pca (default: 5)",
+    )
+
+    # ── Parameter sweep ────────────────────────────────────────────────────
+    parser.add_argument(
+        "--sweep", action='store_true',
+        help=(
+            "Grid search over alpha_W × alpha_H combinations (combined mode only). "
+            "Saves parameter_sweep.csv and a heatmap to the sweep output directory."
+        ),
+    )
+
     parser.add_argument(
         "--figures_only", action='store_true',
         help=(
@@ -2828,6 +2984,12 @@ if __name__ == '__main__':
     )
 
     args = parser.parse_args()
+
+    # ── Mutual exclusion: --clinical_only and --genomic_only ─────────────────
+    if args.clinical_only and args.genomic_only:
+        print("[ERROR] --clinical_only and --genomic_only are mutually exclusive. "
+              "Please specify at most one.")
+        raise SystemExit(1)
 
     pheno_data        = args.pheno_data        or os.environ.get("PHENO_DATA")
     raw_features_file = args.raw_features_file or os.environ.get("RAW_FEATURES_FILE")
@@ -2869,6 +3031,9 @@ if __name__ == '__main__':
         max_features=args.max_features,
         include_raw_clinical=not args.no_raw_clinical,
         scale_method=args.scale_method,
+        feature_select_method=args.feature_select_method,
+        n_pcs_for_features=args.n_pcs_for_features,
+        top_features_per_pc=args.top_features_per_pc,
     )
 
     if args.mode == 'pca':
@@ -2892,16 +3057,34 @@ if __name__ == '__main__':
             scale_method=args.scale_method,
             n_pca_components=args.n_pca_components,
             clinical_only=args.clinical_only,
+            genomic_only=args.genomic_only,
         )
     else:
         if args.mode in ('per_cohort', 'both'):
             run_all_cohorts(**shared_kwargs, population=args.population)
 
         if args.mode in ('combined', 'both'):
-            run_combined_bnmf(
-                **shared_kwargs,
-                weight_features=args.weight_features,
-                include_prs_with_genomic=args.include_prs_with_genomic,
-                population=args.population,
-                clinical_only=args.clinical_only,
-            )
+            if args.sweep:
+                sweep_dir = os.path.join(
+                    pheno_data, 'scores', 'bnmf_parameter_sweep')
+                run_parameter_sweep(
+                    base_run_fn=run_combined_bnmf,
+                    base_kwargs={
+                        **shared_kwargs,
+                        'weight_features': args.weight_features,
+                        'include_prs_with_genomic': args.include_prs_with_genomic,
+                        'population': args.population,
+                        'clinical_only': args.clinical_only,
+                        'genomic_only': args.genomic_only,
+                    },
+                    output_dir=sweep_dir,
+                )
+            else:
+                run_combined_bnmf(
+                    **shared_kwargs,
+                    weight_features=args.weight_features,
+                    include_prs_with_genomic=args.include_prs_with_genomic,
+                    population=args.population,
+                    clinical_only=args.clinical_only,
+                    genomic_only=args.genomic_only,
+                )

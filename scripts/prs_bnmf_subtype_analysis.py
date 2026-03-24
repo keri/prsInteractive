@@ -594,9 +594,42 @@ def _cophenetic_correlation(C):
     return val
 
 
+def _pca_feature_selection(X_df, n_pcs=20, top_per_pc=5):
+    """
+    Select features that load most strongly on the top PCs.
+
+    For each of the top n_pcs principal components, takes the top_per_pc
+    features by absolute loading. Returns the union across all PCs
+    (deduplicated), preserving column order from X_df.
+
+    This ensures selected features span different axes of variation rather
+    than clustering around a single dominant direction (variance-ranking flaw).
+    """
+    from sklearn.decomposition import TruncatedSVD
+    X = X_df.values.astype(np.float32)
+    X_centered = X - X.mean(axis=0)
+    n_comp = min(n_pcs, X.shape[1] - 1, X.shape[0] - 1)
+    if n_comp < 1:
+        return X_df
+    svd = TruncatedSVD(n_components=n_comp, random_state=42)
+    svd.fit(X_centered)
+    selected = set()
+    for i in range(n_comp):
+        top_idx = np.argsort(np.abs(svd.components_[i]))[-top_per_pc:]
+        selected.update(top_idx.tolist())
+    # Preserve original column order
+    kept = [X_df.columns[i] for i in sorted(selected)]
+    print(f"    PC feature selection: {len(kept)} features selected "
+          f"(top {top_per_pc} per PC × {n_comp} PCs, deduplicated)")
+    return X_df[kept]
+
+
 def run_consensus_bnmf(X, k_min=2, k_max=8, n_runs=30,
                        l1_ratio=0.1, alpha_W=0.1, alpha_H=0.1, max_iter=500,
-                       verbose=True):
+                       verbose=True,
+                       feature_select_method='variance',
+                       n_pcs_for_features=20,
+                       top_features_per_pc=5):
     """
     Consensus bNMF: for each k in [k_min, k_max], run NMF n_runs times,
     build the soft consensus matrix, and compute cophenetic correlation.
