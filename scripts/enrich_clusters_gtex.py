@@ -68,22 +68,56 @@ CACHE_DIR   = None   # set at runtime
 
 # ── Directory helpers ──────────────────────────────────────────────────────────
 
+def _scores_root(pheno_data: str) -> str:
+    """
+    Return the 'scores/' directory.  Handles two layouts:
+
+      Layout A — pheno_data IS the analysis dir  (contains scores/ directly)
+      Layout B — pheno_data is the phenotype root (contains combinedAnalysis/scores/)
+
+    Falls back to Layout A path even if it doesn't exist (caller gets a clear error).
+    """
+    direct = os.path.join(pheno_data, 'scores')
+    if os.path.isdir(direct):
+        return direct
+    via_combined = os.path.join(pheno_data, 'combinedAnalysis', 'scores')
+    if os.path.isdir(via_combined):
+        return via_combined
+    return direct
+
+
+# Population sub-directory names that should never be treated as cohort names
+_POPULATION_DIR_NAMES = {'high_risk', 'low_control', 'both', 'separate'}
+
+
 def _resolve_cluster_dir(pheno_data, population, analysis_mode, cohort=None):
     """
     Resolve the bNMF output directory from structured path components.
 
     analysis_mode
     -------------
-    cohort        → {pheno_data}/scores/cohortBnmf/{cohort}/
-    combined      → {pheno_data}/scores/combinedCohortBnmf_{population}/
-    clinical_only → {pheno_data}/scores/combinedCohortBnmf_{population}_clinical_only/
-    genomic_only  → {pheno_data}/scores/combinedCohortBnmf_{population}_genomic_only/
+    cohort        → scores/cohortBnmf/{cohort}/
+                    or scores/cohortBnmf/{cohort}/{population}/
+                    when the NMF was run with --population separate
+    combined      → scores/combinedCohortBnmf_{population}/
+    clinical_only → scores/combinedCohortBnmf_{population}_clinical_only/
+    genomic_only  → scores/combinedCohortBnmf_{population}_genomic_only/
+
+    pheno_data may be either the analysis dir (…/combinedAnalysis/) or the
+    phenotype root (…/type2Diabetes/).
     """
-    scores = os.path.join(pheno_data, 'scores')
+    scores = _scores_root(pheno_data)
     if analysis_mode == 'cohort':
         if not cohort:
             raise ValueError("--cohort is required when --analysis_mode cohort")
-        return os.path.join(scores, 'cohortBnmf', cohort)
+        cohort_base = os.path.join(scores, 'cohortBnmf', cohort)
+        # When NMF was run with --population separate, outputs land in
+        # {cohort}/{population}/ sub-directories — check for that first.
+        if population not in ('both',):
+            pop_subdir = os.path.join(cohort_base, population)
+            if os.path.exists(os.path.join(pop_subdir, 'feature_loadings.csv')):
+                return pop_subdir
+        return cohort_base
     pop_tag = f'_{population}' if population != 'both' else ''
     mode_suffix = {
         'combined':      '',
@@ -94,13 +128,17 @@ def _resolve_cluster_dir(pheno_data, population, analysis_mode, cohort=None):
 
 
 def _list_cohort_dirs(pheno_data):
-    """Return sorted cohort subdirectory names under cohortBnmf/."""
-    base = os.path.join(pheno_data, 'scores', 'cohortBnmf')
+    """
+    Return sorted cohort subdirectory names under cohortBnmf/.
+    Skips population-label directories (high_risk, low_control).
+    """
+    base = os.path.join(_scores_root(pheno_data), 'cohortBnmf')
     if not os.path.isdir(base):
         return []
     return sorted(
         d for d in os.listdir(base)
         if os.path.isdir(os.path.join(base, d))
+        and d not in _POPULATION_DIR_NAMES
     )
 
 

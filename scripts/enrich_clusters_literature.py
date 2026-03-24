@@ -922,39 +922,85 @@ def _detect_population_context(cluster_dir):
     return 'both'
 
 
+def _scores_root(pheno_data: str) -> str:
+    """
+    Return the 'scores/' directory, handling two common layouts:
+
+      Layout A — pheno_data IS the analysis dir:
+        {pheno_data}/scores/cohortBnmf/…
+
+      Layout B — pheno_data is the phenotype root (one level above):
+        {pheno_data}/combinedAnalysis/scores/cohortBnmf/…
+
+    Prefers Layout A; falls back to Layout B when scores/ is absent.
+    """
+    direct = os.path.join(pheno_data, 'scores')
+    if os.path.isdir(direct):
+        return direct
+    via_combined = os.path.join(pheno_data, 'combinedAnalysis', 'scores')
+    if os.path.isdir(via_combined):
+        return via_combined
+    # Neither found — return the direct path; caller will produce a clear error
+    return direct
+
+
 def _resolve_cluster_dir(pheno_data, population, analysis_mode, cohort=None):
     """
     Resolve the bNMF output directory from structured path components.
 
     analysis_mode
     -------------
-    cohort        → {pheno_data}/scores/cohortBnmf/{cohort}/
-    combined      → {pheno_data}/scores/combinedCohortBnmf_{population}/
-    clinical_only → {pheno_data}/scores/combinedCohortBnmf_{population}_clinical_only/
-    genomic_only  → {pheno_data}/scores/combinedCohortBnmf_{population}_genomic_only/
+    cohort        → scores/cohortBnmf/{cohort}/
+                    or scores/cohortBnmf/{cohort}/{population}/
+                    when the NMF was run with --population separate and a
+                    population-specific sub-directory exists.
+    combined      → scores/combinedCohortBnmf_{population}/
+    clinical_only → scores/combinedCohortBnmf_{population}_clinical_only/
+    genomic_only  → scores/combinedCohortBnmf_{population}_genomic_only/
+
+    pheno_data can be either the direct analysis directory (containing scores/)
+    or the phenotype root (containing combinedAnalysis/scores/).
     """
-    scores = os.path.join(pheno_data, 'scores')
+    scores = _scores_root(pheno_data)
     if analysis_mode == 'cohort':
         if not cohort:
             raise ValueError("--cohort is required when --analysis_mode cohort")
-        return os.path.join(scores, 'cohortBnmf', cohort)
+        cohort_base = os.path.join(scores, 'cohortBnmf', cohort)
+        # When the NMF was run with --population separate, outputs land in
+        # {cohort}/{population}/ sub-directories.  Check for that first so
+        # the correct feature_loadings.csv is found.
+        if population not in ('both',):
+            pop_subdir = os.path.join(cohort_base, population)
+            if os.path.exists(os.path.join(pop_subdir, 'feature_loadings.csv')):
+                return pop_subdir
+        return cohort_base
     pop_tag = f'_{population}' if population != 'both' else ''
     mode_suffix = {
-        'combined':     '',
+        'combined':      '',
         'clinical_only': '_clinical_only',
         'genomic_only':  '_genomic_only',
     }.get(analysis_mode, '')
     return os.path.join(scores, f'combinedCohortBnmf{pop_tag}{mode_suffix}')
 
 
+# Population sub-directory names that should never be treated as cohort names
+_POPULATION_DIR_NAMES = {'high_risk', 'low_control', 'both', 'separate'}
+
+
 def _list_cohort_dirs(pheno_data):
-    """Return a sorted list of cohort subdirectory names under cohortBnmf/."""
-    base = os.path.join(pheno_data, 'scores', 'cohortBnmf')
+    """
+    Return sorted cohort subdirectory names under cohortBnmf/.
+
+    Skips population-label directories (high_risk, low_control) that appear
+    at the top level when a cohort was run with population='separate'.
+    """
+    base = os.path.join(_scores_root(pheno_data), 'cohortBnmf')
     if not os.path.isdir(base):
         return []
     return sorted(
         d for d in os.listdir(base)
         if os.path.isdir(os.path.join(base, d))
+        and d not in _POPULATION_DIR_NAMES
     )
 
 
@@ -1153,15 +1199,30 @@ def _resolve_hla_term_for_literature(primary_term, phenotype, min_count=5):
 
 # ── Background data loaders ────────────────────────────────────────────────────
 
-def _find_background_dir(cluster_dir: str) -> str | None:
+def _find_background_dir(cluster_dir: str, pheno_data: str | None = None) -> str | None:
     """
-    Walk upward from cluster_dir looking for a sibling 'background/' directory.
-    Handles both per-cohort (…/scores/cohortBnmf/{name}/) and combined
-    (…/scores/combinedCohortBnmf_*/) layouts without needing pheno_data.
+    Locate the 'background/' directory that holds phenotype_background.json/csv.
+
+    Search order
+    ------------
+    1. {pheno_data}/background/            — exact match when pheno_data given
+    2. {pheno_data}/../background/         — when pheno_data = …/combinedAnalysis/
+       and background sits one level up at the phenotype root
+    3. Walk upward from cluster_dir (up to 8 levels) looking for a sibling
+       'background/' — handles arbitrary nesting without needing pheno_data
+
     Returns the absolute path to the background directory, or None.
     """
+    # ── Direct pheno_data hints (most reliable) ────────────────────────────
+    if pheno_data:
+        for base in (pheno_data, os.path.dirname(os.path.abspath(pheno_data))):
+            candidate = os.path.join(base, 'background')
+            if os.path.isdir(candidate):
+                return candidate
+
+    # ── Walk up from cluster_dir ───────────────────────────────────────────
     path = os.path.abspath(cluster_dir)
-    for _ in range(6):
+    for _ in range(8):
         parent = os.path.dirname(path)
         candidate = os.path.join(parent, 'background')
         if os.path.isdir(candidate):
@@ -1314,6 +1375,7 @@ def enrich_with_literature(
     phenotypes,
     background_table=None,
     auto_background=True,
+    pheno_data=None,
     disgenet_api_key=None,
     ncbi_api_key=None,
     top_n=20,
@@ -1390,7 +1452,7 @@ def enrich_with_literature(
     # ── Auto-detect background file if not supplied ────────────────────────
     bg_path = background_table
     if not bg_path and auto_background:
-        bg_dir = _find_background_dir(cluster_dir)
+        bg_dir = _find_background_dir(cluster_dir, pheno_data=pheno_data)
         if bg_dir:
             for ext in ('.json', '.csv'):
                 candidate = os.path.join(bg_dir, f'phenotype_background{ext}')
@@ -1939,6 +2001,7 @@ if __name__ == '__main__':
         phenotypes=phenotypes,
         background_table=args.background_table,
         auto_background=not args.no_background_auto,
+        pheno_data=args.pheno_data,          # passed to _find_background_dir
         disgenet_api_key=args.disgenet_api_key,
         ncbi_api_key=args.ncbi_api_key,
         top_n=args.top_n,
