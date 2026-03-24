@@ -915,11 +915,47 @@ def _detect_population_context(cluster_dir):
     Returns 'high_risk' or 'low_control' or 'both'.
     """
     parts = cluster_dir.replace('\\', '/').split('/')
-    if 'high_risk' in parts:
+    if any('high_risk' in p for p in parts):
         return 'high_risk'
-    if 'low_control' in parts:
+    if any('low_control' in p for p in parts):
         return 'low_control'
     return 'both'
+
+
+def _resolve_cluster_dir(pheno_data, population, analysis_mode, cohort=None):
+    """
+    Resolve the bNMF output directory from structured path components.
+
+    analysis_mode
+    -------------
+    cohort        → {pheno_data}/scores/cohortBnmf/{cohort}/
+    combined      → {pheno_data}/scores/combinedCohortBnmf_{population}/
+    clinical_only → {pheno_data}/scores/combinedCohortBnmf_{population}_clinical_only/
+    genomic_only  → {pheno_data}/scores/combinedCohortBnmf_{population}_genomic_only/
+    """
+    scores = os.path.join(pheno_data, 'scores')
+    if analysis_mode == 'cohort':
+        if not cohort:
+            raise ValueError("--cohort is required when --analysis_mode cohort")
+        return os.path.join(scores, 'cohortBnmf', cohort)
+    pop_tag = f'_{population}' if population != 'both' else ''
+    mode_suffix = {
+        'combined':     '',
+        'clinical_only': '_clinical_only',
+        'genomic_only':  '_genomic_only',
+    }.get(analysis_mode, '')
+    return os.path.join(scores, f'combinedCohortBnmf{pop_tag}{mode_suffix}')
+
+
+def _list_cohort_dirs(pheno_data):
+    """Return a sorted list of cohort subdirectory names under cohortBnmf/."""
+    base = os.path.join(pheno_data, 'scores', 'cohortBnmf')
+    if not os.path.isdir(base):
+        return []
+    return sorted(
+        d for d in os.listdir(base)
+        if os.path.isdir(os.path.join(base, d))
+    )
 
 
 # ── ClinVar ────────────────────────────────────────────────────────────────────
@@ -1299,6 +1335,11 @@ def enrich_with_literature(
         return {}
 
     H_df = pd.read_csv(loadings_path, index_col=0)
+    print(f"  Loaded feature loadings: {H_df.shape[0]} clusters × {H_df.shape[1]} features")
+
+    # ── Feature → top-cluster mapping (highest loading across clusters) ────
+    # Used to annotate enrichment results with the dominant cluster per feature.
+    feat_top_cluster: dict = H_df.idxmax(axis=0).to_dict()
 
     # Load SNP→gene map from GTEx enrichment cache if available
     snp_gene_map  = {}
@@ -1494,6 +1535,7 @@ def enrich_with_literature(
                     cluster_ranked_rows.append({
                         'cluster':            cluster,
                         'feature':            feat,
+                        'top_cluster':        feat_top_cluster.get(feat, cluster),
                         'term':               term,
                         'phenotype':          pheno,
                         'cluster_rank':       rank,
@@ -1584,8 +1626,49 @@ if __name__ == '__main__':
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
-        '--cluster_dir', required=True,
-        help="Path to bNMF output directory containing feature_loadings.csv",
+        '--cluster_dir', default=None,
+        help=(
+            "Path to bNMF output directory containing feature_loadings.csv.\n"
+            "If omitted, the path is auto-resolved from --pheno_data,\n"
+            "--population, --analysis_mode (and --cohort for cohort mode)."
+        ),
+    )
+    parser.add_argument(
+        '--pheno_data', default=None,
+        help=(
+            "Base directory of the analysis (e.g. results/type2Diabetes/combinedAnalysis).\n"
+            "Used together with --population and --analysis_mode to auto-resolve\n"
+            "--cluster_dir when it is not provided explicitly."
+        ),
+    )
+    parser.add_argument(
+        '--population',
+        default='high_risk',
+        choices=['high_risk', 'low_control', 'both'],
+        help=(
+            "Population group to analyse (default: high_risk).\n"
+            "Controls which combinedCohortBnmf sub-directory is used when\n"
+            "--cluster_dir is auto-resolved."
+        ),
+    )
+    parser.add_argument(
+        '--analysis_mode',
+        default='cohort',
+        choices=['cohort', 'combined', 'clinical_only', 'genomic_only'],
+        help=(
+            "Which bNMF results to use (default: cohort):\n"
+            "  cohort        — per-cohort results under cohortBnmf/{cohort}/\n"
+            "  combined      — cross-cohort results (combinedCohortBnmf_{population})\n"
+            "  clinical_only — clinical-only NMF (combinedCohortBnmf_{population}_clinical_only)\n"
+            "  genomic_only  — genomic-only NMF (combinedCohortBnmf_{population}_genomic_only)"
+        ),
+    )
+    parser.add_argument(
+        '--cohort', default=None,
+        help=(
+            "Cohort name for --analysis_mode cohort (e.g. 'cardio').\n"
+            "If omitted, all subdirectories under cohortBnmf/ are processed."
+        ),
     )
     parser.add_argument(
         '--phenotypes', required=True,
@@ -1665,9 +1748,41 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    enrich_with_literature(
-        cluster_dir=args.cluster_dir,
-        phenotypes=[p.strip() for p in args.phenotypes.split(',')],
+    # ── Resolve cluster_dir(s) ────────────────────────────────────────────────
+    if args.cluster_dir:
+        cluster_dirs = [args.cluster_dir]
+    elif args.pheno_data:
+        if args.analysis_mode == 'cohort':
+            if args.cohort:
+                cluster_dirs = [
+                    _resolve_cluster_dir(args.pheno_data, args.population,
+                                         'cohort', args.cohort)
+                ]
+            else:
+                # No cohort specified → run all cohorts found on disk
+                cohorts = _list_cohort_dirs(args.pheno_data)
+                if not cohorts:
+                    print(f"[ERROR] No cohort sub-directories found under "
+                          f"{args.pheno_data}/scores/cohortBnmf/")
+                    raise SystemExit(1)
+                print(f"  Found {len(cohorts)} cohort(s): {', '.join(cohorts)}")
+                cluster_dirs = [
+                    _resolve_cluster_dir(args.pheno_data, args.population,
+                                         'cohort', c)
+                    for c in cohorts
+                ]
+        else:
+            cluster_dirs = [
+                _resolve_cluster_dir(args.pheno_data, args.population,
+                                      args.analysis_mode)
+            ]
+    else:
+        print("[ERROR] Provide either --cluster_dir or --pheno_data.")
+        raise SystemExit(1)
+
+    phenotypes = [p.strip() for p in args.phenotypes.split(',')]
+    shared_kw  = dict(
+        phenotypes=phenotypes,
         background_table=args.background_table,
         disgenet_api_key=args.disgenet_api_key,
         ncbi_api_key=args.ncbi_api_key,
@@ -1678,3 +1793,10 @@ if __name__ == '__main__':
         zotero_db=args.zotero_db,
         anthropic_api_key=args.anthropic_api_key,
     )
+
+    for cdir in cluster_dirs:
+        if not os.path.isdir(cdir):
+            print(f"  [SKIP] Directory not found: {cdir}")
+            continue
+        print(f"\n{'='*70}\n  cluster_dir: {cdir}\n{'='*70}")
+        enrich_with_literature(cluster_dir=cdir, **shared_kw)

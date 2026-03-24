@@ -66,6 +66,44 @@ DEFAULT_TISSUES = [
 CACHE_DIR   = None   # set at runtime
 
 
+# ── Directory helpers ──────────────────────────────────────────────────────────
+
+def _resolve_cluster_dir(pheno_data, population, analysis_mode, cohort=None):
+    """
+    Resolve the bNMF output directory from structured path components.
+
+    analysis_mode
+    -------------
+    cohort        → {pheno_data}/scores/cohortBnmf/{cohort}/
+    combined      → {pheno_data}/scores/combinedCohortBnmf_{population}/
+    clinical_only → {pheno_data}/scores/combinedCohortBnmf_{population}_clinical_only/
+    genomic_only  → {pheno_data}/scores/combinedCohortBnmf_{population}_genomic_only/
+    """
+    scores = os.path.join(pheno_data, 'scores')
+    if analysis_mode == 'cohort':
+        if not cohort:
+            raise ValueError("--cohort is required when --analysis_mode cohort")
+        return os.path.join(scores, 'cohortBnmf', cohort)
+    pop_tag = f'_{population}' if population != 'both' else ''
+    mode_suffix = {
+        'combined':      '',
+        'clinical_only': '_clinical_only',
+        'genomic_only':  '_genomic_only',
+    }.get(analysis_mode, '')
+    return os.path.join(scores, f'combinedCohortBnmf{pop_tag}{mode_suffix}')
+
+
+def _list_cohort_dirs(pheno_data):
+    """Return sorted cohort subdirectory names under cohortBnmf/."""
+    base = os.path.join(pheno_data, 'scores', 'cohortBnmf')
+    if not os.path.isdir(base):
+        return []
+    return sorted(
+        d for d in os.listdir(base)
+        if os.path.isdir(os.path.join(base, d))
+    )
+
+
 # ── HTTP helpers ───────────────────────────────────────────────────────────────
 
 def _get(url, params=None, retries=3, wait=1.5, headers=None):
@@ -392,6 +430,11 @@ def enrich_with_gtex(
     H_df = pd.read_csv(loadings_path, index_col=0)
     print(f"  Loaded feature loadings: {H_df.shape[0]} clusters × {H_df.shape[1]} features")
 
+    # ── Feature → top-cluster mapping ─────────────────────────────────────
+    # For every feature, identify the cluster with the highest loading.
+    # Used to annotate enrichment outputs.
+    feat_top_cluster: dict = H_df.idxmax(axis=0).to_dict()
+
     # ── Collect top gen_ features per cluster ─────────────────────────────
     gen_cols = [c for c in H_df.columns if 'gen_' in c]
     all_top_features: set[str] = set()
@@ -416,6 +459,29 @@ def enrich_with_gtex(
     print(f"    SNP features: {len(snp_features)}  |  HLA features: {len(hla_features)}")
 
     # ── Map SNPs → genes (NCBI dbSNP) ─────────────────────────────────────
+    # ── Save feature → top-cluster assignments ────────────────────────────
+    feat_assign_rows = []
+    for feat in sorted(all_top_features):
+        top_clust = feat_top_cluster.get(feat, '')
+        top_load  = float(H_df.loc[top_clust, feat]) if top_clust in H_df.index else float('nan')
+        feat_assign_rows.append({
+            'feature':              feat,
+            'top_cluster':          top_clust,
+            'loading_in_top_cluster': round(top_load, 6),
+        })
+    feat_assign_df = pd.DataFrame(feat_assign_rows)
+    feat_assign_df.to_csv(
+        os.path.join(out_dir, 'feature_cluster_assignments.csv'), index=False
+    )
+    print(f"    Saved feature_cluster_assignments.csv ({len(feat_assign_df)} features)")
+
+    # ── Build SNP → top_cluster map (a SNP may appear in several features) ─
+    snp_top_clusters: dict = defaultdict(set)
+    for feat, ids in feat_to_ids.items():
+        tc = feat_top_cluster.get(feat, '')
+        for snp in ids.get('snps', []):
+            snp_top_clusters[snp].add(tc)
+
     snp_ids: set[str] = set()
     for feat in snp_features:
         snp_ids.update(feat_to_ids[feat]['snps'])
@@ -507,6 +573,7 @@ def enrich_with_gtex(
                     'tissue':      tissue,
                     'effect_size': ev['effect_size'],
                     'p_value':     ev['p_value'],
+                    'top_cluster': '|'.join(sorted(snp_top_clusters.get(snp, []))),
                 })
 
     eqtl_df = pd.DataFrame(eqtl_rows)
@@ -633,8 +700,43 @@ if __name__ == '__main__':
         formatter_class=argparse.RawTextHelpFormatter,
     )
     parser.add_argument(
-        '--cluster_dir', required=True,
-        help="Path to bNMF output directory containing feature_loadings.csv",
+        '--cluster_dir', default=None,
+        help=(
+            "Path to bNMF output directory containing feature_loadings.csv.\n"
+            "If omitted, auto-resolved from --pheno_data, --population, --analysis_mode."
+        ),
+    )
+    parser.add_argument(
+        '--pheno_data', default=None,
+        help=(
+            "Base analysis directory (e.g. results/type2Diabetes/combinedAnalysis).\n"
+            "Used with --population and --analysis_mode to auto-resolve --cluster_dir."
+        ),
+    )
+    parser.add_argument(
+        '--population',
+        default='high_risk',
+        choices=['high_risk', 'low_control', 'both'],
+        help="Population group (default: high_risk).",
+    )
+    parser.add_argument(
+        '--analysis_mode',
+        default='cohort',
+        choices=['cohort', 'combined', 'clinical_only', 'genomic_only'],
+        help=(
+            "Which bNMF results to use (default: cohort):\n"
+            "  cohort        — per-cohort results under cohortBnmf/{cohort}/\n"
+            "  combined      — cross-cohort (combinedCohortBnmf_{population})\n"
+            "  clinical_only — clinical-only NMF\n"
+            "  genomic_only  — genomic-only NMF"
+        ),
+    )
+    parser.add_argument(
+        '--cohort', default=None,
+        help=(
+            "Cohort name for --analysis_mode cohort (e.g. 'cardio').\n"
+            "If omitted, all cohorts under cohortBnmf/ are processed."
+        ),
     )
     parser.add_argument(
         '--top_n', type=int, default=20,
@@ -651,12 +753,48 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    # ── Resolve cluster_dir(s) ────────────────────────────────────────────────
+    if args.cluster_dir:
+        cluster_dirs = [args.cluster_dir]
+    elif args.pheno_data:
+        if args.analysis_mode == 'cohort':
+            if args.cohort:
+                cluster_dirs = [
+                    _resolve_cluster_dir(args.pheno_data, args.population,
+                                          'cohort', args.cohort)
+                ]
+            else:
+                cohorts = _list_cohort_dirs(args.pheno_data)
+                if not cohorts:
+                    print(f"[ERROR] No cohort sub-directories found under "
+                          f"{args.pheno_data}/scores/cohortBnmf/")
+                    raise SystemExit(1)
+                print(f"  Found {len(cohorts)} cohort(s): {', '.join(cohorts)}")
+                cluster_dirs = [
+                    _resolve_cluster_dir(args.pheno_data, args.population,
+                                          'cohort', c)
+                    for c in cohorts
+                ]
+        else:
+            cluster_dirs = [
+                _resolve_cluster_dir(args.pheno_data, args.population,
+                                      args.analysis_mode)
+            ]
+    else:
+        print("[ERROR] Provide either --cluster_dir or --pheno_data.")
+        raise SystemExit(1)
+
     tissues = [t.strip() for t in args.tissues.split(',')] \
         if args.tissues else None
 
-    enrich_with_gtex(
-        cluster_dir=args.cluster_dir,
-        top_n=args.top_n,
-        tissues=tissues,
-        ncbi_api_key=args.ncbi_api_key,
-    )
+    for cdir in cluster_dirs:
+        if not os.path.isdir(cdir):
+            print(f"  [SKIP] Directory not found: {cdir}")
+            continue
+        print(f"\n{'='*70}\n  cluster_dir: {cdir}\n{'='*70}")
+        enrich_with_gtex(
+            cluster_dir=cdir,
+            top_n=args.top_n,
+            tissues=tissues,
+            ncbi_api_key=args.ncbi_api_key,
+        )
