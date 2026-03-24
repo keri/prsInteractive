@@ -594,7 +594,8 @@ def _cophenetic_correlation(C):
     return val
 
 
-def _pca_feature_selection(X_df, n_pcs=20, top_per_pc=5, variance_target=None):
+def _pca_feature_selection(X_df, n_pcs=20, top_per_pc=5, variance_target=None,
+                           max_pcs_scan=300):
     """
     Select features proportional to each PC's explained variance ratio.
 
@@ -629,9 +630,7 @@ def _pca_feature_selection(X_df, n_pcs=20, top_per_pc=5, variance_target=None):
 
     if variance_target is not None:
         # ── Auto-detect n_pcs needed to explain variance_target ───────────
-        # Cap at 500 to keep SVD tractable; for genomic data 500 PCs is
-        # typically enough to reach 50–70% of variance.
-        n_search = min(max_possible, 500)
+        n_search = min(max_possible, max_pcs_scan)
         print(f"    PC feature selection: scanning up to {n_search} PCs "
               f"to reach {variance_target*100:.0f}% explained variance …")
         svd = TruncatedSVD(n_components=n_search, random_state=42)
@@ -692,7 +691,8 @@ def run_consensus_bnmf(X, k_min=2, k_max=8, n_runs=30,
                        feature_select_method='variance',
                        n_pcs_for_features=20,
                        top_features_per_pc=5,
-                       variance_target=None):
+                       variance_target=None,
+                       max_pcs_scan=300):
     """
     Consensus bNMF: for each k in [k_min, k_max], run NMF n_runs times,
     build the soft consensus matrix, and compute cophenetic correlation.

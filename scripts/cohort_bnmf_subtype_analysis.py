@@ -1319,7 +1319,7 @@ def _variance_sparsity_filter(
     df,
     min_variance=0.005,
     max_zero_fraction=0.80,
-    max_features=500,
+    max_features=1000,
 ):
     """
     Remove low-information columns before NMF to prevent cluster collapse.
@@ -1503,13 +1503,14 @@ def run_cohort_bnmf(
     fig_path=None,
     min_variance=0.005,
     max_zero_fraction=0.80,
-    max_features=500,
+    max_features=1000,
     feature_weights=None,
     scale_method='quantile',
     feature_select_method='variance',
     n_pcs_for_features=20,
     top_features_per_pc=5,
     variance_target=None,
+    max_pcs_scan=300,
 ):
     """
     Run consensus bNMF for one cohort and write all outputs.
@@ -1559,7 +1560,7 @@ def run_cohort_bnmf(
     if feature_select_method == 'pca' and X_df.shape[1] > top_features_per_pc:
         X_df = bnmf_core._pca_feature_selection(
             X_df, n_pcs=n_pcs_for_features, top_per_pc=top_features_per_pc,
-            variance_target=variance_target)
+            variance_target=variance_target, max_pcs_scan=max_pcs_scan)
         kept_cols = X_df.columns.tolist()
 
     # ── Post-scale feature weighting ────────────────────────────────────────
@@ -1853,13 +1854,14 @@ def run_all_cohorts(
     population='both',
     min_variance=0.005,
     max_zero_fraction=0.80,
-    max_features=500,
+    max_features=1000,
     include_raw_clinical=True,
     scale_method='quantile',
     feature_select_method='variance',
     n_pcs_for_features=20,
     top_features_per_pc=5,
     variance_target=None,
+    max_pcs_scan=300,
 ):
     """
     Run cohort bNMF for all (or specified) cohorts.
@@ -2018,6 +2020,7 @@ def run_all_cohorts(
                 n_pcs_for_features=n_pcs_for_features,
                 top_features_per_pc=top_features_per_pc,
                 variance_target=variance_target,
+                max_pcs_scan=max_pcs_scan,
             )
 
             if result:
@@ -2079,7 +2082,7 @@ def run_pca_analysis(
     include_holdout_prs=True,
     min_variance=0.005,
     max_zero_fraction=0.80,
-    max_features=500,
+    max_features=1000,
     include_prs_with_genomic=False,
     population='high_risk',
     include_raw_clinical=True,
@@ -2403,7 +2406,7 @@ def run_combined_bnmf(
     weight_features=False,
     min_variance=0.005,
     max_zero_fraction=0.80,
-    max_features=500,
+    max_features=1000,
     include_prs_with_genomic=False,
     population='both',
     include_raw_clinical=True,
@@ -2414,6 +2417,7 @@ def run_combined_bnmf(
     n_pcs_for_features=20,
     top_features_per_pc=5,
     variance_target=None,
+    max_pcs_scan=300,
 ):
     """
     Combined cross-cohort bNMF subtype analysis.
@@ -2617,6 +2621,7 @@ def run_combined_bnmf(
         n_pcs_for_features=n_pcs_for_features,
         top_features_per_pc=top_features_per_pc,
         variance_target=variance_target,
+        max_pcs_scan=max_pcs_scan,
     )
 
     if result is None:
@@ -2968,10 +2973,19 @@ if __name__ == '__main__':
         "--variance_target", type=float, default=None,
         help=(
             "When --feature_select_method=pca, auto-detect how many PCs are needed "
-            "to explain this fraction of variance (e.g. 0.5 for 50%%) and use that "
+            "to explain this fraction of variance (e.g. 0.7 for 70%%) and use that "
             "many PCs for feature selection. Overrides --n_pcs_for_features. "
             "Recommended for genomic data where each PC explains <1%% of variance "
-            "and a fixed n_pcs may fall far short of 50%% explained. (default: None)"
+            "and a fixed n_pcs may fall far short of 70%% explained. (default: None)"
+        ),
+    )
+    parser.add_argument(
+        "--max_pcs_scan", type=int, default=300,
+        help=(
+            "Maximum number of PCs to scan when --variance_target is set. "
+            "Caps the SVD at this value to keep computation tractable. "
+            "If the target is not reached within this limit the scan uses all "
+            "computed PCs and warns. (default: 300)"
         ),
     )
 
@@ -3051,6 +3065,7 @@ if __name__ == '__main__':
         n_pcs_for_features=args.n_pcs_for_features,
         top_features_per_pc=args.top_features_per_pc,
         variance_target=args.variance_target,
+        max_pcs_scan=args.max_pcs_scan,
     )
 
     if args.mode == 'pca':
