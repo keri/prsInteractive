@@ -1595,8 +1595,13 @@ def run_cohort_bnmf(
               f"PC3={_ev[2]*100:.1f}%  PC4={_ev[3]*100:.1f}%  "
               f"PC5={_ev[4]*100:.1f}%")
         for thresh in (0.50, 0.70, 0.90):
-            n_needed = int(np.searchsorted(_cumev, thresh)) + 1
-            print(f"    Components to explain {thresh*100:.0f}% variance: {n_needed}")
+            idx = int(np.searchsorted(_cumev, thresh))
+            if idx >= len(_cumev):
+                print(f"    Components to explain {thresh*100:.0f}% variance: "
+                      f">={len(_cumev)} (not reached — re-run with larger --n_pca_components; "
+                      f"current cumulative variance = {_cumev[-1]*100:.1f}%)")
+            else:
+                print(f"    Components to explain {thresh*100:.0f}% variance: {idx + 1}")
         if _ev[0] > 0.70:
             print(f"    *** WARNING: PC1 explains {_ev[0]*100:.1f}% of variance — "
                   f"feature matrix is near rank-1. NMF cluster separation will be "
@@ -2051,6 +2056,7 @@ def run_pca_analysis(
     include_raw_clinical=True,
     scale_method='quantile',
     n_pca_components=30,
+    clinical_only=False,
 ):
     """
     Build the same combined feature matrix used by run_combined_bnmf, scale
@@ -2074,16 +2080,18 @@ def run_pca_analysis(
 
     scores_path = os.path.join(pheno_data, 'scores')
     pop_suffix  = f'_{population}' if population != 'both' else ''
-    base_output = os.path.join(scores_path,           f'combinedPCA{pop_suffix}')
-    base_fig    = os.path.join(pheno_data, 'figures', f'combinedPCA{pop_suffix}')
+    feat_suffix = '_clinical_only' if clinical_only else ''
+    base_output = os.path.join(scores_path,           f'combinedPCA{pop_suffix}{feat_suffix}')
+    base_fig    = os.path.join(pheno_data, 'figures', f'combinedPCA{pop_suffix}{feat_suffix}')
     os.makedirs(base_output, exist_ok=True)
     os.makedirs(base_fig,    exist_ok=True)
 
     print("\n" + "=" * 60)
     print("COMBINED PCA STRUCTURE ANALYSIS")
     print("=" * 60)
-    print(f"  population : {population}")
-    print(f"  use_set    : {use_set}")
+    print(f"  population    : {population}")
+    print(f"  use_set       : {use_set}")
+    print(f"  features      : {'clinical only' if clinical_only else 'genomic + clinical'}")
 
     # ── Load shared data (identical to run_combined_bnmf) ─────────────────
     print("\n[1] Loading feature definitions...")
@@ -2125,6 +2133,17 @@ def run_pca_analysis(
     if combined_matrix.empty:
         print("  [ERROR] Combined feature matrix is empty. Aborting.")
         return
+
+    # ── Clinical-only filter ───────────────────────────────────────────────
+    if clinical_only:
+        clin_cols = [c for c in combined_matrix.columns if c.startswith('clin_')]
+        if not clin_cols:
+            print("  [ERROR] No clinical (clin_*) columns found in combined matrix. "
+                  "Ensure --no_raw_clinical is NOT set when using --clinical_only.")
+            return
+        combined_matrix = combined_matrix[clin_cols]
+        print(f"  Clinical-only: retained {len(clin_cols)} clin_* columns, "
+              f"dropped all gen_* and PRS anchor columns.")
 
     print(f"\n[5] Scaling ({scale_method}) and filtering...")
     X_df, _retained = bnmf_core.impute_and_scale(
@@ -2177,8 +2196,13 @@ def run_pca_analysis(
     print(f"    PC1={ev[0]*100:.1f}%  PC2={ev[1]*100:.1f}%  "
           f"PC3={ev[2]*100:.1f}%  PC4={ev[3]*100:.1f}%  PC5={ev[4]*100:.1f}%")
     for thresh in (0.50, 0.70, 0.90):
-        n_needed = int(np.searchsorted(cev, thresh)) + 1
-        print(f"    PCs to explain {thresh*100:.0f}%: {n_needed}")
+        idx = int(np.searchsorted(cev, thresh))
+        if idx >= len(cev):
+            print(f"    PCs to explain {thresh*100:.0f}%: >={len(cev)} "
+                  f"(not reached — current cumulative = {cev[-1]*100:.1f}%; "
+                  f"re-run with larger --n_pca_components)")
+        else:
+            print(f"    PCs to explain {thresh*100:.0f}%: {idx + 1}")
     if ev[0] > 0.50:
         print(f"  *** PC1 explains {ev[0]*100:.1f}% — strong single dominant direction. "
               f"NMF cluster separation will be limited.")
@@ -2219,11 +2243,17 @@ def run_pca_analysis(
     axes[1].plot(pc_nums, cev * 100, marker='o', color='#1f77b4',
                  linewidth=2, markersize=4)
     for thresh in (50, 70, 90):
-        n_needed = int(np.searchsorted(cev, thresh / 100)) + 1
+        idx = int(np.searchsorted(cev, thresh / 100))
         axes[1].axhline(thresh, color='grey', linestyle=':', linewidth=0.8)
-        axes[1].annotate(f'{thresh}% @ PC{n_needed}',
-                         xy=(n_needed, thresh), xytext=(4, 2),
-                         textcoords='offset points', fontsize=7, color='grey')
+        if idx < len(cev):
+            axes[1].annotate(f'{thresh}% @ PC{idx + 1}',
+                             xy=(idx + 1, thresh), xytext=(4, 2),
+                             textcoords='offset points', fontsize=7, color='grey')
+        else:
+            # Threshold not reached — annotate at right edge with ">N" label
+            axes[1].annotate(f'{thresh}% not reached\n(>{len(cev)} PCs)',
+                             xy=(len(cev), cev[-1] * 100), xytext=(-60, 4),
+                             textcoords='offset points', fontsize=6, color='red')
     axes[1].set_xlabel('Number of Components')
     axes[1].set_ylabel('Cumulative variance (%)')
     axes[1].set_title('Cumulative Explained Variance')
@@ -2336,6 +2366,7 @@ def run_combined_bnmf(
     population='both',
     include_raw_clinical=True,
     scale_method='quantile',
+    clinical_only=False,
 ):
     """
     Combined cross-cohort bNMF subtype analysis.
@@ -2364,8 +2395,9 @@ def run_combined_bnmf(
     # Use a population-specific subdirectory so high_risk and low_control
     # combined runs don't overwrite each other's outputs.
     pop_suffix  = f'_{population}' if population != 'both' else ''
-    base_output = os.path.join(scores_path, f'combinedCohortBnmf{pop_suffix}')
-    base_fig    = os.path.join(pheno_data,  'figures', f'combinedCohortBnmf{pop_suffix}')
+    clin_suffix = '_clinical_only' if clinical_only else ''
+    base_output = os.path.join(scores_path, f'combinedCohortBnmf{pop_suffix}{clin_suffix}')
+    base_fig    = os.path.join(pheno_data,  'figures', f'combinedCohortBnmf{pop_suffix}{clin_suffix}')
 
     print("\n" + "=" * 60)
     print("COMBINED CROSS-COHORT bNMF")
@@ -2463,6 +2495,19 @@ def run_combined_bnmf(
     # being normalised away.  When weight_features=False (default), None is
     # passed and all features are treated equally.
     nmf_matrix = combined_matrix.copy()
+
+    # ── Clinical-only mode: drop all genomic features ──────────────────────
+    if clinical_only:
+        clin_cols = [c for c in nmf_matrix.columns if c.startswith('clin_')]
+        if not clin_cols:
+            print("  [ERROR] No clinical (clin_*) columns found. "
+                  "Ensure --no_raw_clinical is NOT set when using --clinical_only.")
+            return
+        dropped_gen = len(nmf_matrix.columns) - len(clin_cols)
+        nmf_matrix = nmf_matrix[clin_cols]
+        print(f"  Clinical-only: {len(clin_cols)} clin_* features retained, "
+              f"{dropped_gen} gen_* features dropped")
+
     resolved_weights = None
     if weight_features and feature_metadata:
         resolved_weights = {
@@ -2706,6 +2751,11 @@ if __name__ == '__main__':
         help="Number of PCA components to compute in --mode pca (default: 30)",
     )
     parser.add_argument(
+        "--clinical_only", action='store_true',
+        help="PCA mode only: restrict matrix to clin_* columns (no genomic features). "
+             "Useful for assessing clinical feature dimensionality independently.",
+    )
+    parser.add_argument(
         "--population", default='both',
         choices=['both', 'high_risk', 'low_control', 'separate'],
         help=(
@@ -2841,6 +2891,7 @@ if __name__ == '__main__':
             include_raw_clinical=not args.no_raw_clinical,
             scale_method=args.scale_method,
             n_pca_components=args.n_pca_components,
+            clinical_only=args.clinical_only,
         )
     else:
         if args.mode in ('per_cohort', 'both'):
@@ -2852,4 +2903,5 @@ if __name__ == '__main__':
                 weight_features=args.weight_features,
                 include_prs_with_genomic=args.include_prs_with_genomic,
                 population=args.population,
+                clinical_only=args.clinical_only,
             )
