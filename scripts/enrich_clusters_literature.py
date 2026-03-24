@@ -1151,7 +1151,95 @@ def _resolve_hla_term_for_literature(primary_term, phenotype, min_count=5):
     return fallback, f"'{primary_term}' low coverage → fallback '{fallback}'"
 
 
-# ── Background table loader ────────────────────────────────────────────────────
+# ── Background data loaders ────────────────────────────────────────────────────
+
+def _find_background_dir(cluster_dir: str) -> str | None:
+    """
+    Walk upward from cluster_dir looking for a sibling 'background/' directory.
+    Handles both per-cohort (…/scores/cohortBnmf/{name}/) and combined
+    (…/scores/combinedCohortBnmf_*/) layouts without needing pheno_data.
+    Returns the absolute path to the background directory, or None.
+    """
+    path = os.path.abspath(cluster_dir)
+    for _ in range(6):
+        parent = os.path.dirname(path)
+        candidate = os.path.join(parent, 'background')
+        if os.path.isdir(candidate):
+            return candidate
+        if parent == path:
+            break
+        path = parent
+    return None
+
+
+def load_background_data(path: str) -> dict:
+    """
+    Load phenotype background data from a JSON or CSV file produced by
+    phenotype_background_analysis.py.
+
+    Returns
+    -------
+    dict  {term_lower: {'term': str, 'category': str, 'count': int,
+                        'sentiment_score': float, 'association_type': str}}
+
+    JSON format  : root['terms'] is a list of dicts with those fields.
+    CSV format   : rows with columns category, term, count, sentiment_score,
+                   association_type (all optional except term).
+    """
+    if not path or not os.path.exists(path):
+        return {}
+
+    try:
+        if path.endswith('.json'):
+            import json as _json
+            with open(path) as fh:
+                raw = _json.load(fh)
+            items = raw.get('terms', []) if isinstance(raw, dict) else raw
+        else:
+            import pandas as _pd
+            items = _pd.read_csv(path).to_dict('records')
+    except Exception as exc:
+        print(f"  [WARN] Could not read background data '{path}': {exc}")
+        return {}
+
+    result: dict = {}
+    for item in items:
+        term = str(item.get('term', '')).strip()
+        if not term:
+            continue
+        result[term.lower()] = {
+            'term':             term,
+            'category':         str(item.get('category', '')),
+            'count':            int(item.get('count', 0) or 0),
+            'sentiment_score':  float(item.get('sentiment_score', 0.0) or 0.0),
+            'association_type': str(item.get('association_type', '')),
+        }
+
+    print(f"  Background data   : {len(result)} terms from {os.path.basename(path)}")
+    cats = {}
+    for v in result.values():
+        cats[v['category']] = cats.get(v['category'], 0) + 1
+    for cat, n in sorted(cats.items(), key=lambda x: -x[1]):
+        print(f"    {cat:30s} {n:4d} terms")
+    return result
+
+
+def _background_weight(count: int, sentiment: float) -> float:
+    """
+    Compute a background evidence weight in [0, 1] that rewards:
+      - High publication count   (log-scaled; saturates ~1e6)
+      - High sentiment_score     (topic-specificity proxy)
+
+    Formula: log10(count + 2) / 7.0  ×  (0.5 + 0.5 × clamp(sentiment / 0.4))
+      - log10 denominator 7 ≈ log10(1e7), so even the most-cited terms < 1
+      - sentiment factor ranges from 0.5 (unscored) to 1.0 (highly specific)
+    """
+    import math
+    count_factor     = math.log10(max(count, 0) + 2) / 7.0
+    sentiment_clamped = min(1.0, float(sentiment or 0.0) / 0.4)
+    sentiment_factor  = 0.5 + 0.5 * sentiment_clamped
+    return min(1.0, count_factor * sentiment_factor)
+
 
 def load_phenotypes_from_background_table(
     background_table_path: str,
@@ -1160,9 +1248,9 @@ def load_phenotypes_from_background_table(
     min_count: int = 0,
 ) -> list[str]:
     """
-    Load all unique terms from a phenotype_background.csv produced by
-    phenotype_background_analysis.py and return them as a phenotype list
-    for use in enrich_with_literature().
+    Load all unique terms from a phenotype_background CSV or JSON file produced
+    by phenotype_background_analysis.py and return them as a phenotype list for
+    use in enrich_with_literature().  Supports both .csv and .json formats.
 
     Every gene/SNP feature will be queried against every term in this list,
     producing a full (feature × background_term) evidence matrix so that
@@ -1171,7 +1259,7 @@ def load_phenotypes_from_background_table(
 
     Parameters
     ----------
-    background_table_path : str  — path to phenotype_background.csv
+    background_table_path : str  — path to phenotype_background.csv or .json
     primary_phenotype     : str | None — if given, it is prepended to the list
                              and any duplicate removed; ensures the main phenotype
                              is always included even if not in the table
@@ -1184,30 +1272,24 @@ def load_phenotypes_from_background_table(
     -------
     list[str]  deduplicated phenotype terms in discovery order
     """
-    try:
-        bg = pd.read_csv(background_table_path)
-    except Exception as exc:
-        print(f"  [WARN] Could not read background table '{background_table_path}': {exc}")
+    bg_meta = load_background_data(background_table_path)
+    if not bg_meta:
         return [primary_phenotype] if primary_phenotype else []
 
-    required_cols = {'term', 'count'}
-    missing = required_cols - set(bg.columns)
-    if missing:
-        print(f"  [WARN] background table missing columns: {missing}. "
-              f"Falling back to primary phenotype only.")
-        return [primary_phenotype] if primary_phenotype else []
+    # Apply filters
+    filtered = [
+        v for v in bg_meta.values()
+        if (not association_type or v['association_type'] == association_type)
+        and v['count'] >= min_count
+    ]
 
-    if association_type and 'association_type' in bg.columns:
-        bg = bg[bg['association_type'] == association_type]
+    # Sort: highest count first (within each category, counts proxy specificity)
+    filtered.sort(key=lambda v: -v['count'])
 
-    if min_count > 0:
-        bg = bg[bg['count'] >= min_count]
-
-    # Preserve discovery order (highest count first within each category)
     terms_ordered: list[str] = []
     seen: set[str] = set()
-    for term in bg.sort_values('count', ascending=False)['term']:
-        t = str(term).strip()
+    for v in filtered:
+        t = v['term']
         if t and t.lower() not in seen:
             terms_ordered.append(t)
             seen.add(t.lower())
@@ -1231,6 +1313,7 @@ def enrich_with_literature(
     cluster_dir,
     phenotypes,
     background_table=None,
+    auto_background=True,
     disgenet_api_key=None,
     ncbi_api_key=None,
     top_n=20,
@@ -1304,19 +1387,31 @@ def enrich_with_literature(
     print(f"  Population context : {population_context}"
           f"{'  [protective queries enabled]' if run_protective else ''}")
 
-    # ── Expand phenotypes from background table ────────────────────────────
-    # When a background table is provided, all unique terms from it are added
-    # to the phenotypes list so every feature is scored against every term.
-    # No ranking or truncation — the full cross-product is always computed.
-    if background_table:
-        # primary_phenotype = first element of the phenotypes list acts as anchor
+    # ── Auto-detect background file if not supplied ────────────────────────
+    bg_path = background_table
+    if not bg_path and auto_background:
+        bg_dir = _find_background_dir(cluster_dir)
+        if bg_dir:
+            for ext in ('.json', '.csv'):
+                candidate = os.path.join(bg_dir, f'phenotype_background{ext}')
+                if os.path.exists(candidate):
+                    bg_path = candidate
+                    print(f"  Background file   : auto-detected {candidate}")
+                    break
+
+    # ── Load background metadata (category / count / sentiment) ───────────
+    # term_meta maps term_lower → {term, category, count, sentiment_score}
+    # Used for: (1) expanding phenotype list; (2) annotating output columns;
+    #           (3) computing background_weighted_score.
+    term_meta: dict = load_background_data(bg_path) if bg_path else {}
+
+    # ── Expand phenotypes from background data ─────────────────────────────
+    if term_meta:
         primary = phenotypes[0] if phenotypes else None
         bg_terms = load_phenotypes_from_background_table(
-            background_table,
+            bg_path,
             primary_phenotype=primary,
         )
-        # Merge: keep original phenotypes first, then append background terms
-        # that are not already present (case-insensitive dedup)
         n_before   = len(phenotypes)
         seen_lower = {p.lower() for p in phenotypes}
         extra: list[str] = []
@@ -1478,10 +1573,21 @@ def enrich_with_literature(
             # the standard risk query (approximated: prot_count beyond risk count)
             unique_prot = max(0, prot_count - pt3_count)
 
+        # ── Background category / weight annotation ────────────────────────
+        pheno_meta  = term_meta.get(pheno.lower(), {})
+        bg_category = pheno_meta.get('category', '')
+        bg_count    = pheno_meta.get('count', 0)
+        bg_sentiment = pheno_meta.get('sentiment_score', 0.0)
+        bg_weight   = _background_weight(bg_count, bg_sentiment)
+
         row = {
             'term':                  term,
             'query_term':            query_term,
             'phenotype':             pheno,
+            'background_category':   bg_category,
+            'background_count':      bg_count,
+            'background_sentiment':  round(bg_sentiment, 4),
+            'background_weight':     round(bg_weight, 4),
             'population_context':    population_context,
             'disgenet_score':        round(disgenet_score, 6),
             'disgenet_disease':      disgenet_disease,
@@ -1531,17 +1637,26 @@ def enrich_with_literature(
             loading = float(H_df.loc[cluster, feat])
             for term in all_terms.get(feat, []):
                 for pheno in phenotypes:
-                    score = ev_lookup.get((term, pheno), 0.0)
+                    score      = ev_lookup.get((term, pheno), 0.0)
+                    pheno_meta = term_meta.get(pheno.lower(), {})
+                    bg_cat     = pheno_meta.get('category', '')
+                    bg_wt      = _background_weight(
+                        pheno_meta.get('count', 0),
+                        pheno_meta.get('sentiment_score', 0.0),
+                    )
                     cluster_ranked_rows.append({
-                        'cluster':            cluster,
-                        'feature':            feat,
-                        'top_cluster':        feat_top_cluster.get(feat, cluster),
-                        'term':               term,
-                        'phenotype':          pheno,
-                        'cluster_rank':       rank,
-                        'loading':            round(loading, 6),
-                        'combined_score':     score,
-                        'weighted_rank_score': round(loading * score, 6),
+                        'cluster':                   cluster,
+                        'feature':                   feat,
+                        'top_cluster':               feat_top_cluster.get(feat, cluster),
+                        'term':                      term,
+                        'phenotype':                 pheno,
+                        'background_category':       bg_cat,
+                        'background_weight':         round(bg_wt, 4),
+                        'cluster_rank':              rank,
+                        'loading':                   round(loading, 6),
+                        'combined_score':            score,
+                        'weighted_rank_score':       round(loading * score, 6),
+                        'background_weighted_score': round(loading * score * bg_wt, 6),
                     })
 
     cluster_ranked_df = pd.DataFrame(cluster_ranked_rows)
@@ -1569,18 +1684,42 @@ def enrich_with_literature(
             print(f"    Saved cluster_evidence_ranked.csv")
 
     # ── Cluster summary ────────────────────────────────────────────────────
+    # Use background_weighted_score when available, else weighted_rank_score
+    summary_sort_col = (
+        'background_weighted_score'
+        if 'background_weighted_score' in cluster_ranked_df.columns
+        and cluster_ranked_df['background_weighted_score'].sum() > 0
+        else 'weighted_rank_score'
+    )
     summary_rows = []
     if not cluster_ranked_df.empty:
         for cluster, grp in cluster_ranked_df.groupby('cluster'):
-            best = grp.nlargest(1, 'weighted_rank_score').iloc[0]
-            summary_rows.append({
+            best = grp.nlargest(1, summary_sort_col).iloc[0]
+            # Top hit per background category (when categories available)
+            category_bests = {}
+            if 'background_category' in grp.columns:
+                for cat, cat_grp in grp[grp['background_category'] != ''].groupby(
+                        'background_category'):
+                    cb = cat_grp.nlargest(1, summary_sort_col).iloc[0]
+                    category_bests[cat] = (cb['term'], round(cb[summary_sort_col], 6))
+
+            row = {
                 'cluster':             cluster,
                 'top_term':            best['term'],
                 'top_feature':         best['feature'],
+                'top_cluster':         best.get('top_cluster', cluster),
                 'dominant_phenotype':  best['phenotype'],
+                'dominant_category':   best.get('background_category', ''),
                 'max_evidence_score':  best['combined_score'],
                 'weighted_rank_score': best['weighted_rank_score'],
-            })
+            }
+            if 'background_weighted_score' in best.index:
+                row['background_weighted_score'] = best['background_weighted_score']
+            # Add per-category top terms as flat columns
+            for cat, (cat_term, cat_score) in sorted(category_bests.items()):
+                row[f'top_{cat}_term']  = cat_term
+                row[f'top_{cat}_score'] = cat_score
+            summary_rows.append(row)
 
     summary_df = pd.DataFrame(summary_rows)
     if not summary_df.empty:
@@ -1603,9 +1742,13 @@ def enrich_with_literature(
             print(f"    Saved cluster_literature_summary.csv")
         print("\n  Cluster dominant associations:")
         for _, row in summary_df.iterrows():
+            cat_tag = (f"  [{row['dominant_category']}]"
+                       if row.get('dominant_category') else '')
+            bw_tag  = (f"  bg_wt={row['background_weighted_score']:.4f}"
+                       if 'background_weighted_score' in row.index else '')
             print(f"    {row['cluster']:20s} → {row['top_term']} "
-                  f"× {row['dominant_phenotype']}  "
-                  f"(score={row['max_evidence_score']:.3f})")
+                  f"× {row['dominant_phenotype']}{cat_tag}  "
+                  f"(score={row['max_evidence_score']:.3f}{bw_tag})")
 
     print(f"\n  Literature enrichment complete → {out_dir}/")
     return {
@@ -1682,12 +1825,23 @@ if __name__ == '__main__':
     parser.add_argument(
         '--background_table', default=None,
         help=(
-            "Path to phenotype_background.csv produced by\n"
+            "Path to phenotype_background.csv or .json produced by\n"
             "phenotype_background_analysis.py.  When supplied, all unique\n"
             "terms in the table (subtypes, co-phenotypes, mechanisms, pathways,\n"
             "complications, comorbidities) are added to the phenotype list so\n"
             "every gene/SNP feature is scored against every background term.\n"
-            "No ranking or truncation is applied."
+            "If omitted, a phenotype_background.json/.csv is auto-detected from\n"
+            "a 'background/' directory adjacent to the analysis root.\n"
+            "Outputs gain: background_category, background_count,\n"
+            "background_sentiment, background_weight, background_weighted_score."
+        ),
+    )
+    parser.add_argument(
+        '--no_background_auto', action='store_true',
+        help=(
+            "Disable auto-detection of the phenotype_background file.\n"
+            "Use when you want to run without background terms even if a\n"
+            "background/ directory exists alongside the analysis."
         ),
     )
     parser.add_argument(
@@ -1784,6 +1938,7 @@ if __name__ == '__main__':
     shared_kw  = dict(
         phenotypes=phenotypes,
         background_table=args.background_table,
+        auto_background=not args.no_background_auto,
         disgenet_api_key=args.disgenet_api_key,
         ncbi_api_key=args.ncbi_api_key,
         top_n=args.top_n,
