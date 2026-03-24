@@ -206,7 +206,7 @@ class ZoteroCorpus:
                 MAX(CASE WHEN f.fieldName = 'url'          THEN idv.value END) AS url
             FROM items i
             JOIN itemTypes it   ON i.itemTypeID  = it.itemTypeID
-            JOIN collectionItems ci ON i.itemID  = ci.collectionID
+            JOIN collectionItems ci ON i.itemID  = ci.itemID
             LEFT JOIN itemData id    ON i.itemID  = id.itemID
             LEFT JOIN fields f       ON id.fieldID = f.fieldID
             LEFT JOIN itemDataValues idv ON id.valueID = idv.valueID
