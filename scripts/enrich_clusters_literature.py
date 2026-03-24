@@ -202,6 +202,7 @@ class ZoteroCorpus:
                 it.typeName                                                    AS item_type,
                 MAX(CASE WHEN f.fieldName = 'title'        THEN idv.value END) AS title,
                 MAX(CASE WHEN f.fieldName = 'abstractNote' THEN idv.value END) AS abstract,
+                MAX(CASE WHEN f.fieldName = 'DOI'          THEN idv.value END) AS doi,
                 MAX(CASE WHEN f.fieldName = 'extra'        THEN idv.value END) AS extra,
                 MAX(CASE WHEN f.fieldName = 'url'          THEN idv.value END) AS url
             FROM items i
@@ -302,12 +303,190 @@ class ZoteroCorpus:
                 return m.group(1)
         return ''
 
-    def load(self) -> 'ZoteroCorpus':
+    @staticmethod
+    def _extract_doi(doi_field: str, extra: str, url: str) -> str:
+        """Extract DOI from Zotero fields (DOI field → extra → URL)."""
+        if doi_field:
+            return doi_field.strip()
+        if extra:
+            m = re.search(r'DOI:\s*(10\.\S+)', extra, re.IGNORECASE)
+            if m:
+                return m.group(1).rstrip('.,;)')
+        if url and '10.' in url:
+            m = re.search(r'(10\.\d{4,}/\S+)', url)
+            if m:
+                return m.group(1).rstrip('.,;)')
+        return ''
+
+    # ── PMC full-text fetch ────────────────────────────────────────────────
+
+    @staticmethod
+    def _fetch_pmc_fulltext(pmid: str, api_key: str | None = None,
+                             cache: dict | None = None) -> str:
+        """
+        Fetch full text from PubMed Central for a given PMID.
+
+        Pipeline
+        --------
+        1. elink — convert PMID → PMCID (confirms OA full text exists in PMC)
+        2. efetch — download full-text XML for the PMCID
+        3. Parse body text, strip XML tags
+
+        Returns plain text or '' if the paper is not in PMC / not open access.
+        Respects NCBI rate limits (10 req/s with key, 3 req/s without).
+        """
+        if not pmid:
+            return ''
+
+        cache_key = f'pmc_{pmid}'
+        if cache is not None and cache_key in cache:
+            return cache[cache_key]
+
+        _headers = {'User-Agent': 'ZoteroCorpus/1.0 (research; contact via GitHub)'}
+        _base    = {'api_key': api_key} if api_key else {}
+        _sleep   = 0.12 if api_key else 0.4
+
+        # ── Step 1: PMID → PMCID ──────────────────────────────────────────
+        try:
+            r = requests.get(
+                f'{NCBI_BASE}/elink.fcgi',
+                params={**_base, 'dbfrom': 'pubmed', 'db': 'pmc',
+                        'id': pmid, 'retmode': 'json'},
+                headers=_headers, timeout=15,
+            )
+            time.sleep(_sleep)
+            if r.status_code != 200:
+                return ''
+            data = r.json()
+            pmcids: list[str] = []
+            for ls in data.get('linksets', []):
+                for ld in ls.get('linksetdbs', []):
+                    if ld.get('dbto') == 'pmc':
+                        pmcids.extend(str(x) for x in ld.get('links', []))
+            if not pmcids:
+                if cache is not None:
+                    cache[cache_key] = ''
+                return ''
+        except Exception:
+            return ''
+
+        # ── Step 2: fetch full-text XML ────────────────────────────────────
+        try:
+            r = requests.get(
+                f'{NCBI_BASE}/efetch.fcgi',
+                params={**_base, 'db': 'pmc', 'id': pmcids[0],
+                        'rettype': 'full', 'retmode': 'xml'},
+                headers=_headers, timeout=45,
+            )
+            time.sleep(_sleep)
+            if r.status_code != 200:
+                return ''
+            xml = r.text
+        except Exception:
+            return ''
+
+        # ── Step 3: extract body text ──────────────────────────────────────
+        body = re.search(r'<body[^>]*>(.*?)</body>', xml, re.DOTALL)
+        raw  = body.group(1) if body else xml
+        # Remove front/back matter if body tag absent
+        raw  = re.sub(r'<(?:front|back)>.*?</(?:front|back)>', '', raw,
+                      flags=re.DOTALL)
+        text = re.sub(r'<[^>]+>', ' ', raw)          # strip tags
+        text = re.sub(r'\s+', ' ', text).strip()
+
+        if cache is not None:
+            cache[cache_key] = text
+        return text
+
+    # ── Unpaywall full-text fetch ──────────────────────────────────────────
+
+    @staticmethod
+    def _fetch_unpaywall_pdf(doi: str, email: str,
+                              cache: dict | None = None) -> str:
+        """
+        Query Unpaywall for a legal open-access PDF URL, download and extract.
+
+        Uses api.unpaywall.org/v2/{doi}?email={email}.
+        Prefers url_for_pdf from best_oa_location; falls back to other OA
+        locations.  Downloads PDF to a temp file, extracts text, then deletes.
+
+        Returns plain text or '' if no open-access version is available.
+        """
+        if not doi or not email:
+            return ''
+
+        cache_key = f'unpaywall_{doi}'
+        if cache is not None and cache_key in cache:
+            return cache[cache_key]
+
+        # ── Query Unpaywall ────────────────────────────────────────────────
+        try:
+            r = requests.get(
+                f'https://api.unpaywall.org/v2/{doi}',
+                params={'email': email},
+                headers={'User-Agent': 'ZoteroCorpus/1.0 (research)'},
+                timeout=15,
+            )
+            time.sleep(0.5)
+            if r.status_code != 200:
+                return ''
+            data = r.json()
+        except Exception:
+            return ''
+
+        # Find best open-access PDF URL
+        pdf_url: str = ''
+        best = data.get('best_oa_location') or {}
+        pdf_url = best.get('url_for_pdf') or ''
+        if not pdf_url:
+            for loc in data.get('oa_locations', []):
+                if loc.get('url_for_pdf'):
+                    pdf_url = loc['url_for_pdf']
+                    break
+        if not pdf_url:
+            if cache is not None:
+                cache[cache_key] = ''
+            return ''
+
+        # ── Download PDF and extract text ──────────────────────────────────
+        import tempfile
+        try:
+            r = requests.get(
+                pdf_url, timeout=45,
+                headers={'User-Agent': 'ZoteroCorpus/1.0 (research)'},
+                allow_redirects=True,
+            )
+            ctype = r.headers.get('content-type', '').lower()
+            if r.status_code != 200 or 'pdf' not in ctype:
+                if cache is not None:
+                    cache[cache_key] = ''
+                return ''
+            with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+                tmp.write(r.content)
+                tmp_path = tmp.name
+            text = ZoteroCorpus._extract_pdf_text(tmp_path)
+            os.unlink(tmp_path)
+        except Exception:
+            text = ''
+
+        if cache is not None:
+            cache[cache_key] = text
+        return text
+
+    def load(self, ncbi_api_key: str | None = None,
+             unpaywall_email: str | None = None) -> 'ZoteroCorpus':
         """
         Load all papers + PDF text from the Zotero collection.
 
         Call once before calling search(). Loading 200-500 papers with PDFs
         typically takes 30–120 seconds depending on PDF size and disk speed.
+
+        For papers that only have abstracts (no local PDF), the method will
+        attempt to fetch full text from:
+          1. PubMed Central (requires ncbi_api_key for 10 req/s; 3/s without)
+          2. Unpaywall open-access PDF (requires unpaywall_email)
+
+        Results are cached in memory to avoid duplicate fetches within a run.
         """
         if self._loaded:
             return self
@@ -340,11 +519,16 @@ class ZoteroCorpus:
             conn.close()
 
         # Build corpus entries, extract PDF text where available
-        n_pdfs = 0
+        n_pdfs      = 0
+        abs_only: list[str] = []   # keys of papers that ended up abstract-only
+
         for p in papers:
-            pmid    = self._extract_pmid(p.get('extra') or '',
+            pmid     = self._extract_pmid(p.get('extra') or '',
+                                          p.get('url') or '')
+            doi      = self._extract_doi(p.get('doi') or '',
+                                         p.get('extra') or '',
                                          p.get('url') or '')
-            key     = pmid or f"item_{p['itemID']}"
+            key      = pmid or f"item_{p['itemID']}"
             pdf_path = pdf_map.get(p['itemID'], '')
             full_text = ''
             is_full   = False
@@ -357,15 +541,64 @@ class ZoteroCorpus:
             self.papers[key] = {
                 'itemID':       p['itemID'],
                 'pmid':         pmid,
+                'doi':          doi,
                 'title':        p.get('title') or '',
                 'abstract':     p.get('abstract') or '',
                 'full_text':    full_text,
                 'is_full_text': is_full,
             }
+            if not is_full:
+                abs_only.append(key)
+
+        # ── Fetch full text for abstract-only papers ───────────────────────
+        # Shared in-memory cache so duplicate PMIDs/DOIs are not re-fetched.
+        fetch_cache: dict = {}
+        n_pmc = 0
+        n_uw  = 0
+
+        if (ncbi_api_key or unpaywall_email) and abs_only:
+            try_pmc = bool(ncbi_api_key)      # PMC works without key too but
+            #   we only attempt it when the caller explicitly provides a key to
+            #   avoid hammering NCBI at the anonymous 3 req/s limit for hundreds
+            #   of papers — the corpus could have 400+ abstract-only entries.
+            try_uw  = bool(unpaywall_email)
+
+            n_abs = len(abs_only)
+            print(f"    Fetching full text for {n_abs} abstract-only papers "
+                  f"(PMC={'yes' if try_pmc else 'no'}, "
+                  f"Unpaywall={'yes' if try_uw else 'no'}) ...")
+
+            for i, key in enumerate(abs_only, 1):
+                paper = self.papers[key]
+                text  = ''
+
+                # ── PMC first ─────────────────────────────────────────────
+                if try_pmc and paper['pmid'] and not text:
+                    text = self._fetch_pmc_fulltext(
+                        paper['pmid'], ncbi_api_key, fetch_cache)
+                    if text:
+                        n_pmc += 1
+
+                # ── Unpaywall fallback ─────────────────────────────────────
+                if try_uw and paper['doi'] and not text:
+                    text = self._fetch_unpaywall_pdf(
+                        paper['doi'], unpaywall_email, fetch_cache)
+                    if text:
+                        n_uw += 1
+
+                if text:
+                    paper['full_text']    = text
+                    paper['is_full_text'] = True
+                    n_pdfs += 1
+
+                if i % 50 == 0 or i == n_abs:
+                    print(f"      {i}/{n_abs} processed  "
+                          f"(+{n_pmc} PMC, +{n_uw} Unpaywall so far)")
 
         n_total    = len(self.papers)
         n_abs_only = n_total - n_pdfs
-        print(f"    {n_total} papers  |  {n_pdfs} with full-text PDF  "
+        print(f"    {n_total} papers  |  {n_pdfs} with full-text "
+              f"(local PDF + {n_pmc} PMC + {n_uw} Unpaywall)  "
               f"|  {n_abs_only} abstract-only")
         self._loaded = True
         return self
@@ -1378,6 +1611,7 @@ def enrich_with_literature(
     pheno_data=None,
     disgenet_api_key=None,
     ncbi_api_key=None,
+    unpaywall_email=None,
     top_n=20,
     population_context='auto',
     append_mode=True,
@@ -1414,7 +1648,10 @@ def enrich_with_literature(
                                  that every feature × every background term is queried.
                                  No ranking or truncation is applied — all terms are used.
     disgenet_api_key          : str | None — DisGeNET API key (free at disgenet.org)
-    ncbi_api_key              : str | None — NCBI API key (3→10 req/sec)
+    ncbi_api_key              : str | None — NCBI API key (3→10 req/sec); also used for
+                                 PMC full-text fetch of abstract-only Zotero papers
+    unpaywall_email           : str | None — email passed to Unpaywall API (required by their
+                                 ToS); enables OA PDF fetch for abstract-only Zotero papers
     top_n                     : int — top features per cluster to query
     population_context        : str — 'auto' | 'both' | 'high_risk' | 'low_control'
         Controls which additional queries are run:
@@ -1511,6 +1748,57 @@ def enrich_with_literature(
         cluster_top[cluster] = row.nlargest(top_n).index.tolist()
 
     all_features = list({f for feats in cluster_top.values() for f in feats})
+
+    # ── Supplementary features from importantFeaturesAcrossCohortsAndTrainingData ─
+    # Load the tiered genomic feature table produced by calculate_top_features_in_cohort.py.
+    # Any features NOT already present in feature_loadings.csv are added to the
+    # enrichment universe with synthetic loading = normalised matching_z_score and
+    # top_cluster = 'supplementary'.  Only HighCases training_data rows are used.
+    supp_loadings: dict[str, float] = {}     # feature → synthetic loading (0-1)
+    if pheno_data:
+        scores_root = _scores_root(pheno_data)
+        supp_path = os.path.join(
+            scores_root, 'importantCohortScores',
+            'importantFeaturesAcrossCohortsAndTrainingData.Filtered.tiered.csv',
+        )
+        if os.path.exists(supp_path):
+            supp_df = pd.read_csv(supp_path)
+            # Filter to HighCases training split only
+            if 'training_data' in supp_df.columns:
+                supp_df = supp_df[supp_df['training_data'] == 'HighCases']
+            if 'feature_set' in supp_df.columns and 'cohort' not in supp_df.columns:
+                supp_df.rename(columns={'feature_set': 'cohort'}, inplace=True)
+            # Normalise feature names: strip gen_ / clin_ prefix for comparison
+            nmf_bare = {
+                re.sub(r'^(?:gen|clin)_', '', f).lower()
+                for f in H_df.columns
+            }
+            # Build normalised loading from matching_z_score
+            z_col = 'matching_z_score' if 'matching_z_score' in supp_df.columns else None
+            if z_col and 'feature' in supp_df.columns:
+                # Keep best (max z) row per feature across cohorts
+                best = (supp_df.groupby('feature')[z_col]
+                        .max().reset_index().rename(columns={z_col: 'z'}))
+                z_max = best['z'].max() or 1.0
+                for _, row in best.iterrows():
+                    bare = str(row['feature']).lower()
+                    if bare not in nmf_bare:
+                        supp_loadings[row['feature']] = round(row['z'] / z_max, 6)
+            if supp_loadings:
+                print(f"  Supplementary features: {len(supp_loadings)} extra features "
+                      f"from importantFeaturesAcrossCohortsAndTrainingData "
+                      f"(not in NMF matrix)")
+        else:
+            print(f"  [INFO] Supplementary features file not found: {supp_path}")
+
+    # Merge supplementary features
+    for feat, loading in supp_loadings.items():
+        feat_top_cluster[feat] = 'supplementary'
+        # Add to all_features; do NOT add to any cluster_top bucket — they are
+        # processed separately below using their synthetic loading.
+        if feat not in all_features:
+            all_features.append(feat)
+
     all_terms    = {
         feat: extract_terms_from_feature(feat, snp_gene_map)
         for feat in all_features
@@ -1538,7 +1826,8 @@ def enrich_with_literature(
             zotero_corpus = ZoteroCorpus(
                 collection_name=zotero_corpus_collection,
                 db_path=db_path,
-            ).load()
+            ).load(ncbi_api_key=ncbi_api_key,
+                   unpaywall_email=unpaywall_email)
             if not zotero_corpus.papers:
                 print("  [WARN] Zotero corpus is empty — corpus enrichment disabled.")
                 zotero_corpus = None
@@ -1720,6 +2009,33 @@ def enrich_with_literature(
                         'weighted_rank_score':       round(loading * score, 6),
                         'background_weighted_score': round(loading * score * bg_wt, 6),
                     })
+
+    # ── Supplementary features (not in NMF; from importantFeaturesAcrossCohortsAndTrainingData) ─
+    for rank, (feat, loading) in enumerate(
+            sorted(supp_loadings.items(), key=lambda x: x[1], reverse=True), start=1):
+        for term in all_terms.get(feat, []):
+            for pheno in phenotypes:
+                score      = ev_lookup.get((term, pheno), 0.0)
+                pheno_meta = term_meta.get(pheno.lower(), {})
+                bg_cat     = pheno_meta.get('category', '')
+                bg_wt      = _background_weight(
+                    pheno_meta.get('count', 0),
+                    pheno_meta.get('sentiment_score', 0.0),
+                )
+                cluster_ranked_rows.append({
+                    'cluster':                   'supplementary',
+                    'feature':                   feat,
+                    'top_cluster':               'supplementary',
+                    'term':                      term,
+                    'phenotype':                 pheno,
+                    'background_category':       bg_cat,
+                    'background_weight':         round(bg_wt, 4),
+                    'cluster_rank':              rank,
+                    'loading':                   loading,
+                    'combined_score':            score,
+                    'weighted_rank_score':       round(loading * score, 6),
+                    'background_weighted_score': round(loading * score * bg_wt, 6),
+                })
 
     cluster_ranked_df = pd.DataFrame(cluster_ranked_rows)
     if not cluster_ranked_df.empty:
@@ -1912,7 +2228,21 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--ncbi_api_key', default=None,
-        help="NCBI Entrez API key — increases rate limit from 3 to 10 req/sec",
+        help=(
+            "NCBI Entrez API key — increases rate limit from 3 to 10 req/sec.\n"
+            "Also used for PubMed Central full-text fetch of abstract-only "
+            "Zotero papers."
+        ),
+    )
+    parser.add_argument(
+        '--unpaywall_email', default=None,
+        metavar='EMAIL',
+        help=(
+            "Email address to pass to the Unpaywall API (required by their ToS).\n"
+            "When set, abstract-only Zotero papers are checked against Unpaywall\n"
+            "for legal open-access PDFs; those found are downloaded and extracted\n"
+            "as full text.  Runs after PMC fetch (PMC takes priority)."
+        ),
     )
     parser.add_argument(
         '--disgenet_api_key', default=None,
@@ -2001,9 +2331,10 @@ if __name__ == '__main__':
         phenotypes=phenotypes,
         background_table=args.background_table,
         auto_background=not args.no_background_auto,
-        pheno_data=args.pheno_data,          # passed to _find_background_dir
+        pheno_data=args.pheno_data,          # passed to _find_background_dir + supplementary features
         disgenet_api_key=args.disgenet_api_key,
         ncbi_api_key=args.ncbi_api_key,
+        unpaywall_email=args.unpaywall_email,
         top_n=args.top_n,
         population_context=args.population_context,
         append_mode=not args.no_append,
