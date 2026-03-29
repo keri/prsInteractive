@@ -608,17 +608,18 @@ def _nri_bar_chart(ax, labels, records, title):
     Shared grouped-bar NRI chart used by both NRI plot functions.
 
     For each clinical variable:
-      Amber bar  — NRI events   with 95% CI error bar
-      Blue bar   — NRI non-events with 95% CI error bar
-      Dark diamond — Net NRI (no error bar, value shown in tooltip / as text)
+      Amber bar  — NRI events       with 95% CI error bar; n_cases   annotated above cap
+      Blue bar   — NRI non-events   with 95% CI error bar; n_controls annotated above cap
+      Dark diamond — Net NRI
 
     Parameters
     ----------
     ax : matplotlib Axes
     labels : list of str   x-tick labels
-    records : list of dict each with keys nri, nri_events, nri_non_events,
-                           ci_low_events, ci_high_events,
-                           ci_low_non_events, ci_high_non_events
+    records : list of dict  keys: nri, nri_events, nri_non_events,
+                            ci_low_events, ci_high_events,
+                            ci_low_non_events, ci_high_non_events,
+                            n_cases, n_controls
     title : str
     """
     AMBER = '#BA7517'
@@ -628,14 +629,17 @@ def _nri_bar_chart(ax, labels, records, title):
     x     = np.arange(len(labels))
     width = 0.3
 
-    ev_vals  = [r['nri_events']     for r in records]
-    ne_vals  = [r['nri_non_events'] for r in records]
-    net_vals = [r['nri']            for r in records]
+    ev_vals  = np.array([r['nri_events']     if not np.isnan(r.get('nri_events',  np.nan)) else np.nan for r in records])
+    ne_vals  = np.array([r['nri_non_events'] if not np.isnan(r.get('nri_non_events', np.nan)) else np.nan for r in records])
+    net_vals = np.array([r['nri']            if not np.isnan(r.get('nri', np.nan)) else np.nan for r in records])
 
-    ev_lo  = np.array(ev_vals)  - np.array([r['ci_low_events']     for r in records])
-    ev_hi  = np.array([r['ci_high_events']     for r in records]) - np.array(ev_vals)
-    ne_lo  = np.array(ne_vals)  - np.array([r['ci_low_non_events'] for r in records])
-    ne_hi  = np.array([r['ci_high_non_events'] for r in records]) - np.array(ne_vals)
+    ev_hi  = np.array([r.get('ci_high_events',    np.nan) for r in records]) - ev_vals
+    ne_hi  = np.array([r.get('ci_high_non_events', np.nan) for r in records]) - ne_vals
+    ev_lo  = ev_vals  - np.array([r.get('ci_low_events',    np.nan) for r in records])
+    ne_lo  = ne_vals  - np.array([r.get('ci_low_non_events', np.nan) for r in records])
+
+    n_cases    = [int(r.get('n_cases',    0)) for r in records]
+    n_controls = [int(r.get('n_controls', 0)) for r in records]
 
     ax.bar(x - width / 2, ev_vals,  width, color=AMBER, label='NRI events',
            linewidth=0, zorder=2)
@@ -650,10 +654,57 @@ def _nri_bar_chart(ax, labels, records, title):
                 fmt='none', color=DARK, capsize=3, linewidth=1, zorder=3)
 
     # Diamond for net NRI
-    ax.scatter(x, net_vals, marker='D', color=DARK, s=55, zorder=4,
-               label='Net NRI')
+    ax.scatter(x, net_vals, marker='D', color=DARK, s=55, zorder=4, label='Net NRI')
 
     ax.axhline(0, color=DARK, linewidth=0.8, alpha=0.4)
+
+    # ── Annotate n= above each bar's CI cap ───────────────────────────────
+    # Compute a sensible y-padding from the spread of visible data.
+    all_tops = np.concatenate([
+        np.where(np.isfinite(ev_vals  + np.abs(ev_hi)),  ev_vals  + np.abs(ev_hi),  [0]),
+        np.where(np.isfinite(ne_vals  + np.abs(ne_hi)),  ne_vals  + np.abs(ne_hi),  [0]),
+        np.where(np.isfinite(net_vals), net_vals, [0]),
+    ])
+    all_bots = np.concatenate([
+        np.where(np.isfinite(ev_vals  - np.abs(ev_lo)),  ev_vals  - np.abs(ev_lo),  [0]),
+        np.where(np.isfinite(ne_vals  - np.abs(ne_lo)),  ne_vals  - np.abs(ne_lo),  [0]),
+        np.where(np.isfinite(net_vals), net_vals, [0]),
+    ])
+    data_range = max(float(np.nanmax(all_tops)) - float(np.nanmin(all_bots)), 1e-6)
+    y_pad      = data_range * 0.05     # 5 % of data range between cap and text
+
+    for i in range(len(labels)):
+        # Events annotation (amber bar)
+        if np.isfinite(ev_vals[i]) and n_cases[i] > 0:
+            cap_ev = float(ev_vals[i]) + float(np.abs(ev_hi[i])) if np.isfinite(ev_hi[i]) else float(ev_vals[i])
+            top_ev = max(cap_ev, 0.0) + y_pad
+            ax.text(x[i] - width / 2, top_ev,
+                    f'n={n_cases[i]:,}',
+                    ha='center', va='bottom', fontsize=7.5,
+                    color=AMBER, fontweight='bold')
+
+        # Non-events annotation (blue bar)
+        if np.isfinite(ne_vals[i]) and n_controls[i] > 0:
+            cap_ne = float(ne_vals[i]) + float(np.abs(ne_hi[i])) if np.isfinite(ne_hi[i]) else float(ne_vals[i])
+            top_ne = max(cap_ne, 0.0) + y_pad
+            ax.text(x[i] + width / 2, top_ne,
+                    f'n={n_controls[i]:,}',
+                    ha='center', va='bottom', fontsize=7.5,
+                    color=BLUE, fontweight='bold')
+
+    # Expand y-axis top so annotations are never clipped
+    cur_bot, cur_top = ax.get_ylim()
+    annot_tops = []
+    for i in range(len(labels)):
+        if np.isfinite(ev_vals[i]) and n_cases[i] > 0:
+            cap_ev = float(ev_vals[i]) + float(np.abs(ev_hi[i])) if np.isfinite(ev_hi[i]) else float(ev_vals[i])
+            annot_tops.append(max(cap_ev, 0.0) + y_pad * 4)
+        if np.isfinite(ne_vals[i]) and n_controls[i] > 0:
+            cap_ne = float(ne_vals[i]) + float(np.abs(ne_hi[i])) if np.isfinite(ne_hi[i]) else float(ne_vals[i])
+            annot_tops.append(max(cap_ne, 0.0) + y_pad * 4)
+    if annot_tops:
+        ax.set_ylim(cur_bot, max(cur_top, max(annot_tops)))
+
     ax.set_xticks(x)
     ax.set_xticklabels(labels, fontsize=10)
     ax.set_ylabel('NRI', fontsize=11)
