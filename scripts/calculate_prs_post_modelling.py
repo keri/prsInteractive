@@ -282,6 +282,7 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,test_combined_
             
         
         ####################  DOWNLOAD THE DATASET WITH ALL GENO FEATURES ###################
+        featuresToDownload = []
         mainEpiDf = get_dataset(data_pathway,withdrawal_path,featuresToDownload,use_chunking=True)
         
         #get the IIDs for dataset to be used in cardio data and covar PRS
@@ -324,7 +325,7 @@ def main(pheno,withdrawal_path,pheno_data,test_path,test_env_file,test_combined_
         
         
         for model in filteredFeatures['model'].unique().tolist() + ['covariate']:
-#       for model in ['all','cardio']:
+#       for model in ['cardio']:
 #       for model in prs_models:
             if model == 'covariate':
                 prsFeatures = covarCoefs.copy()
@@ -423,9 +424,10 @@ if __name__ == '__main__':
 
     
 #   pheno='type2Diabetes'
-#   epi_combo='prod'
-#   pheno_path=f'/your/directory/prsInteractive/results/{pheno}'
-#   pheno_data=f'{pheno_path}/productEpi'
+#   test_path='/debug/path'
+#   epi_combo='sum'
+#   pheno_path=f'{test_path}/prsInteractive/results/{pheno}'
+#   pheno_data=f'{pheno_path}/summedEpi'
 #   test_env_file=f'{pheno_data}/geneEnvironmentTest.csv'
 #   holdout_env_file=f'{pheno_data}/geneEnvironmentHoldout.csv'
 #   test_path=f'{pheno_path}/testCombined.raw'
@@ -433,10 +435,10 @@ if __name__ == '__main__':
 #   #   results_path='/your/directory/prsInteractive/results'
 #   holdout_combined_env_file = f"{pheno_data}/allEnvironmentHoldout.csv"
 #   test_combined_env_file = f"{pheno_data}/allEnvironmentTest.csv"
-#   covar_file='/your/directory/prsInteractive/results/covar.csv'
-#   hla_file='/your/directoryr/prsInteractive/results/participant_hla.csv'
+#   covar_file=f'{test_path}/prsInteractive/results/covar.csv'
+#   hla_file=f'{test_path}/prsInteractive/results/participant_hla.csv'
 #   feature_file=f'{pheno_data}/scores/featureScoresReducedFinalModel.filtered.csv'
-#   withdrawal_path = f'/your/directory/prsInteractive/data/withdrawals.csv'
+#   withdrawal_path = f'{test_path}/prsInteractive/data/withdrawals.csv'
 
     
     if not pheno_data:

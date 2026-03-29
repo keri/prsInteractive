@@ -1773,6 +1773,24 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, prs_method
                 results['nri'][f"{prs1}_vs_{measure}"][f"{measure}_low"] = {'error': str(e)}
                 
                 
+            try:
+                #calculate nri with PRS_combined and low clinical measure
+#               results['nri'][f"{prs1}_vs_{measure}"] = {}
+                nri, nri_events, nri_non_events = calculate_nri(
+                    df_copy[df_copy[measure] == 1], measure, prs_col1, True
+                )
+                
+                
+                results['nri'][f"{prs1}_vs_{measure}"][f"{measure}_high"] = {
+                    'nri': nri,
+                    'nri_events': nri_events,
+                    'nri_non_events': nri_non_events
+                }
+                
+            except Exception as e:
+                results['nri'][f"{prs1}_vs_{measure}"][f"{measure}_high"] = {'error': str(e)}
+                
+                
             fig = plot_reclassification_table(df_copy, measure, prs_col1)
             fig.savefig(f'{figPath}/reclassificationHeatMap.{measure}v{prs1}{file_ext}.png',dpi=150, bbox_inches='tight')
             plt.close(fig)

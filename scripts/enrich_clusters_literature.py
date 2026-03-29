@@ -861,7 +861,9 @@ def analyze_corpus_sentiment(
     except Exception as exc:
         print(f"    [WARN] Corpus sentiment failed for '{feature}' × "
               f"'{phenotype}': {exc}")
-        return _empty_corpus_result(len(paper_matches), len(all_entries))
+        # corpus_papers=0 ensures compute_combined_score skips the corpus branch
+        # so the failure doesn't inject a phantom neutral score or dilute other evidence.
+        return _empty_corpus_result(n_papers=0, n_sentences=0)
 
 
 # ── HTTP helpers ───────────────────────────────────────────────────────────────
