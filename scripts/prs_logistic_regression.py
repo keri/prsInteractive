@@ -53,7 +53,11 @@ def _count_reclassifications(old_risk, new_risk, is_case):
 
 
 def _nri_with_ci(old_risk, new_risk, is_case):
-    """Return NRI components and 95% CI (Pencina 2008)."""
+    """Return NRI components and 95% CIs (Pencina 2008).
+
+    Returns per-component CIs in addition to the total NRI CI so that
+    bar charts can show separate error bars for events and non-events.
+    """
     counts     = _count_reclassifications(old_risk, new_risk, is_case)
     n_cases    = counts['n_cases']
     n_controls = counts['n_controls']
@@ -67,14 +71,20 @@ def _nri_with_ci(old_risk, new_risk, is_case):
     se_nri = np.sqrt(se_ev**2 + se_ne**2)
 
     return {
-        'nri':            nri,
-        'nri_events':     nri_events,
-        'nri_non_events': nri_non_events,
-        'ci_low':         nri - 1.96 * se_nri,
-        'ci_high':        nri + 1.96 * se_nri,
-        'se':             se_nri,
-        'n_cases':        n_cases,
-        'n_controls':     n_controls,
+        'nri':                  nri,
+        'nri_events':           nri_events,
+        'nri_non_events':       nri_non_events,
+        # total NRI CI
+        'ci_low':               nri - 1.96 * se_nri,
+        'ci_high':              nri + 1.96 * se_nri,
+        # per-component CIs
+        'ci_low_events':        nri_events     - 1.96 * se_ev,
+        'ci_high_events':       nri_events     + 1.96 * se_ev,
+        'ci_low_non_events':    nri_non_events - 1.96 * se_ne,
+        'ci_high_non_events':   nri_non_events + 1.96 * se_ne,
+        'se':                   se_nri,
+        'n_cases':              n_cases,
+        'n_controls':           n_controls,
     }
 
 
@@ -353,84 +363,129 @@ def plot_auc_comparison(results, figPath, prs_col_label='PRSComp'):
     print(f'\nAUC comparison plot saved to {out}')
 
 
-def plot_nri_forest_lr(results, figPath):
+def _nri_bar_chart(ax, labels, records, title):
     """
-    Forest plot of NRI (logistic regression augmented vs base model)
-    with 95% CI for each clinical measure.
+    Shared grouped-bar NRI chart used by both NRI plot functions.
+
+    For each clinical variable:
+      Amber bar  — NRI events   with 95% CI error bar
+      Blue bar   — NRI non-events with 95% CI error bar
+      Dark diamond — Net NRI (no error bar, value shown in tooltip / as text)
+
+    Parameters
+    ----------
+    ax : matplotlib Axes
+    labels : list of str   x-tick labels
+    records : list of dict each with keys nri, nri_events, nri_non_events,
+                           ci_low_events, ci_high_events,
+                           ci_low_non_events, ci_high_non_events
+    title : str
+    """
+    AMBER = '#BA7517'
+    BLUE  = '#378ADD'
+    DARK  = '#2C2C2A'
+
+    x     = np.arange(len(labels))
+    width = 0.3
+
+    ev_vals  = [r['nri_events']     for r in records]
+    ne_vals  = [r['nri_non_events'] for r in records]
+    net_vals = [r['nri']            for r in records]
+
+    ev_lo  = np.array(ev_vals)  - np.array([r['ci_low_events']     for r in records])
+    ev_hi  = np.array([r['ci_high_events']     for r in records]) - np.array(ev_vals)
+    ne_lo  = np.array(ne_vals)  - np.array([r['ci_low_non_events'] for r in records])
+    ne_hi  = np.array([r['ci_high_non_events'] for r in records]) - np.array(ne_vals)
+
+    ax.bar(x - width / 2, ev_vals,  width, color=AMBER, label='NRI events',
+           linewidth=0, zorder=2)
+    ax.bar(x + width / 2, ne_vals,  width, color=BLUE,  label='NRI non-events',
+           linewidth=0, zorder=2)
+
+    ax.errorbar(x - width / 2, ev_vals,
+                yerr=[np.abs(ev_lo), np.abs(ev_hi)],
+                fmt='none', color=DARK, capsize=3, linewidth=1, zorder=3)
+    ax.errorbar(x + width / 2, ne_vals,
+                yerr=[np.abs(ne_lo), np.abs(ne_hi)],
+                fmt='none', color=DARK, capsize=3, linewidth=1, zorder=3)
+
+    # Diamond for net NRI
+    ax.scatter(x, net_vals, marker='D', color=DARK, s=55, zorder=4,
+               label='Net NRI')
+
+    ax.axhline(0, color=DARK, linewidth=0.8, alpha=0.4)
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels, fontsize=10)
+    ax.set_ylabel('NRI', fontsize=11)
+    ax.set_title(title, fontsize=11, pad=8)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+
+
+def plot_nri_bar_lr(results, figPath):
+    """
+    Grouped bar NRI chart for logistic regression (augmented vs base model).
+    Amber = NRI events, Blue = NRI non-events, Diamond = Net NRI.
+    Error bars show 95% CI on events and non-events separately.
     """
     clin_keys = [k for k in results if k != '_base']
     labels    = [k.replace('_', ' ') for k in clin_keys]
-    nris      = [results[k]['nri']    for k in clin_keys]
-    ci_los    = [results[k]['ci_low'] for k in clin_keys]
-    ci_his    = [results[k]['ci_high'] for k in clin_keys]
+    records   = [results[k] for k in clin_keys]
 
-    fig, ax = plt.subplots(figsize=(7, 0.7 * len(clin_keys) + 2))
-    y_pos   = np.arange(len(labels))
-
-    ax.errorbar(
-        nris, y_pos,
-        xerr=[np.array(nris) - np.array(ci_los),
-              np.array(ci_his) - np.array(nris)],
-        fmt='none', color='#2C2C2A', capsize=4, linewidth=1.2, zorder=3
+    fig, ax = plt.subplots(figsize=(max(6, len(clin_keys) * 2.2), 5))
+    _nri_bar_chart(
+        ax, labels, records,
+        title=('Net Reclassification Improvement\n'
+               '(PRSComp + covariates + clinical measure vs PRSComp + covariates)')
     )
-    colors = ['#BA7517' if n > 0 else '#378ADD' for n in nris]
-    for i, (n, c) in enumerate(zip(nris, colors)):
-        ax.scatter(n, i, color=c, s=70, zorder=4)
-
-    ax.axvline(0, color='#2C2C2A', linewidth=1, linestyle='--', alpha=0.5)
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(labels, fontsize=10)
-    ax.set_xlabel('NRI vs PRSComp alone (95% CI)', fontsize=11)
-    ax.set_title(
-        'Net Reclassification Improvement\n'
-        '(PRSComp + covariates + clinical measure vs PRSComp + covariates)',
-        fontsize=11, pad=8
-    )
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
+    handles, lbls = ax.get_legend_handles_labels()
+    ax.legend(handles, lbls, fontsize=9, frameon=False, loc='upper right')
     fig.tight_layout()
 
-    out = os.path.join(figPath, 'nri_forest_lr_prs_plus_clinical.png')
+    out = os.path.join(figPath, 'nri_bar_lr_prs_plus_clinical.png')
     fig.savefig(out, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    print(f'NRI forest (LR) plot saved to {out}')
+    print(f'NRI bar chart (LR) saved to {out}')
 
 
-def plot_nri_forest_prs_vs_clinical(df, binary_clinical_cols, prs_high_risk_col,
-                                    figPath, prs_label='ePRSCombined'):
+def plot_nri_bar_prs_vs_clinical(df, binary_clinical_cols, prs_high_risk_col,
+                                 figPath, prs_label='ePRSCombined'):
     """
-    Two-panel forest plot: NRI of ePRSCombined binary vs each clinical measure binary.
+    Two-panel grouped bar chart: NRI of ePRSCombined binary vs each clinical measure binary.
 
     Left panel  — Overall (all holdout samples)
     Right panel — Within clinically low-risk group ({measure}_binary == 0)
 
     Reference classifier: clinical measure binary (old)
     New classifier:       ePRSCombined binary  (new)
+
+    Each panel:
+      Amber bars  — NRI events   with 95% CI error bars
+      Blue bars   — NRI non-events with 95% CI error bars
+      Dark diamond — Net NRI
     """
     panels = [
-        ('Overall',                        None),
+        ('Overall',                          None),
         ('Within clinically low-risk group', 'low'),
     ]
-    fig, axes = plt.subplots(1, 2, figsize=(12, 0.6 * len(binary_clinical_cols) + 3),
-                             sharey=True)
-
-    y_pos  = np.arange(len(binary_clinical_cols))
     labels = [c.replace('_binary', '').replace('_', ' ') for c in binary_clinical_cols]
 
-    all_records = []
+    panel_records = {}
+    all_records   = []
 
-    for ax, (panel_title, panel_tag) in zip(axes, panels):
-        nris, ci_los, ci_his, colors = [], [], [], []
-
+    for panel_title, panel_tag in panels:
+        recs = []
         for clin_col in binary_clinical_cols:
-            if panel_tag == 'low':
-                sub = df[df[clin_col] == 0]
-            else:
-                sub = df
+            sub = df[df[clin_col] == 0] if panel_tag == 'low' else df
+            nan_rec = {k: np.nan for k in
+                       ['nri', 'nri_events', 'nri_non_events',
+                        'ci_low_events', 'ci_high_events',
+                        'ci_low_non_events', 'ci_high_non_events',
+                        'ci_low', 'ci_high']}
+            nan_rec.update({'n_cases': 0, 'n_controls': 0})
 
             if len(sub) == 0 or sub['PHENOTYPE'].nunique() < 2:
-                nris.append(np.nan); ci_los.append(np.nan); ci_his.append(np.nan)
-                colors.append('#AAAAAA')
+                recs.append(nan_rec)
                 continue
 
             res = _nri_with_ci(
@@ -438,54 +493,37 @@ def plot_nri_forest_prs_vs_clinical(df, binary_clinical_cols, prs_high_risk_col,
                 new_risk=sub[prs_high_risk_col].astype(bool),
                 is_case=sub['PHENOTYPE'] == 1,
             )
-            nris.append(res['nri'])
-            ci_los.append(res['ci_low'])
-            ci_his.append(res['ci_high'])
-            colors.append('#BA7517' if res['nri'] > 0 else '#378ADD')
-
+            recs.append(res)
             all_records.append({
-                'panel':          panel_title,
-                'clinical_var':   clin_col,
-                'nri':            res['nri'],
-                'nri_events':     res['nri_events'],
-                'nri_non_events': res['nri_non_events'],
-                'ci_low':         res['ci_low'],
-                'ci_high':        res['ci_high'],
-                'n_cases':        res['n_cases'],
-                'n_controls':     res['n_controls'],
+                'panel': panel_title, 'clinical_var': clin_col, **res
             })
 
-        xerr_lo = np.where(np.isnan(nris), 0, np.array(nris) - np.array(ci_los))
-        xerr_hi = np.where(np.isnan(nris), 0, np.array(ci_his) - np.array(nris))
+        panel_records[panel_title] = recs
 
-        ax.errorbar(
-            nris, y_pos,
-            xerr=[np.abs(xerr_lo), np.abs(xerr_hi)],
-            fmt='none', color='#2C2C2A', capsize=4, linewidth=1.2, zorder=3
-        )
-        for i, (n, c) in enumerate(zip(nris, colors)):
-            if not np.isnan(n):
-                ax.scatter(n, i, color=c, s=70, zorder=4, marker='D')
+    fig, axes = plt.subplots(
+        1, 2,
+        figsize=(max(10, len(binary_clinical_cols) * 2.5 * 2), 5),
+        sharey=False
+    )
 
-        ax.axvline(0, color='#2C2C2A', linewidth=1, linestyle='--', alpha=0.5)
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(labels if ax is axes[0] else [], fontsize=10)
-        ax.set_xlabel('NRI (95% CI)', fontsize=11)
-        ax.set_title(panel_title, fontsize=11, pad=8)
-        ax.spines['top'].set_visible(False)
-        ax.spines['right'].set_visible(False)
+    for ax, (panel_title, _) in zip(axes, panels):
+        _nri_bar_chart(ax, labels, panel_records[panel_title], panel_title)
 
+    # Shared legend above panels
+    handles, lbls = axes[0].get_legend_handles_labels()
+    fig.legend(handles, lbls, loc='upper center', ncol=3,
+               fontsize=10, frameon=False, bbox_to_anchor=(0.5, 1.04))
     fig.suptitle(
         f'NRI of {prs_label} vs clinical measure\n'
-        f'(reference: clinical binary; new: {prs_label} high-risk)',
-        fontsize=12, y=1.02
+        f'(reference: clinical binary; new: {prs_label} ≥ 800)',
+        fontsize=12, y=1.08
     )
     fig.tight_layout()
 
-    out = os.path.join(figPath, 'nri_forest_ePRSCombined_vs_clinical.png')
+    out = os.path.join(figPath, 'nri_bar_ePRSCombined_vs_clinical.png')
     fig.savefig(out, dpi=300, bbox_inches='tight')
     plt.close(fig)
-    print(f'NRI forest (ePRSCombined vs clinical) saved to {out}')
+    print(f'NRI bar chart (ePRSCombined vs clinical) saved to {out}')
 
     return pd.DataFrame(all_records)
 
@@ -529,10 +567,10 @@ def run_logistic_analysis(pheno, pheno_data, results_path, prs_col, n_splits=5):
     )
 
     plot_auc_comparison(results, figPath, prs_col_label=prs_col)
-    plot_nri_forest_lr(results, figPath)
+    plot_nri_bar_lr(results, figPath)
 
-    # NRI forest: ePRSCombined binary vs each clinical measure binary
-    nri_prs_df = plot_nri_forest_prs_vs_clinical(
+    # NRI bar chart: ePRSCombined binary vs each clinical measure binary
+    nri_prs_df = plot_nri_bar_prs_vs_clinical(
         df, binary_clinical_cols, prs_high_risk_col, figPath,
         prs_label='ePRSCombined'
     )
