@@ -197,10 +197,11 @@ def run_logistic_cv(df, prs_col, covariate_cols,
                     continuous_clinical_cols, binary_clinical_cols,
                     outcome_col='PHENOTYPE', n_splits=5, seed=42):
     """
-    5-fold stratified CV.
+    5-fold stratified CV with three model families per clinical measure.
 
-    Model 1 (base):  bin_combined + covariate_cols
-    Model 2 (+clin): base + one continuous clinical measure
+    Model 1 (base):      bin_combined + covariate_cols
+    Model 2 (clin-only): covariate_cols + clinical measure  (no PRS)
+    Model 3 (augmented): bin_combined + covariate_cols + clinical measure
 
     Columns z-scored per fold: bin_combined, age, PC1-PC10, clinical measures.
     SEX left unscaled (binary).
@@ -208,21 +209,24 @@ def run_logistic_cv(df, prs_col, covariate_cols,
 
     Returns
     -------
-    results : dict  keyed by continuous clinical col name (plus '_base')
-    base_prob_pool : np.ndarray  pooled probabilities from base model
-    clin_prob_pool : dict        pooled probabilities per clinical col
+    results          : dict  keyed by continuous clinical col name (plus '_base')
+    base_prob_pool   : np.ndarray  pooled probabilities — base model
+    clin_prob_pool   : dict        pooled probabilities — augmented model
+    clin_only_prob_pool : dict     pooled probabilities — clinical-only model
     """
     skf = StratifiedKFold(n_splits=n_splits, shuffle=True, random_state=seed)
 
     # All continuous features that need z-scoring (excluding SEX)
     continuous_base = [c for c in [prs_col] + covariate_cols if c != 'SEX']
     base_features   = [prs_col] + covariate_cols
+    # Covariate-only features used for clinical-only model (no PRS)
+    cov_features    = covariate_cols
 
     y = df[outcome_col].values
-    base_prob_pool = np.full(len(df), np.nan)
-    base_thresh_folds = []
-    # keyed by continuous clinical col name
-    clin_prob_pool = {c: np.full(len(df), np.nan) for c in continuous_clinical_cols}
+    base_prob_pool      = np.full(len(df), np.nan)
+    base_thresh_folds   = []
+    clin_prob_pool      = {c: np.full(len(df), np.nan) for c in continuous_clinical_cols}
+    clin_only_prob_pool = {c: np.full(len(df), np.nan) for c in continuous_clinical_cols}
 
     # Map continuous → binary col for NRI
     clin_to_binary = {
@@ -245,7 +249,7 @@ def run_logistic_cv(df, prs_col, covariate_cols,
         y_tr = df_tr[outcome_col].values
         y_te = df_te[outcome_col].values
 
-        # Base model
+        # ── Base model (PRS + covariates) ──────────────────────────────────
         X_tr_base = df_tr[base_features].values
         X_te_base = df_te[base_features].values
 
@@ -260,26 +264,43 @@ def run_logistic_cv(df, prs_col, covariate_cols,
             youden_threshold(y_tr, base_m.predict_proba(X_tr_base)[:, 1])
         )
 
-        # Augmented models: add one continuous clinical measure (z-scored on fold)
+        # ── Per-clinical models ────────────────────────────────────────────
         for clin_col in continuous_clinical_cols:
             clin_scaler = StandardScaler()
             clin_tr = clin_scaler.fit_transform(df_tr[[clin_col]])
             clin_te = clin_scaler.transform(df_te[[clin_col]])
 
+            # Model 3: augmented (PRS + covariates + clinical)
             X_tr_aug = np.hstack([X_tr_base, clin_tr])
             X_te_aug = np.hstack([X_te_base, clin_te])
 
-            aug_m = LogisticRegression(penalty=None, solver='lbfgs',
-                                       max_iter=2000, random_state=seed)
+            # Model 2: clinical only (covariates + clinical, no PRS)
+            cov_tr_only = df_tr[cov_features].values
+            cov_te_only = df_te[cov_features].values
+            X_tr_clin_only = np.hstack([cov_tr_only, clin_tr])
+            X_te_clin_only = np.hstack([cov_te_only, clin_te])
+
+            aug_m      = LogisticRegression(penalty=None, solver='lbfgs',
+                                            max_iter=2000, random_state=seed)
+            clin_only_m = LogisticRegression(penalty=None, solver='lbfgs',
+                                             max_iter=2000, random_state=seed)
             try:
                 aug_m.fit(X_tr_aug, y_tr)
                 clin_prob_pool[clin_col][test_idx] = \
                     aug_m.predict_proba(X_te_aug)[:, 1]
             except Exception as exc:
-                print(f'  [WARN] fold {fold_idx} {clin_col}: {exc}')
+                print(f'  [WARN] fold {fold_idx} augmented {clin_col}: {exc}')
                 clin_prob_pool[clin_col][test_idx] = base_prob_fold
 
-    # Pool and compute metrics
+            try:
+                clin_only_m.fit(X_tr_clin_only, y_tr)
+                clin_only_prob_pool[clin_col][test_idx] = \
+                    clin_only_m.predict_proba(X_te_clin_only)[:, 1]
+            except Exception as exc:
+                print(f'  [WARN] fold {fold_idx} clin-only {clin_col}: {exc}')
+                clin_only_prob_pool[clin_col][test_idx] = base_prob_fold
+
+    # ── Pool and compute metrics ───────────────────────────────────────────
     base_thresh = float(np.median(base_thresh_folds))
     print(f'\nMedian Youden threshold (base model): {base_thresh:.3f}')
 
@@ -296,36 +317,123 @@ def run_logistic_cv(df, prs_col, covariate_cols,
     print(f'  AUC={b["auc"]:.4f}  Precision={b["precision"]:.4f}  Recall={b["recall"]:.4f}')
 
     for clin_col in continuous_clinical_cols:
-        prob_new  = clin_prob_pool[clin_col]
-        preds     = (prob_new >= base_thresh).astype(int)
+        prob_new      = clin_prob_pool[clin_col]
+        prob_clin_only = clin_only_prob_pool[clin_col]
+        preds         = (prob_new >= base_thresh).astype(int)
 
-        # NRI uses binary classifications from the _binary column
         bin_col = clin_to_binary.get(clin_col)
         if bin_col and bin_col in df.columns:
             nri_d = calculate_nri_from_probs(y, base_prob_pool, prob_new, base_thresh)
         else:
             nri_d = {'nri': np.nan, 'nri_events': np.nan, 'nri_non_events': np.nan,
-                     'ci_low': np.nan, 'ci_high': np.nan, 'se': np.nan,
+                     'ci_low': np.nan, 'ci_high': np.nan,
+                     'ci_low_events': np.nan, 'ci_high_events': np.nan,
+                     'ci_low_non_events': np.nan, 'ci_high_non_events': np.nan,
+                     'se': np.nan,
                      'n_cases': int((y == 1).sum()), 'n_controls': int((y == 0).sum())}
 
         results[clin_col] = {
-            'auc':       roc_auc_score(y, prob_new),
-            'precision': precision_score(y, preds, zero_division=0),
-            'recall':    recall_score(y, preds, zero_division=0),
+            'auc':            roc_auc_score(y, prob_new),
+            'auc_clin_only':  roc_auc_score(y, prob_clin_only),
+            'precision':      precision_score(y, preds, zero_division=0),
+            'recall':         recall_score(y, preds, zero_division=0),
             **nri_d,
         }
         m = results[clin_col]
         print(f'\n--- Augmented: + {clin_col} ---')
-        print(f'  AUC={m["auc"]:.4f}  Precision={m["precision"]:.4f}  Recall={m["recall"]:.4f}')
+        print(f'  AUC (PRS+clin)={m["auc"]:.4f}  AUC (clin-only)={m["auc_clin_only"]:.4f}')
+        print(f'  Precision={m["precision"]:.4f}  Recall={m["recall"]:.4f}')
         print(f'  NRI={m["nri"]:.4f}  95%CI=[{m["ci_low"]:.4f}, {m["ci_high"]:.4f}]')
         print(f'  NRI events={m["nri_events"]:.4f}  NRI non-events={m["nri_non_events"]:.4f}')
 
-    return results, base_prob_pool, clin_prob_pool
+    return results, base_prob_pool, clin_prob_pool, clin_only_prob_pool
 
 
 # ---------------------------------------------------------------------------
 # plotting
 # ---------------------------------------------------------------------------
+
+def plot_roc_curves(y, base_prob_pool, clin_prob_pool, clin_only_prob_pool,
+                    continuous_clinical_cols, figPath, prs_col_label='ePRSComp'):
+    """
+    Multi-panel ROC plot: one subplot per clinical measure showing three curves.
+
+      Dark  (#2C2C2A) — ePRSComp alone          (PRS + covariates)
+      Blue  (#378ADD) — Clinical measure alone   (covariates + clinical, no PRS)
+      Amber (#BA7517) — ePRSComp + clinical      (PRS + covariates + clinical)
+
+    AUC shown in the legend for each curve.  Diagonal reference line included.
+    """
+    n   = len(continuous_clinical_cols)
+    if n == 0:
+        return
+
+    ncols = min(3, n)
+    nrows = int(np.ceil(n / ncols))
+
+    fig, axes = plt.subplots(
+        nrows, ncols,
+        figsize=(ncols * 4.5, nrows * 4.2),
+        squeeze=False
+    )
+
+    base_auc = roc_auc_score(y, base_prob_pool)
+    base_fpr, base_tpr, _ = roc_curve(y, base_prob_pool)
+
+    for idx, clin_col in enumerate(continuous_clinical_cols):
+        ax    = axes[idx // ncols][idx % ncols]
+        label = clin_col.replace('_binary', '').replace('_', ' ')
+
+        # ── ePRSComp alone ──────────────────────────────────────────────
+        ax.plot(base_fpr, base_tpr,
+                color='#2C2C2A', linewidth=1.8,
+                label=f'{prs_col_label} alone (AUC={base_auc:.3f})')
+
+        # ── Clinical measure alone ───────────────────────────────────────
+        prob_co  = clin_only_prob_pool[clin_col]
+        auc_co   = roc_auc_score(y, prob_co)
+        fpr_co, tpr_co, _ = roc_curve(y, prob_co)
+        ax.plot(fpr_co, tpr_co,
+                color='#378ADD', linewidth=1.8,
+                label=f'{label} alone (AUC={auc_co:.3f})')
+
+        # ── ePRSComp + clinical ──────────────────────────────────────────
+        prob_aug = clin_prob_pool[clin_col]
+        auc_aug  = roc_auc_score(y, prob_aug)
+        fpr_aug, tpr_aug, _ = roc_curve(y, prob_aug)
+        ax.plot(fpr_aug, tpr_aug,
+                color='#BA7517', linewidth=1.8,
+                label=f'{prs_col_label} + {label} (AUC={auc_aug:.3f})')
+
+        # Diagonal reference
+        ax.plot([0, 1], [0, 1], color='#AAAAAA', linewidth=0.8,
+                linestyle='--', zorder=0)
+
+        ax.set_xlim(-0.02, 1.02)
+        ax.set_ylim(-0.02, 1.02)
+        ax.set_xlabel('1 − Specificity (FPR)', fontsize=10)
+        ax.set_ylabel('Sensitivity (TPR)',      fontsize=10)
+        ax.set_title(label, fontsize=11, pad=6)
+        ax.legend(fontsize=7.5, frameon=False, loc='lower right')
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+    # Hide any unused subplots
+    for empty in range(n, nrows * ncols):
+        axes[empty // ncols][empty % ncols].set_visible(False)
+
+    fig.suptitle(
+        f'ROC curves per clinical measure\n'
+        f'({prs_col_label} alone vs clinical alone vs {prs_col_label} + clinical)',
+        fontsize=12, y=1.02
+    )
+    fig.tight_layout()
+
+    out = os.path.join(figPath, 'roc_curves_per_clinical_measure.png')
+    fig.savefig(out, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print(f'ROC curves plot saved to {out}')
+
 
 def plot_auc_comparison(results, figPath, prs_col_label='PRSComp'):
     """Horizontal bar chart: AUC for PRSComp + clinical vs PRSComp alone."""
@@ -560,12 +668,18 @@ def run_logistic_analysis(pheno, pheno_data, results_path, prs_col, n_splits=5):
         load_data(pheno_data, results_path, prs_col)
 
     # Logistic regression CV (continuous clinical cols as features, binary for NRI)
-    results, base_prob, clin_probs = run_logistic_cv(
+    results, base_prob, clin_probs, clin_only_probs = run_logistic_cv(
         df, prs_col, covariate_cols,
         continuous_clinical_cols, binary_clinical_cols,
         outcome_col='PHENOTYPE', n_splits=n_splits
     )
 
+    y = df['PHENOTYPE'].values
+
+    plot_roc_curves(
+        y, base_prob, clin_probs, clin_only_probs,
+        continuous_clinical_cols, figPath, prs_col_label=prs_col
+    )
     plot_auc_comparison(results, figPath, prs_col_label=prs_col)
     plot_nri_bar_lr(results, figPath)
 
