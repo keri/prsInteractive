@@ -353,6 +353,138 @@ def run_logistic_cv(df, prs_col, covariate_cols,
 # plotting
 # ---------------------------------------------------------------------------
 
+def plot_prs_by_clinical_decile(df, continuous_clinical_cols, prs_col, figPath,
+                                prs_label='ePRSComp'):
+    """
+    Grouped box plot: ePRSComp (bin_combined 1-1000) stratified by
+    clinical marker decile.
+
+    Layout
+    ------
+    X-axis  : deciles 1-10 (computed independently per clinical measure)
+    Y-axis  : ePRSComp (prs_col)
+    Grouping: at each decile position, one box per clinical measure,
+              placed side-by-side.  Boxes are colour-coded by measure.
+
+    Styling
+    -------
+    - Filled boxes, coloured by clinical measure (tab10 palette)
+    - Median line: white, linewidth 1.6
+    - Whiskers extend to 1.5 × IQR; outliers shown as small translucent dots
+    - Dashed horizontal line at overall median ePRSComp for reference
+    """
+    n_clin = len(continuous_clinical_cols)
+    if n_clin == 0:
+        print('No continuous clinical columns found — skipping decile box plot.')
+        return
+
+    N_DECILES = 10
+    PALETTE   = plt.get_cmap('tab10').colors   # 10 distinct colours
+
+    # ── Build per-measure decile → PRS mapping ────────────────────────────
+    # data[measure][decile] = array of prs values
+    data = {}
+    labels_clean = []
+    for clin_col in continuous_clinical_cols:
+        label = clin_col.replace('_', ' ')
+        labels_clean.append(label)
+
+        decile_ser = pd.qcut(
+            df[clin_col].rank(method='first'),   # rank to break ties cleanly
+            q=N_DECILES,
+            labels=False,
+            duplicates='drop'
+        ) + 1   # 1-indexed
+
+        measure_data = {}
+        for d in range(1, N_DECILES + 1):
+            mask = decile_ser == d
+            vals = df.loc[mask, prs_col].dropna().values
+            measure_data[d] = vals if len(vals) > 0 else np.array([np.nan])
+        data[clin_col] = measure_data
+
+    # ── Layout: positions ─────────────────────────────────────────────────
+    # Each decile group spans 1 unit; boxes fill 85% of that width.
+    group_span = 1.0
+    box_w      = (group_span * 0.85) / n_clin      # individual box width
+    gap        = group_span * 0.15                  # gap between groups
+
+    def box_pos(decile, clin_idx):
+        """Centre x-position of one box."""
+        group_centre = (decile - 1) * group_span
+        start        = group_centre - (n_clin - 1) * box_w / 2
+        return start + clin_idx * box_w
+
+    # ── Figure ────────────────────────────────────────────────────────────
+    fig_w = max(16, n_clin * 3.2)
+    fig, ax = plt.subplots(figsize=(fig_w, 6))
+
+    overall_median = float(np.nanmedian(df[prs_col].values))
+    ax.axhline(overall_median, color='#2C2C2A', linewidth=0.9,
+               linestyle=':', alpha=0.45, label=f'Overall median ({overall_median:.0f})')
+
+    for clin_idx, (clin_col, label) in enumerate(
+            zip(continuous_clinical_cols, labels_clean)):
+        colour = PALETTE[clin_idx % len(PALETTE)]
+
+        positions = [box_pos(d, clin_idx) for d in range(1, N_DECILES + 1)]
+        box_data  = [data[clin_col][d]    for d in range(1, N_DECILES + 1)]
+
+        bp = ax.boxplot(
+            box_data,
+            positions=positions,
+            widths=box_w * 0.88,
+            patch_artist=True,
+            manage_ticks=False,
+            # whiskers to 1.5 IQR
+            whis=1.5,
+            showfliers=True,
+            flierprops=dict(
+                marker='o', markerfacecolor=(*colour[:3], 0.25),
+                markeredgecolor='none', markersize=2.5
+            ),
+            medianprops=dict(color='white', linewidth=1.6),
+            whiskerprops=dict(color=colour, linewidth=1.0, linestyle='-'),
+            capprops=dict(color=colour, linewidth=1.2),
+            boxprops=dict(linewidth=0),
+        )
+        for patch in bp['boxes']:
+            patch.set_facecolor((*colour[:3], 0.80))
+
+        # Invisible scatter for the legend
+        ax.scatter([], [], color=colour, s=60, marker='s', label=label)
+
+    # ── X-axis ticks centred on each decile group ─────────────────────────
+    tick_positions = [
+        (box_pos(d, 0) + box_pos(d, n_clin - 1)) / 2
+        for d in range(1, N_DECILES + 1)
+    ]
+    ax.set_xticks(tick_positions)
+    ax.set_xticklabels([str(d) for d in range(1, N_DECILES + 1)], fontsize=11)
+    ax.set_xlabel('Clinical measure decile', fontsize=12)
+    ax.set_ylabel(f'{prs_label} (bin_combined, 1–1000)', fontsize=12)
+    ax.set_title(
+        f'{prs_label} distribution by clinical measure decile\n'
+        f'(deciles computed independently per measure)',
+        fontsize=12, pad=10
+    )
+    ax.set_xlim(
+        box_pos(1, 0)             - box_w,
+        box_pos(N_DECILES, n_clin - 1) + box_w
+    )
+    ax.set_ylim(0, 1050)
+    ax.legend(fontsize=9, frameon=False, loc='upper left',
+              bbox_to_anchor=(0, 1), ncol=min(n_clin, 4))
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    fig.tight_layout()
+
+    out = os.path.join(figPath, 'prs_by_clinical_decile_boxplot.png')
+    fig.savefig(out, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    print(f'PRS-by-clinical-decile box plot saved to {out}')
+
+
 def plot_roc_curves(y, base_prob_pool, clin_prob_pool, clin_only_prob_pool,
                     continuous_clinical_cols, figPath, prs_col_label='ePRSComp'):
     """
@@ -666,6 +798,11 @@ def run_logistic_analysis(pheno, pheno_data, results_path, prs_col, n_splits=5):
 
     df, continuous_clinical_cols, binary_clinical_cols, covariate_cols, prs_high_risk_col = \
         load_data(pheno_data, results_path, prs_col)
+
+    # ePRSComp by clinical decile (uses raw data, no modelling needed)
+    plot_prs_by_clinical_decile(
+        df, continuous_clinical_cols, prs_col, figPath, prs_label=prs_col
+    )
 
     # Logistic regression CV (continuous clinical cols as features, binary for NRI)
     results, base_prob, clin_probs, clin_only_probs = run_logistic_cv(
