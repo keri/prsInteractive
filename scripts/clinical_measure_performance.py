@@ -337,6 +337,125 @@ def create_sankey_plot_clinical_data(df, figPath, use_epi_main=False):
         
         
         
+def plot_nri_v1(df, clinical_vars, prs_col, figsize=(10, 5)):
+    """
+    Version-1 NRI bar chart matching the HTML design:
+      - Amber bars  : NRI events   (cases correctly reclassified to higher risk)
+      - Blue bars   : NRI non-events (controls correctly reclassified to lower risk)
+      - Dark diamond: Net NRI with 95% CI whiskers
+
+    Two side-by-side panels are produced:
+      left  — Overall (all samples)
+      right — Within clinically low-risk group (clinical binary == 0)
+
+    Uses calculate_nri(..., return_ci=True) for Pencina 2008 95% CI on net NRI.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Must contain 'PHENOTYPE' (1=case, 0=control), binary clinical columns
+        (named ``<var>_binary`` or passed directly), and prs_col.
+    clinical_vars : list of str
+        Binary (0/1) clinical risk columns.  Typically the ``*_binary`` columns
+        produced by convert_to_binary().
+    prs_col : str
+        Binary (0/1) PRS high-risk column used as the *new* classifier.
+    figsize : tuple
+        Figure size passed to plt.subplots.
+
+    Returns
+    -------
+    fig : matplotlib.figure.Figure
+    summary : pd.DataFrame
+        NRI components for both panels indexed by clinical variable label.
+    """
+    AMBER = '#BA7517'
+    BLUE  = '#378ADD'
+    DARK  = '#2C2C2A'
+
+    panels = [
+        ('Overall',                          df),
+        ('Within clinically low-risk group', None),   # subset built per-var below
+    ]
+
+    fig, axes = plt.subplots(1, 2, figsize=figsize, sharey=False)
+
+    labels = [v.replace('_binary', '').replace('_risk_cat', '').replace('_', ' ')
+              for v in clinical_vars]
+    x = np.arange(len(clinical_vars))
+    width = 0.35
+
+    records = []
+
+    for ax, (panel_title, panel_df_fixed) in zip(axes, panels):
+        events_vals, ne_vals, net_vals = [], [], []
+        ci_lo_vals, ci_hi_vals = [], []
+
+        for var in clinical_vars:
+            if panel_df_fixed is not None:
+                sub = panel_df_fixed
+            else:
+                # low-risk subgroup: clinical binary == 0
+                sub = df[df[var] == 0]
+
+            try:
+                nri, nri_ev, nri_ne, ci_lo, ci_hi = calculate_nri(
+                    sub, var, prs_col, clinical=True, return_ci=True
+                )
+            except Exception:
+                nri, nri_ev, nri_ne, ci_lo, ci_hi = (np.nan,) * 5
+
+            events_vals.append(nri_ev)
+            ne_vals.append(nri_ne)
+            net_vals.append(nri)
+            ci_lo_vals.append(ci_lo)
+            ci_hi_vals.append(ci_hi)
+
+            records.append({
+                'panel':          panel_title,
+                'variable':       var,
+                'nri_events':     nri_ev,
+                'nri_non_events': nri_ne,
+                'nri':            nri,
+                'ci_low':         ci_lo,
+                'ci_high':        ci_hi,
+            })
+
+        # Bars
+        ax.bar(x - width / 2, events_vals, width, label='NRI events',
+               color=AMBER, linewidth=0, zorder=2)
+        ax.bar(x + width / 2, ne_vals,     width, label='NRI non-events',
+               color=BLUE,  linewidth=0, zorder=2)
+
+        # Diamond markers for net NRI with CI whiskers
+        yerr_lo = np.array(net_vals) - np.array(ci_lo_vals)
+        yerr_hi = np.array(ci_hi_vals) - np.array(net_vals)
+        ax.errorbar(
+            x, net_vals,
+            yerr=[np.abs(yerr_lo), np.abs(yerr_hi)],
+            fmt='D', color=DARK, markersize=7, capsize=4,
+            linewidth=1.2, zorder=3, label='Net NRI (95% CI)'
+        )
+
+        ax.axhline(0, color='#2C2C2A', linewidth=0.8, alpha=0.4)
+        ax.set_xticks(x)
+        ax.set_xticklabels(labels, fontsize=11)
+        ax.set_title(panel_title, fontsize=12, pad=8)
+        ax.set_ylabel('NRI', fontsize=11)
+        ax.tick_params(axis='y', labelsize=10)
+        ax.spines['top'].set_visible(False)
+        ax.spines['right'].set_visible(False)
+
+    # Shared legend above both panels
+    handles, lbls = axes[0].get_legend_handles_labels()
+    fig.legend(handles, lbls, loc='upper center', ncol=3,
+               fontsize=10, frameon=False, bbox_to_anchor=(0.5, 1.04))
+    fig.tight_layout()
+
+    summary = pd.DataFrame(records)
+    return fig, summary
+
+
 def plot_nri_from_reclassification(df, clinical_vars, prs_col, show_total_as_line=False):
     
     """
@@ -1176,7 +1295,7 @@ def _count_reclassifications(old_risk: pd.Series, new_risk: pd.Series,
     }
 
 
-def calculate_nri(df, prs_method1, prs_method2, clinical=True):
+def calculate_nri(df, prs_method1, prs_method2, clinical=True, return_ci=False):
     """
     Calculate Net Reclassification Improvement (NRI) comparing two binary risk
     classifications.
@@ -1191,10 +1310,15 @@ def calculate_nri(df, prs_method1, prs_method2, clinical=True):
         Column name for the new classification (binary 0/1).
     clinical : bool
         When True, validates that prs_method1 is binary before proceeding.
+    return_ci : bool, default False
+        When True, returns a 5-tuple (nri, nri_events, nri_non_events, ci_low, ci_high)
+        where ci_low/ci_high are the 95% confidence interval bounds for the total NRI
+        (Pencina 2008 SE formula).
 
     Returns
     -------
-    tuple : (nri, nri_events, nri_non_events)
+    tuple : (nri, nri_events, nri_non_events) when return_ci=False
+            (nri, nri_events, nri_non_events, ci_low, ci_high) when return_ci=True
     """
     if clinical:
         if not set(df[prs_method1].dropna().unique()).issubset({0, 1}):
@@ -1217,7 +1341,18 @@ def calculate_nri(df, prs_method1, prs_method2, clinical=True):
     nri_non_events = (counts['down_controls'] - counts['up_controls'])   / n_controls
     nri            = nri_events + nri_non_events
 
-    return nri, nri_events, nri_non_events
+    if not return_ci:
+        return nri, nri_events, nri_non_events
+
+    # 95% CI via Pencina 2008 SE formula: SE = sqrt(up+down) / n
+    se_events     = np.sqrt(counts['up_cases']    + counts['down_cases'])    / n_cases
+    se_non_events = np.sqrt(counts['up_controls'] + counts['down_controls']) / n_controls
+    se_nri        = np.sqrt(se_events**2 + se_non_events**2)
+
+    ci_low  = nri - 1.96 * se_nri
+    ci_high = nri + 1.96 * se_nri
+
+    return nri, nri_events, nri_non_events, ci_low, ci_high
 
 def net_reclassification_index(data: pd.DataFrame, prs1_name: str,
                                prs2_name: str, threshold: int,
@@ -1802,6 +1937,12 @@ def compare_prs_performance(df, clinical_measures, figPath, file_ext, prs_method
             
         
     #       if prs1 == 'combined_centile_bin':
+            # Version-1 NRI plot (amber=events, blue=non-events, diamond=net NRI + 95% CI)
+            fig, nri_summary = plot_nri_v1(df_copy, binary_measures, prs_col1)
+            plt.savefig(f'{figPath}/nri_v1_clinical_vars.{prs1}.png', dpi=300, bbox_inches='tight')
+            plt.close(fig)
+
+            # Legacy reclassification bar chart kept for backward compatibility
             fig,nri_summary = plot_nri_from_reclassification(df_copy,binary_measures,prs_col1)
             plt.savefig(f'{figPath}/nri_comparison_clinical_vars_bar_chart.{prs1}.png', dpi=300, bbox_inches='tight')
             plt.close(fig)
