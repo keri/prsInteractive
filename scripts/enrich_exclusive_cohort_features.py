@@ -918,7 +918,7 @@ def main(pheno_data, raw_features_file,
     # Load functional cluster files
     # -------------------------------------------------------------------------
     print("\n--- Step 4: Loading functional cluster files ---")
-    subtype_path = os.path.join(pheno_data, 'subtypeResearch')
+    subtype_path = os.path.join(os.path.dirname(pheno_data), 'subtypeResearch')
     cluster_pattern = os.path.join(subtype_path, '*functional_cluster*.csv')
     cluster_files = sorted(glob.glob(cluster_pattern))
 
@@ -1080,7 +1080,8 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--pheno_data',
-        help='Path to combinedAnalysis directory (contains scores/ and subtypeResearch/)',
+        help='Path to combinedAnalysis directory (e.g. results/type2Diabetes/combinedAnalysis); '
+             'subtypeResearch/ is expected one level up (results/type2Diabetes/subtypeResearch/)',
     )
     parser.add_argument(
         '--raw_features_file',
