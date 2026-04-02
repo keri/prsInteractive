@@ -704,8 +704,13 @@ def build_lookup(wide_df, cluster_cols, feat_col, loci_col, trait_col):
 
         if feat_col and feat_col in present.columns:
             for v in present[feat_col].dropna():
-                # Each cell may contain comma/semicolon-separated rsIDs
-                for token in re.split(r'[,;\s]+', str(v)):
+                # Split on commas/semicolons only — NOT whitespace.
+                # rsIDs never contain spaces; clinical names do ("Fasting glucose",
+                # "Hemoglobin concentration", etc.) and must be kept whole so that
+                # normalise_name() can convert the full phrase to a single canonical key
+                # (e.g. "Hemoglobin concentration" → "haemoglobin_concentration").
+                for token in re.split(r'[,;]+', str(v)):
+                    token = token.strip()
                     n = _norm(token)
                     if n:
                         features_set.add(n)
