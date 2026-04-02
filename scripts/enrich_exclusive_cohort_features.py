@@ -97,6 +97,11 @@ warnings.filterwarnings("ignore")
 #  all resolve to the same canonical key before any matching is done.
 # =============================================================================
 
+# Runtime-populated clinical feature map: {normalised_alias → canonical_key}.
+# Loaded from clinical_feature_map.csv in subtypeResearch/.  Empty until
+# load_clinical_feature_map() is called in main().
+_CLINICAL_FEATURE_MAP: dict = {}
+
 # (pattern, replacement) — applied left-to-right after basic cleaning.
 # American / informal → canonical British / clinical spelling used in UKB.
 _SPELLING_CANON = [
@@ -151,13 +156,13 @@ def normalise_name(name: str) -> str:
     "HbA1c"               → "hba1c"
     "LDL-C"               → "ldl_cholesterol"
     """
-    if not name or (isinstance(name, float) and np.isnan(name)):
+    s = _normalise_base(name)
+    if not s:
         return ''
-    s = str(name).lower().strip()
-    s = re.sub(r'[\s\-/\.]+', '_', s)
-    s = re.sub(r'_+', '_', s).strip('_')
-    for pattern, repl in _SPELLING_CANON:
-        s = re.sub(pattern, repl, s)
+    # Clinical feature map lookup (populated at runtime from clinical_feature_map.csv).
+    # Resolves aliases like 'hba1c', 'glycated_hemoglobin' → canonical primary term.
+    if _CLINICAL_FEATURE_MAP:
+        s = _CLINICAL_FEATURE_MAP.get(s, s)
     return s
 
 
@@ -176,6 +181,89 @@ def normalise_series_names(col_names):
         for canon, originals in collisions.items():
             print(f"  [NORM] Collapsed to '{canon}': {originals}")
     return canon_map, reverse
+
+
+def load_clinical_feature_map(subtype_path: str) -> dict:
+    """
+    Load ``clinical_feature_map.csv`` from *subtype_path* and build a
+    normalised-alias → canonical-key lookup.
+
+    CSV structure
+    -------------
+    feature   – primary / canonical name (space-separated; most common form
+                used in the functional cluster files).  This becomes the
+                canonical key after normalisation.
+    feature1  – first alternative spelling / abbreviation.
+    feature2  – second alternative spelling / abbreviation.
+
+    Any number of extra columns are silently ignored.
+
+    Logic
+    -----
+    1. Normalise the *feature* value (lowercase, separator→_, spelling canon)
+       → this is the canonical key.
+    2. For each non-empty cell in feature1 / feature2, normalise that value
+       and store alias → canonical_key in the returned dict.
+    3. The canonical key itself is also stored (identity mapping) so that
+       names that are already in canonical form pass through unchanged.
+
+    Returns
+    -------
+    dict  {normalised_alias: normalised_canonical}
+
+    The returned dict is merged into the module-level ``_CLINICAL_FEATURE_MAP``
+    so that ``normalise_name()`` can consult it on every call.
+    """
+    map_path = os.path.join(subtype_path, 'clinical_feature_map.csv')
+    if not os.path.isfile(map_path):
+        print(f"  [WARN] clinical_feature_map.csv not found at {map_path}; "
+              "clinical alias expansion disabled.")
+        return {}
+
+    df = pd.read_csv(map_path, encoding='utf-8-sig')
+    # Drop completely empty columns (the CSV has trailing empty cols)
+    df = df.dropna(axis=1, how='all')
+    df.columns = df.columns.str.strip()
+
+    alias_map: dict = {}
+    n_entries = 0
+
+    for _, row in df.iterrows():
+        raw_primary = row.get('feature', '')
+        if not raw_primary or (isinstance(raw_primary, float) and np.isnan(raw_primary)):
+            continue
+        # Normalise without consulting the (still-empty) map to avoid recursion
+        canonical = _normalise_base(str(raw_primary))
+        # Identity mapping: canonical → canonical
+        alias_map[canonical] = canonical
+
+        for alt_col in ('feature1', 'feature2'):
+            raw_alt = row.get(alt_col, '')
+            if not raw_alt or (isinstance(raw_alt, float) and np.isnan(raw_alt)):
+                continue
+            alt_norm = _normalise_base(str(raw_alt))
+            if alt_norm and alt_norm != canonical:
+                alias_map[alt_norm] = canonical
+                n_entries += 1
+
+    print(f"  Loaded clinical_feature_map.csv: {len(df)} entries, "
+          f"{n_entries} alias mappings registered.")
+    return alias_map
+
+
+def _normalise_base(name: str) -> str:
+    """
+    Core normalisation without the clinical-map lookup (used when building
+    the map itself to avoid circular reference).
+    """
+    if not name or (isinstance(name, float) and np.isnan(name)):
+        return ''
+    s = str(name).lower().strip()
+    s = re.sub(r'[\s\-/\.]+', '_', s)
+    s = re.sub(r'_+', '_', s).strip('_')
+    for pattern, repl in _SPELLING_CANON:
+        s = re.sub(pattern, repl, s)
+    return s
 
 
 # =============================================================================
@@ -919,6 +1007,11 @@ def main(pheno_data, raw_features_file,
     # -------------------------------------------------------------------------
     print("\n--- Step 4: Loading functional cluster files ---")
     subtype_path = os.path.join(os.path.dirname(pheno_data), 'subtypeResearch')
+
+    # Populate clinical alias map BEFORE any normalise_name calls on cluster data
+    global _CLINICAL_FEATURE_MAP
+    _CLINICAL_FEATURE_MAP = load_clinical_feature_map(subtype_path)
+
     cluster_pattern = os.path.join(subtype_path, '*functional_cluster*.csv')
     cluster_files = sorted(glob.glob(cluster_pattern))
 
