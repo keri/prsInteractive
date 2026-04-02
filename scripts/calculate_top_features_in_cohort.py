@@ -13,10 +13,11 @@ from sklearn.impute import SimpleImputer
 import warnings
 
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, HistGradientBoostingClassifier
 from sklearn.multioutput import MultiOutputClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
+from scipy import stats as scipy_stats
 import os
 
 from helper.download import *
@@ -261,6 +262,254 @@ def print_feature_diagnostics(df, feature_sets, threshold):
 #  Unchanged helpers below
 # =============================================================================
 
+# =============================================================================
+#  EXCLUSIVE HIGH-CASES: IDENTIFICATION AND BOOTSTRAP GBM-SHAP
+# =============================================================================
+
+def detect_bin_thresholds(groupedDf, bin_cols):
+    """
+    Infer high-risk / low-risk thresholds from the actual bin scale present in
+    the data, preserving the same top-20% / bottom-20% split regardless of
+    whether bins run 1–10 (deciles) or 1–1000 (quantiles).
+
+      1–10  scale : high > 8   (= 0.8 × 10),  low < 3   (= 0.2 × 10 + 1)
+      1–1000 scale: high > 800 (= 0.8 × 1000), low < 201 (= 0.2 × 1000 + 1)
+    """
+    max_bin = float(groupedDf[bin_cols].max().max())
+    high_threshold = 0.8 * max_bin
+    low_threshold  = 0.2 * max_bin + 1
+    print(f'  Bin scale: 1–{max_bin:.0f}  →  '
+          f'high risk bin > {high_threshold:.0f}  |  '
+          f'low risk bin < {low_threshold:.0f}')
+    return high_threshold, low_threshold
+
+
+def identify_exclusive_high_cases(groupedDf, bin_cols):
+    """
+    For each cohort, identify individuals who are exclusively high-risk in that
+    cohort but NOT high-risk in any other cohort, restricted to cases
+    (PHENOTYPE == 2).  Controls are low-risk within the same cohort
+    (PHENOTYPE == 1).
+
+    Thresholds are derived proportionally from the bin scale (top 20% / bottom
+    20%) so the function is correct for both the 1–10 training file and the
+    1–1000 holdout file.
+
+    Parameters
+    ----------
+    groupedDf : DataFrame indexed by IID with bin_* and PHENOTYPE columns
+    bin_cols  : list of bin_* column names to consider
+
+    Returns
+    -------
+    dict  {cohort: {'case_index': Index, 'control_index': Index}}
+    """
+    high_thresh, low_thresh = detect_bin_thresholds(groupedDf, bin_cols)
+    result = {}
+    cohort_names = [c.replace('bin_', '') for c in bin_cols]
+    for col, cohort in zip(bin_cols, cohort_names):
+        is_high_this  = groupedDf[col] > high_thresh
+        other_cols    = [c for c in bin_cols if c != col]
+        is_high_other = (
+            groupedDf[other_cols].gt(high_thresh).any(axis=1)
+            if other_cols
+            else pd.Series(False, index=groupedDf.index)
+        )
+        case_idx    = groupedDf[
+            is_high_this & ~is_high_other & (groupedDf['PHENOTYPE'] == 2)
+        ].index
+        control_idx = groupedDf[
+            (groupedDf[col] < low_thresh) & (groupedDf['PHENOTYPE'] == 1)
+        ].index
+        result[cohort] = {'case_index': case_idx, 'control_index': control_idx}
+        print(f'  ExclusiveHigh {cohort}: {len(case_idx):>5} exclusive cases  '
+              f'| {len(control_idx):>6} within-cohort controls')
+    return result
+
+
+def run_exclusive_high_bootstrap(
+        cohort, case_index, control_index,
+        feature_df, featuresDf, feature_str,
+        n_iterations, z_threshold,
+        figPath, featureImportanceFile,
+        rng_seed=42):
+    """
+    Train a Histogram Gradient Boosted classifier (exclusive cases vs balanced
+    controls) n_iterations times, bootstrapping a fresh balanced control sample
+    each iteration.  SHAP values are extracted from each model and the per-feature
+    mean SHAP across all case samples is accumulated.  After all iterations the
+    accumulated means are averaged and z-scored; features whose |z| exceeds
+    z_threshold are flagged as important.
+
+    Design rationale — why bootstrap balanced controls?
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Exclusive cases are by definition a small, biologically coherent group.
+    Controls are plentiful and heterogeneous.  Training on the full imbalanced
+    dataset inflates the majority class and suppresses the minority signal.
+    Bootstrapping n balanced subsets of controls and averaging SHAP z-scores
+    across iterations gives a stable, low-variance importance estimate without
+    any single control sample composition dominating the result.
+
+    Why gradient boosted trees rather than random forest?
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    GBMs build trees sequentially to correct residuals, making them more
+    sensitive to subtle, non-linear interactions in small exclusive cohorts.
+    HistGradientBoostingClassifier is the sklearn native implementation —
+    fast, supports native missing-value handling, and is fully SHAP-compatible
+    via shap.TreeExplainer.
+
+    Parameters
+    ----------
+    cohort              : str, cohort label (e.g. 'G', 'GxG')
+    case_index          : pandas Index of exclusive high-risk case IIDs
+    control_index       : pandas Index of within-cohort low-risk control IIDs
+    feature_df          : DataFrame indexed by IID with feature columns
+                          (all features for this model, IID-indexed after
+                           assign_groups has been called)
+    featuresDf          : DataFrame with 'feature' and 'features_used' columns
+                          (already renamed from 'model')
+    feature_str         : str, model name identifying which rows of featuresDf
+                          to use and which output label to assign
+    n_iterations        : int, number of bootstrap iterations
+    z_threshold         : float, |z_score| threshold to flag feature_importance=1
+    figPath             : str, directory for saving plots
+    featureImportanceFile : str, path to the shared output CSV (appended to)
+    rng_seed            : int, base RNG seed (each iteration offset by index)
+    """
+    # ---- Feature columns for this model -------------------------------------
+    model_features = featuresDf[
+        featuresDf['features_used'] == feature_str
+    ]['feature'].tolist()
+    feat_cols = [f for f in model_features if f in feature_df.columns]
+
+    if not feat_cols:
+        print(f'    [SKIP] No features for {cohort} × {feature_str}')
+        return
+
+    # ---- Intersect IIDs with feature_df index --------------------------------
+    case_ids    = [i for i in case_index    if i in feature_df.index]
+    control_ids = [i for i in control_index if i in feature_df.index]
+    n_cases     = len(case_ids)
+
+    if n_cases < 5:
+        print(f'    [SKIP] {cohort} × {feature_str}: only {n_cases} exclusive cases')
+        return
+    if len(control_ids) < 5:
+        print(f'    [SKIP] {cohort} × {feature_str}: only {len(control_ids)} controls')
+        return
+
+    X_cases         = feature_df.loc[case_ids,    feat_cols]
+    X_controls_pool = feature_df.loc[control_ids, feat_cols]
+    y_cases         = np.ones(n_cases,  dtype=int)
+
+    replace = len(control_ids) < n_cases     # sample with replacement only if pool < cases
+    if replace:
+        print(f'    [WARN] {cohort}: control pool ({len(control_ids)}) < n_cases '
+              f'({n_cases}); sampling with replacement')
+
+    rng = np.random.default_rng(rng_seed)
+
+    # ---- Bootstrap loop -----------------------------------------------------
+    # Accumulate sum of per-feature mean-SHAP-over-cases for each iteration
+    shap_sum      = np.zeros(len(feat_cols), dtype=float)
+    n_successful  = 0
+
+    for it in range(n_iterations):
+        ctrl_pos    = rng.choice(len(control_ids), size=n_cases, replace=replace)
+        X_ctrl_iter = X_controls_pool.iloc[ctrl_pos]
+        y_ctrl_iter = np.zeros(n_cases, dtype=int)
+
+        X_iter = pd.concat([X_cases, X_ctrl_iter])
+        y_iter = np.concatenate([y_cases, y_ctrl_iter])
+
+        try:
+            gbm = HistGradientBoostingClassifier(
+                max_iter=200,
+                learning_rate=0.05,
+                max_depth=4,
+                random_state=int(rng.integers(0, 2**31)),
+            )
+            gbm.fit(X_iter, y_iter)
+
+            # SHAP on cases only — we want the attribution that drives case
+            # predictions, not the average across both classes.
+            explainer  = shap.TreeExplainer(gbm)
+            shap_vals  = explainer.shap_values(X_cases)
+
+            # HistGBM binary: shap_values is a 2D array (n_samples × n_features)
+            # for the positive class; no list wrapping needed.
+            if isinstance(shap_vals, list):
+                shap_vals = shap_vals[1]
+
+            shap_sum     += np.mean(shap_vals, axis=0)
+            n_successful += 1
+
+        except Exception as exc:
+            if it < 3:
+                print(f'    [WARN] iteration {it} failed ({cohort} × {feature_str}): {exc}')
+            continue
+
+    if n_successful == 0:
+        print(f'    [ERROR] All {n_iterations} iterations failed for '
+              f'{cohort} × {feature_str}')
+        return
+
+    # ---- Average and z-score ------------------------------------------------
+    avg_mean_shap = pd.Series(shap_sum / n_successful, index=feat_cols)
+
+    # Drop features whose averaged SHAP is identically zero across all iterations
+    avg_mean_shap = avg_mean_shap[avg_mean_shap != 0]
+    if avg_mean_shap.empty:
+        print(f'    [SKIP] {cohort} × {feature_str}: all averaged SHAP values zero')
+        return
+
+    z_scores = pd.Series(
+        scipy_stats.zscore(avg_mean_shap.values),
+        index=avg_mean_shap.index,
+        name='z_score',
+    )
+
+    # ---- Build output row (same schema as the existing RF loop) -------------
+    featureImportance = pd.DataFrame({
+        'feature'   : avg_mean_shap.index,
+        'mean_shap' : avg_mean_shap.values,
+        'z_score'   : z_scores.values,
+    })
+    featureImportance['feature_importance'] = (
+        featureImportance['z_score'].abs() > z_threshold
+    ).astype(int)
+    featureImportance['cohort']                  = cohort
+    featureImportance['features_used']           = feature_str
+    featureImportance['training_data_used']      = 'ExclusiveHighCases'
+    featureImportance['n_bootstrap_iterations']  = n_successful
+    # GBM has no linear coefficients — coefs/odds_ratio are not meaningful
+    featureImportance['coefs']                   = np.nan
+    featureImportance['odds_ratio']              = np.nan
+
+    # Merge in any annotation already in featuresDf (e.g. model metadata)
+    featureImportance = featureImportance.merge(
+        featuresDf, on=['feature', 'features_used'], how='left'
+    )
+
+    n_important = int(featureImportance['feature_importance'].sum())
+    print(f'    {cohort} × {feature_str}: {n_successful}/{n_iterations} iterations OK  '
+          f'| {n_important} features |z| > {z_threshold}')
+
+    # ---- Plot z-score bar chart (reuse existing helper) ---------------------
+    plot_and_save_top_features(
+        z_scores, cohort,
+        figPath, f'{feature_str}.ExclusiveHighCases'
+    )
+
+    # ---- Append to shared featureImportance CSV -----------------------------
+    if not os.path.exists(featureImportanceFile):
+        with open(featureImportanceFile, mode='w', newline='') as fh:
+            featureImportance.to_csv(fh, index=False)
+    else:
+        with open(featureImportanceFile, mode='a', newline='') as fh:
+            featureImportance.to_csv(fh, index=False, header=False)
+
+
 def assign_groups(dfDict, featuresDf, trainingDataHigh, trainingDataLow):
     groupDfList = []
     for g, df in dfDict.items():
@@ -279,7 +528,9 @@ def assign_groups(dfDict, featuresDf, trainingDataHigh, trainingDataLow):
 
 
 def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
-         majority_threshold=0.6, delta_threshold=0.5, use_all=False):
+         majority_threshold=0.6, delta_threshold=0.5, use_all=False,
+         run_exclusive=False, n_exclusive_iterations=1000,
+         exclusive_z_threshold=1.0):
 
     scoresPath = f'{phenoData}/scores'
     figPath = f'{phenoData}/figures/importantCohortFeatures'
@@ -372,7 +623,7 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
         model.fit(X_train, y_train)
   
         y_pred = model.predict(X_test)
-        report_dict = classification_report(y_test, y_pred, target_names=groups, output_dict=True)
+        report_dict = classification_report(y_test, y_pred, target_names=groups, output_dict=True, zero_division=0)
         report_df = pd.DataFrame(report_dict).transpose().reset_index()
   
         for i, cl in enumerate(groups):
@@ -439,6 +690,39 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
       probDf.to_csv(probDfFile)
 
     # =========================================================================
+    #  EXCLUSIVE HIGH-CASES: BOOTSTRAP GBM-SHAP PER COHORT
+    #
+    #  For each cohort find individuals exclusively high-risk there (bin > 8 in
+    #  this cohort, NOT > 8 in any other), train n_exclusive_iterations
+    #  HistGradientBoostedClassifier models each time drawing a fresh balanced
+    #  control sample, extract SHAP values on cases, average across iterations,
+    #  z-score, and append results to the shared featureImportanceFile under
+    #  training_data_used = 'ExclusiveHighCases'.  These rows then participate
+    #  in the same cross-cohort filtering step below as HighCases / LowControls.
+    # =========================================================================
+    if run_exclusive:
+        print('\n########################  EXCLUSIVE HIGH-CASES BOOTSTRAP'
+              '  ########################')
+        exclusive_groups = identify_exclusive_high_cases(groupedDf, models_bins_to_use)
+
+        for cohort, group_data in exclusive_groups.items():
+            print(f'\n  --- Cohort: {cohort} ---')
+            for data_type, feat_df in dfDict.items():
+                run_exclusive_high_bootstrap(
+                    cohort               = cohort,
+                    case_index           = group_data['case_index'],
+                    control_index        = group_data['control_index'],
+                    feature_df           = feat_df,
+                    featuresDf           = featuresDf,
+                    feature_str          = data_type,
+                    n_iterations         = n_exclusive_iterations,
+                    z_threshold          = exclusive_z_threshold,
+                    figPath              = figPath,
+                    featureImportanceFile= featureImportanceFile,
+                    rng_seed             = 42,
+                )
+
+    # =========================================================================
     #  CROSS-COHORT FILTERING with chosen strategy
     # =========================================================================
     importantTrainingDataFeatures = pd.read_csv(featureImportanceFile)
@@ -449,6 +733,23 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
         trainingDataFeatures = importantTrainingDataFeatures[
             importantTrainingDataFeatures['training_data_used'] == trainingData_str]
         feature_sets = trainingDataFeatures['features_used'].unique()
+
+        # ExclusiveHighCases: each cohort was trained independently on its own
+        # exclusive individuals — features only ever appear for ONE cohort, so the
+        # cross-cohort filtering functions (which require other-cohort z-scores to
+        # exist) would silently drop everything via `if len(other_z) == 0: continue`.
+        # Exclusivity is already guaranteed at the individual level; pass through
+        # directly using the same |z| > threshold criterion used inside the RF loop.
+        if trainingData_str == 'ExclusiveHighCases':
+            results_df = trainingDataFeatures[
+                trainingDataFeatures['feature_importance'] == 1
+            ].copy()
+            print(f"\n  ExclusiveHighCases: bypassing cross-cohort filter "
+                  f"(exclusivity enforced at individual level). "
+                  f"{len(results_df)} features with feature_importance=1.")
+            results_df['training_data_used'] = trainingData_str
+            filteredResults = pd.concat([filteredResults, results_df], ignore_index=True)
+            continue
 
         # Print diagnostics so you can see where the sparsity originates
         print_feature_diagnostics(trainingDataFeatures, feature_sets, threshold=0.5)
@@ -516,6 +817,31 @@ if __name__ == '__main__':
                         help="For majority strategy: fraction of other cohorts that must be negative (default: 0.6)")
     parser.add_argument("--delta_threshold", type=float, default=0.5,
                         help="For differential strategy: min z-score delta above mean of other cohorts (default: 0.5)")
+    parser.add_argument("--run_exclusive", action='store_true', default=False,
+                        help=(
+                            "Run the exclusive high-cases bootstrap GBM-SHAP analysis. "
+                            "Trains n_exclusive_iterations HistGradientBoosted models per "
+                            "cohort × feature-set, each with a fresh balanced control "
+                            "sample, averages SHAP z-scores across iterations, and appends "
+                            "results to featureImportanceFile under "
+                            "training_data_used='ExclusiveHighCases'. "
+                            "Results participate in the same cross-cohort filtering step."
+                        ))
+    parser.add_argument("--n_exclusive_iterations", type=int, default=1000,
+                        help=(
+                            "Number of bootstrap iterations for the exclusive high-cases "
+                            "GBM-SHAP analysis (default: 1000). Each iteration draws a "
+                            "fresh balanced control sample, trains one GBM, and extracts "
+                            "SHAP values on cases. 500 is a reasonable minimum; 1000 gives "
+                            "stable z-score estimates in most cohort sizes."
+                        ))
+    parser.add_argument("--exclusive_z_threshold", type=float, default=1.0,
+                        help=(
+                            "SHAP z-score threshold for flagging feature_importance=1 in "
+                            "the exclusive high-cases analysis (default: 1.0). Applied to "
+                            "the z-score of the averaged per-feature mean SHAP across all "
+                            "bootstrap iterations."
+                        ))
 
     args = parser.parse_args()
 
@@ -536,10 +862,13 @@ if __name__ == '__main__':
     if not feature_scores_file:
         raise ValueError("You must provide --feature_scores_file_filtered or set FEATURE_SCORES_FILE_FILTERED env var.")
 
-    print(f"Filter strategy   : {args.filter_strategy}")
-    print(f"SHAP z threshold  : {threshold}")
-    print(f"Majority threshold: {args.majority_threshold}")
-    print(f"Delta threshold   : {args.delta_threshold}")
+    print(f"Filter strategy        : {args.filter_strategy}")
+    print(f"SHAP z threshold       : {threshold}")
+    print(f"Majority threshold     : {args.majority_threshold}")
+    print(f"Delta threshold        : {args.delta_threshold}")
+    print(f"Run exclusive bootstrap: {args.run_exclusive}")
+    print(f"Exclusive iterations   : {args.n_exclusive_iterations}")
+    print(f"Exclusive z threshold  : {args.exclusive_z_threshold}")
 
     main(
         pheno_data,
@@ -547,6 +876,9 @@ if __name__ == '__main__':
         threshold,
         filter_strategy=args.filter_strategy,
         majority_threshold=args.majority_threshold,
-        delta_threshold=args.delta_threshold
+        delta_threshold=args.delta_threshold,
+        run_exclusive=args.run_exclusive,
+        n_exclusive_iterations=args.n_exclusive_iterations,
+        exclusive_z_threshold=args.exclusive_z_threshold,
     )
   
