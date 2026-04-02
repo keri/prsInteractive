@@ -764,8 +764,144 @@ def build_lookup(wide_df, cluster_cols, feat_col, loci_col, trait_col):
     return lookup
 
 
+def load_mahajan_map(subtype_path: str) -> dict:
+    """
+    Load ``mahajan_clinical_loci_map.csv`` and build a lookup that maps each
+    SNP rsID or gene-locus token to the clinical feature it is most strongly
+    associated with (highest absolute beta across all clinical trait columns).
+
+    CSV structure
+    -------------
+    feature  – rsID (e.g. rs2296172)
+    loci     – gene symbol(s) (e.g. MACF1)
+    <trait>  – one column per clinical trait; cells are numeric betas / effect
+               sizes (NA allowed).
+
+    Returns
+    -------
+    dict  {normalised_id: {'clinical_feature': normalised_trait_name,
+                           'source': 'feature' | 'loci'}}
+
+    ``source`` records whether the key came from the rsID (feature) column or
+    the loci (gene) column so the downstream annotation can note the origin.
+    """
+    map_path = os.path.join(subtype_path, 'mahajan_clinical_loci_map.csv')
+    if not os.path.isfile(map_path):
+        print(f"  [WARN] mahajan_clinical_loci_map.csv not found at {map_path}; "
+              "Mahajan clinical linkage disabled.")
+        return {}
+
+    df = pd.read_csv(map_path, encoding='utf-8-sig')
+    # Drop completely empty columns (trailing Unnamed: cols)
+    df = df.dropna(axis=1, how='all')
+    df.columns = df.columns.str.strip()
+
+    id_cols = {'feature', 'loci'}
+    clinical_cols = [c for c in df.columns
+                     if c not in id_cols and not c.startswith('Unnamed')]
+    if not clinical_cols:
+        print("  [WARN] No clinical columns found in mahajan_clinical_loci_map.csv.")
+        return {}
+
+    # Coerce clinical columns to numeric
+    for c in clinical_cols:
+        df[c] = pd.to_numeric(df[c], errors='coerce')
+
+    mahajan: dict = {}
+    n_mapped = 0
+
+    for _, row in df.iterrows():
+        # Find the clinical column with the maximum |beta| for this SNP/locus
+        betas = row[clinical_cols].abs()
+        if betas.isna().all():
+            continue
+        best_trait_col = betas.idxmax()
+        best_trait_norm = normalise_name(best_trait_col)
+        if not best_trait_norm:
+            continue
+
+        # Register the rsID key
+        rsid = str(row.get('feature', '') or '').strip()
+        if rsid and rsid.lower() not in ('nan', ''):
+            key = _norm(rsid)
+            if key:
+                mahajan[key] = {'clinical_feature': best_trait_norm,
+                                'source': 'feature'}
+                n_mapped += 1
+
+        # Register each gene token from the loci column
+        loci_raw = str(row.get('loci', '') or '').strip()
+        if loci_raw and loci_raw.lower() not in ('nan', ''):
+            for gene in re.split(r'[;,\s]+', loci_raw):
+                key = _norm(gene.strip())
+                if key and key not in mahajan:
+                    # Only add if not already registered by rsID (rsID takes priority)
+                    mahajan[key] = {'clinical_feature': best_trait_norm,
+                                    'source': 'loci'}
+                    n_mapped += 1
+
+    print(f"  Loaded mahajan_clinical_loci_map.csv: {len(df)} SNPs/loci, "
+          f"{n_mapped} id→clinical mappings registered.")
+    return mahajan
+
+
+def apply_mahajan_clinical_features(expanded_df: pd.DataFrame,
+                                     mahajan_map: dict) -> pd.DataFrame:
+    """
+    For each genomic row in *expanded_df*, look up snp1, snp2, and
+    snp1_gene_names / snp2_gene_names tokens against *mahajan_map* and
+    record the linked clinical feature.
+
+    New columns added
+    -----------------
+    mahajan_clinical_feature : str   – canonical clinical feature name from
+                                       Mahajan map (empty string if no hit)
+    mahajan_source           : str   – 'snp1' | 'snp2' | 'gene' | '' –
+                                       which identifier produced the hit
+
+    Only genomic rows (feature_source == 'genomic_shap') are queried; clinical
+    rows already have a clinical identity and are left unchanged.
+    """
+    mahajan_cf  = []
+    mahajan_src = []
+
+    for _, row in expanded_df.iterrows():
+        cf, src = '', ''
+        if row.get('feature_source') == 'genomic_shap' and mahajan_map:
+            # Priority: snp1 → snp2 → gene tokens from snp1_genes → snp2_genes
+            candidates = []
+            for label, val in [('snp1', row.get('snp1')),
+                                ('snp2', row.get('snp2'))]:
+                n = _norm(val)
+                if n:
+                    candidates.append((label, n))
+            for gene_col, label in [('snp1_gene_names', 'gene'),
+                                     ('snp2_gene_names', 'gene')]:
+                gene_str = row.get(gene_col, '')
+                if gene_str and pd.notna(gene_str):
+                    for g in re.split(r'[;,\s]+', str(gene_str)):
+                        n = _norm(g.strip())
+                        if n:
+                            candidates.append((label, n))
+
+            for label, key in candidates:
+                if key in mahajan_map:
+                    cf  = mahajan_map[key]['clinical_feature']
+                    src = label
+                    break
+
+        mahajan_cf.append(cf)
+        mahajan_src.append(src)
+
+    expanded_df = expanded_df.copy()
+    expanded_df['mahajan_clinical_feature'] = mahajan_cf
+    expanded_df['mahajan_source']           = mahajan_src
+    return expanded_df
+
+
 def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
-                         feature_source, all_lookups):
+                         feature_source, all_lookups,
+                         mahajan_clinical_feature=''):
     """
     Map a single feature to all functional clusters with a strict match order.
 
@@ -780,6 +916,9 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
       1. feature → feature : snp1 (then snp2) vs cluster 'feature' col.
                              For clinical rows with no SNP annotation, raw 'feature'
                              name is used instead (direct trait-name match).
+                             If a Mahajan-linked clinical feature was resolved for this
+                             SNP/locus, it is also included as a feature candidate here
+                             (method recorded as 'feature_feature_mahajan').
       2. loci    → loci    : snp1_gene_names + snp2_gene_names tokens (our loci)
                              vs cluster 'loci' col (gene-name loci on cluster side).
       3. feature → loci    : snp1 / snp2 rsID tokens vs cluster 'loci' col
@@ -787,13 +926,17 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
 
     Parameters
     ----------
-    all_lookups : list of (col_key, lookup_dict) where lookup_dict has keys
-                  'features', 'loci'
+    all_lookups              : list of (col_key, lookup_dict) where lookup_dict has
+                               keys 'features', 'loci'
+    mahajan_clinical_feature : str   normalised clinical feature name derived from
+                               mahajan_clinical_loci_map.csv for this SNP/locus;
+                               empty string if none was found.
 
     Returns
     -------
     hits        : dict  {col_key: 0 or 1}
-    method_used : str   'feature_feature' | 'loci_loci' | 'feature_loci' | 'none'
+    method_used : str   'feature_feature' | 'feature_feature_mahajan' |
+                        'loci_loci' | 'feature_loci' | 'none'
                   Reflects the most specific method that produced any positive hit
                   across all cluster columns for this row.
     """
@@ -813,6 +956,14 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
         if n:
             clinical_candidates.add(n)
 
+    # Mahajan-derived clinical feature for this SNP/locus (genomic rows only).
+    # Kept separate so we can distinguish the match method.
+    mahajan_candidates = set()
+    if mahajan_clinical_feature:
+        n = _norm(mahajan_clinical_feature)
+        if n:
+            mahajan_candidates.add(n)
+
     feature_candidates = snp_candidates | clinical_candidates
 
     # --- Our "loci" candidates (step 2) -------------------------------------
@@ -829,17 +980,31 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
     # --- Map each cluster column ---------------------------------------------
     hits = {}
     best_method = 'none'
-    method_rank = {'none': 0, 'feature_loci': 1, 'loci_loci': 2, 'feature_feature': 3}
+    method_rank = {
+        'none':                     0,
+        'feature_loci':             1,
+        'loci_loci':                2,
+        'feature_feature_mahajan':  3,   # clinical bridge via Mahajan map
+        'feature_feature':          4,   # direct SNP / clinical name match (highest)
+    }
 
     for col_key, lookup in all_lookups:
         hit = 0
         method = 'none'
 
-        # 1. feature → feature
+        # 1. feature → feature (direct)
         #    snp1/snp2 rsID (or clinical name) vs cluster feature col
         if feature_candidates & lookup['features']:
             hit = 1
             method = 'feature_feature'
+
+        # 1b. feature → feature via Mahajan clinical bridge
+        #     SNP linked to a clinical trait in Mahajan et al. → that trait
+        #     is matched against the cluster feature col.  Ranked below direct
+        #     SNP / name match but above loci-level matching.
+        elif mahajan_candidates & lookup['features']:
+            hit = 1
+            method = 'feature_feature_mahajan'
 
         # 2. loci → loci
         #    our gene-name tokens (snp1_gene_names / snp2_gene_names)
@@ -1049,11 +1214,15 @@ def main(pheno_data, raw_features_file,
     # Load functional cluster files
     # -------------------------------------------------------------------------
     print("\n--- Step 4: Loading functional cluster files ---")
+    # NOTE: Mahajan map is applied in Step 4b (after subtype_path is set).
     subtype_path = os.path.join(os.path.dirname(pheno_data), 'subtypeResearch')
 
     # Populate clinical alias map BEFORE any normalise_name calls on cluster data
     global _CLINICAL_FEATURE_MAP
     _CLINICAL_FEATURE_MAP = load_clinical_feature_map(subtype_path)
+
+    # Load Mahajan SNP → clinical-feature bridge map
+    mahajan_map = load_mahajan_map(subtype_path)
 
     cluster_pattern = os.path.join(subtype_path, '*functional_cluster*.csv')
     cluster_files = sorted(glob.glob(cluster_pattern))
@@ -1088,6 +1257,14 @@ def main(pheno_data, raw_features_file,
             print(f"  [ERROR] {fname}: {exc}")
 
     # -------------------------------------------------------------------------
+    # Step 4b: Annotate genomic features with Mahajan clinical bridge
+    # -------------------------------------------------------------------------
+    print("\n--- Step 4b: Applying Mahajan SNP→clinical-feature linkage ---")
+    expanded_df = apply_mahajan_clinical_features(expanded_df, mahajan_map)
+    n_mahajan = (expanded_df['mahajan_clinical_feature'] != '').sum()
+    print(f"  Genomic rows with a Mahajan clinical link: {n_mahajan}/{len(expanded_df)}")
+
+    # -------------------------------------------------------------------------
     # Map features to clusters
     # -------------------------------------------------------------------------
     print("\n--- Step 5: Mapping features to functional clusters ---")
@@ -1102,25 +1279,28 @@ def main(pheno_data, raw_features_file,
             snp2_genes=row.get('snp2_gene_names'),
             feature_source=row.get('feature_source'),
             all_lookups=flat_lookups,
+            mahajan_clinical_feature=row.get('mahajan_clinical_feature', ''),
         )
         # Count how many functional cluster columns have a positive hit (1)
         n_matched = sum(cluster_hits.values())
 
         output_rows.append({
-            'raw_feature':        row.get('raw_feature', feat_val),
-            'feature':            feat_val,
-            'cohort':             row['cohort'],
-            'feature_source':     row.get('feature_source'),
-            'p_value':            row.get('p_value'),
-            'p_value_fdr':        row.get('p_value_fdr'),
-            'effect_size_r':      row.get('effect_size_r'),
-            'odds_ratio':         row.get('odds_ratio'),
-            'specificity_tier':   row.get('specificity_tier'),
-            'snp1_gene_names':    row.get('snp1_gene_names'),
-            'snp2_gene_names':    row.get('snp2_gene_names'),
-            'match_method':       match_method,
-            'n_clusters_matched': n_matched,
-            **cluster_hits,        # binary 0/1 per functional cluster column
+            'raw_feature':               row.get('raw_feature', feat_val),
+            'feature':                   feat_val,
+            'cohort':                    row['cohort'],
+            'feature_source':            row.get('feature_source'),
+            'p_value':                   row.get('p_value'),
+            'p_value_fdr':               row.get('p_value_fdr'),
+            'effect_size_r':             row.get('effect_size_r'),
+            'odds_ratio':                row.get('odds_ratio'),
+            'specificity_tier':          row.get('specificity_tier'),
+            'snp1_gene_names':           row.get('snp1_gene_names'),
+            'snp2_gene_names':           row.get('snp2_gene_names'),
+            'mahajan_clinical_feature':  row.get('mahajan_clinical_feature', ''),
+            'mahajan_source':            row.get('mahajan_source', ''),
+            'match_method':              match_method,
+            'n_clusters_matched':        n_matched,
+            **cluster_hits,              # binary 0/1 per functional cluster column
         })
 
     if not output_rows:
@@ -1148,6 +1328,8 @@ def main(pheno_data, raw_features_file,
         'raw_feature', 'feature', 'cohort', 'feature_source',
         'p_value', 'p_value_fdr', 'effect_size_r', 'odds_ratio',
         'specificity_tier', 'snp1_gene_names', 'snp2_gene_names',
+        # Mahajan clinical linkage (populated for genomic features only)
+        'mahajan_clinical_feature', 'mahajan_source',
         'match_method', 'n_clusters_matched',
     ]
     cluster_cols_out = [c for c in output_df.columns if c not in meta_cols]
