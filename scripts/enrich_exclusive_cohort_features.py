@@ -25,7 +25,7 @@ Pipeline:
      and their gene names. GxG features (two rsIDs) expand to one row per SNP.
 
   4. Load functional cluster CSVs from {results_path}/subtypeResearch/:
-       - pattern: *functional_cluster*.csv
+       - all *.csv files except clinical_feature_map.csv and mahajan_clinical_loci_map.csv
        - expected feature identifier cols: feature, Feature, Trait, trait, Loci, loci
        - if "cluster assignment" / "cluster_assignment" column is present, pivot
          long → wide using beta / effect as values
@@ -1234,11 +1234,20 @@ def main(pheno_data, raw_features_file,
     # Load Mahajan SNP → clinical-feature bridge map
     mahajan_map = load_mahajan_map(subtype_path)
 
-    cluster_pattern = os.path.join(subtype_path, '*functional_cluster*.csv')
-    cluster_files = sorted(glob.glob(cluster_pattern))
+    # Load ALL CSVs in subtypeResearch/ as potential cluster maps, excluding
+    # the two files that are loaded separately for other purposes.
+    # A pattern like *functional_cluster*.csv misses files named differently,
+    # e.g. kim_function_cluster_*.csv (no 'al') and multerer_fc_*.csv ('fc'
+    # abbreviation), so we enumerate all CSVs and explicitly exclude the known
+    # non-cluster files instead.
+    _EXCLUDE_FROM_CLUSTER = {'clinical_feature_map.csv', 'mahajan_clinical_loci_map.csv'}
+    cluster_files = sorted(
+        f for f in glob.glob(os.path.join(subtype_path, '*.csv'))
+        if os.path.basename(f) not in _EXCLUDE_FROM_CLUSTER
+    )
 
     if not cluster_files:
-        print(f"  [WARN] No cluster files found: {cluster_pattern}")
+        print(f"  [WARN] No cluster files found in {subtype_path}")
 
     # flat_lookups: list of (col_key, lookup_dict) for map_row_to_clusters
     flat_lookups = []
