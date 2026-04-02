@@ -912,17 +912,18 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
     feature (raw name, clinical      loci col     (gene names; equivalent to our
              fallback only)          ──────────────  snp1_gene_names / snp2_gene_names)
 
-    Match order — first hit wins per cluster column:
-      1. feature → feature : snp1 (then snp2) vs cluster 'feature' col.
-                             For clinical rows with no SNP annotation, raw 'feature'
-                             name is used instead (direct trait-name match).
-                             If a Mahajan-linked clinical feature was resolved for this
-                             SNP/locus, it is also included as a feature candidate here
-                             (method recorded as 'feature_feature_mahajan').
-      2. loci    → loci    : snp1_gene_names + snp2_gene_names tokens (our loci)
-                             vs cluster 'loci' col (gene-name loci on cluster side).
-      3. feature → loci    : snp1 / snp2 rsID tokens vs cluster 'loci' col
-                             (fallback: SNP may not be the index SNP but shares a locus).
+    Match order — first hit wins per cluster column (most → least specific):
+      1. feature → feature         : snp1/snp2 rsID (or clinical name for non-genomic
+                                     rows) vs cluster 'feature' col.
+      1b. feature → feature        : Mahajan-linked clinical trait for this SNP vs
+           (mahajan)                 cluster 'feature' col.
+      2. loci    → loci            : snp1_gene_names / snp2_gene_names gene tokens
+                                     vs cluster 'loci' col.
+      3. loci    → feature         : same gene tokens vs cluster 'feature' col
+                                     (some cluster files use gene symbols as feature
+                                     identifiers rather than rsIDs).
+      4. feature → loci            : snp1/snp2 rsID tokens vs cluster 'loci' col
+                                     (SNP not the index SNP but shares a locus).
 
     Parameters
     ----------
@@ -936,7 +937,7 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
     -------
     hits        : dict  {col_key: 0 or 1}
     method_used : str   'feature_feature' | 'feature_feature_mahajan' |
-                        'loci_loci' | 'feature_loci' | 'none'
+                        'loci_loci' | 'loci_feature' | 'feature_loci' | 'none'
                   Reflects the most specific method that produced any positive hit
                   across all cluster columns for this row.
     """
@@ -982,10 +983,11 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
     best_method = 'none'
     method_rank = {
         'none':                     0,
-        'feature_loci':             1,
-        'loci_loci':                2,
-        'feature_feature_mahajan':  3,   # clinical bridge via Mahajan map
-        'feature_feature':          4,   # direct SNP / clinical name match (highest)
+        'feature_loci':             1,   # SNP rsID vs cluster loci col
+        'loci_feature':             2,   # our gene names vs cluster feature col
+        'loci_loci':                3,   # our gene names vs cluster loci col
+        'feature_feature_mahajan':  4,   # clinical bridge via Mahajan map
+        'feature_feature':          5,   # direct SNP / clinical name match (highest)
     }
 
     for col_key, lookup in all_lookups:
@@ -1013,7 +1015,15 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
             hit = 1
             method = 'loci_loci'
 
-        # 3. feature → loci
+        # 3. loci → feature
+        #    our gene-name tokens vs cluster feature col
+        #    (cluster file lists a gene symbol rather than an rsID as the
+        #     feature identifier — e.g. some loci-based cluster maps)
+        elif loci_candidates & lookup['features']:
+            hit = 1
+            method = 'loci_feature'
+
+        # 4. feature → loci
         #    snp1/snp2 rsID vs cluster loci col
         #    (SNP not listed as index SNP but appears in a locus entry)
         elif snp_candidates & lookup['loci']:
