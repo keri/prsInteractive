@@ -684,6 +684,17 @@ def build_lookup(wide_df, cluster_cols, feat_col, loci_col, trait_col):
     """
     Build per-cluster lookup dicts of normalised identifier strings.
 
+    Assignment rule — max-cluster wins
+    ------------------------------------
+    Each row (feature / locus) is assigned to the ONE cluster column whose
+    absolute beta value is the largest.  This prevents a trait like
+    "waist circumference" (non-zero in every cluster but dominant in obesity)
+    from matching every cluster equally.
+
+    When a file has only a single cluster column (or the column is binary
+    0/1 rather than continuous betas), every non-zero row is assigned to
+    that column as before.
+
     All values are stored in their canonical form (via normalise_name) so
     that spelling variants collapse to the same key at query time.
 
@@ -693,35 +704,62 @@ def build_lookup(wide_df, cluster_cols, feat_col, loci_col, trait_col):
          'features' – values from the feature/SNP identifier column
          'loci'     – values from the Loci/loci column
     """
-    lookup = {}
-    for cc in cluster_cols:
-        if cc not in wide_df.columns:
+    # Initialise empty sets for every cluster column
+    lookup = {cc: {'features': set(), 'loci': set()}
+              for cc in cluster_cols if cc in wide_df.columns}
+
+    # Only consider cluster columns that actually exist in the dataframe
+    valid_cols = [cc for cc in cluster_cols if cc in wide_df.columns]
+    if not valid_cols:
+        return lookup
+
+    # -------------------------------------------------------------------------
+    # Determine the dominant cluster for each row.
+    # For rows where all cluster values are zero / NaN → skip (no assignment).
+    # -------------------------------------------------------------------------
+    beta_df = wide_df[valid_cols].copy()
+    # Coerce to numeric; non-numeric (e.g. text) → NaN
+    beta_df = beta_df.apply(pd.to_numeric, errors='coerce')
+
+    if len(valid_cols) == 1:
+        # Single cluster: assign any non-zero/non-null row to it
+        dominant = beta_df[valid_cols[0]].apply(
+            lambda v: valid_cols[0] if pd.notna(v) and v != 0 else None
+        )
+    else:
+        # Multi-cluster: argmax of absolute value per row
+        abs_df = beta_df.abs()
+        # idxmax returns NaN for all-NaN rows; replace by checking row max > 0
+        dominant = abs_df.idxmax(axis=1)
+        row_max = abs_df.max(axis=1)
+        dominant = dominant.where(row_max > 0, other=None)
+
+    # -------------------------------------------------------------------------
+    # Populate lookup sets based on dominant cluster assignment
+    # -------------------------------------------------------------------------
+    for idx, dom_col in dominant.items():
+        if dom_col is None:
             continue
-        # Rows where this cluster is represented (non-null, non-zero)
-        present = wide_df[wide_df[cc].notna() & (wide_df[cc] != 0)]
+        row = wide_df.loc[idx]
 
-        features_set, loci_set = set(), set()
-
-        if feat_col and feat_col in present.columns:
-            for v in present[feat_col].dropna():
+        if feat_col and feat_col in wide_df.columns:
+            raw_feat = row.get(feat_col, None)
+            if raw_feat is not None and not (isinstance(raw_feat, float) and np.isnan(raw_feat)):
                 # Split on commas/semicolons only — NOT whitespace.
                 # rsIDs never contain spaces; clinical names do ("Fasting glucose",
-                # "Hemoglobin concentration", etc.) and must be kept whole so that
-                # normalise_name() can convert the full phrase to a single canonical key
-                # (e.g. "Hemoglobin concentration" → "haemoglobin_concentration").
-                for token in re.split(r'[,;]+', str(v)):
-                    token = token.strip()
-                    n = _norm(token)
+                # "Hemoglobin concentration") and must be kept whole so that
+                # normalise_name() maps the full phrase to its canonical key.
+                for token in re.split(r'[,;]+', str(raw_feat)):
+                    n = _norm(token.strip())
                     if n:
-                        features_set.add(n)
+                        lookup[dom_col]['features'].add(n)
 
-        if loci_col and loci_col in present.columns:
-            for v in present[loci_col].dropna():
-                n = _norm(v)
+        if loci_col and loci_col in wide_df.columns:
+            raw_loci = row.get(loci_col, None)
+            if raw_loci is not None and not (isinstance(raw_loci, float) and np.isnan(raw_loci)):
+                n = _norm(str(raw_loci))
                 if n:
-                    loci_set.add(n)
-
-        lookup[cc] = {'features': features_set, 'loci': loci_set}
+                    lookup[dom_col]['loci'].add(n)
 
     return lookup
 
