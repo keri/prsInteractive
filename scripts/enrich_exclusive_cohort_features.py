@@ -1240,7 +1240,12 @@ def main(pheno_data, raw_features_file,
     # e.g. kim_function_cluster_*.csv (no 'al') and multerer_fc_*.csv ('fc'
     # abbreviation), so we enumerate all CSVs and explicitly exclude the known
     # non-cluster files instead.
-    _EXCLUDE_FROM_CLUSTER = {'clinical_feature_map.csv', 'mahajan_clinical_loci_map.csv'}
+    _EXCLUDE_FROM_CLUSTER = {
+        'clinical_feature_map.csv',        # loaded by load_clinical_feature_map()
+        'mahajan_clinical_loci_map.csv',   # loaded by load_mahajan_map()
+        'multerer_fc_clinical_trait_map.csv',  # old results, not used
+        'multerer_fc_loci_map.csv',            # old results, not used
+    }
     cluster_files = sorted(
         f for f in glob.glob(os.path.join(subtype_path, '*.csv'))
         if os.path.basename(f) not in _EXCLUDE_FROM_CLUSTER
