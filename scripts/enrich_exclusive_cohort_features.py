@@ -653,15 +653,33 @@ def load_genomic_features(scores_path, filter_strategy):
 
     df = pd.read_csv(path)
 
-    # Normalise cohort column name
-    if 'feature_set' in df.columns and 'cohort' not in df.columns:
-        df.rename(columns={'feature_set': 'cohort'}, inplace=True)
+    # Normalise cohort column.
+    # HighCases/LowControls rows come from find_tiered_features which writes
+    # 'feature_set' (= the matching cohort name) but no 'cohort' column.
+    # ExclusiveHighCases rows come from run_exclusive_high_bootstrap which writes
+    # 'cohort' but no 'feature_set'.
+    # When both training categories are concatenated in the CSV, both columns
+    # exist but each set of rows has NaN in the column belonging to the other.
+    # Fill 'cohort' from 'feature_set' wherever cohort is missing, then drop
+    # the now-redundant 'feature_set' column.
+    if 'feature_set' in df.columns:
+        if 'cohort' not in df.columns:
+            df.rename(columns={'feature_set': 'cohort'}, inplace=True)
+        else:
+            df['cohort'] = df['cohort'].fillna(df['feature_set'])
+            df.drop(columns=['feature_set'], inplace=True)
 
     # Include HighCases, LowControls, and ExclusiveHighCases
     if 'training_data_used' in df.columns:
         df = df[df['training_data_used'].isin(
             ['HighCases', 'LowControls', 'ExclusiveHighCases']
         )]
+
+    # Drop any rows still missing a cohort (shouldn't happen, but guard)
+    n_before = len(df)
+    df = df[df['cohort'].notna()]
+    if len(df) < n_before:
+        print(f"  [WARN] Dropped {n_before - len(df)} rows with missing cohort")
 
     # Infer feature_source from the feature name itself
     df['feature_source'] = df['feature'].apply(_infer_feature_source)
