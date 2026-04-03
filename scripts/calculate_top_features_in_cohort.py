@@ -746,19 +746,24 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
         feature_sets = trainingDataFeatures['features_used'].unique()
 
         # ExclusiveHighCases: each cohort was trained independently on its own
-        # exclusive individuals — features only ever appear for ONE cohort, so the
-        # cross-cohort filtering functions (which require other-cohort z-scores to
-        # exist) would silently drop everything via `if len(other_z) == 0: continue`.
-        # Exclusivity is already guaranteed at the individual level; pass through
-        # directly using the same |z| > threshold criterion used inside the RF loop.
+        # exclusive individuals, so z-scores across cohorts aren't comparable the
+        # same way as HighCases (no requirement for "negative in others" since the
+        # training populations are disjoint). Instead, for each feature assign it
+        # to the single (cohort, features_used) combination with the highest z_score
+        # among feature_importance==1 rows — one authoritative row per feature.
         if trainingData_str == 'ExclusiveHighCases':
-            results_df = trainingDataFeatures[
+            important = trainingDataFeatures[
                 trainingDataFeatures['feature_importance'] == 1
             ].copy()
-            print(f"\n  ExclusiveHighCases: bypassing cross-cohort filter "
-                  f"(exclusivity enforced at individual level). "
-                  f"{len(results_df)} features with feature_importance=1.")
+            if important.empty:
+                print(f"\n  ExclusiveHighCases: no features with feature_importance=1.")
+                continue
+            # For each feature keep only the (cohort, features_used) row with max z_score
+            best_idx = important.groupby('feature')['z_score'].idxmax()
+            results_df = important.loc[best_idx].copy()
             results_df['training_data_used'] = trainingData_str
+            print(f"\n  ExclusiveHighCases: {len(important)} feature_importance=1 rows → "
+                  f"{len(results_df)} after max-z (cohort, features_used) assignment.")
             filteredResults = pd.concat([filteredResults, results_df], ignore_index=True)
             continue
 
