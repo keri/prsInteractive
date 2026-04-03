@@ -489,6 +489,146 @@ def find_clinical_features_balanced(raw_df, cases, controls, feature_cols,
     return _apply_fdr(result, alpha=alpha, min_effect=min_effect_size)
 
 
+def filter_clinical_features_cross_cohort(
+    cohort_results: dict,
+    majority_threshold: float = 0.6,
+    delta_threshold: float = 0.1,
+) -> pd.DataFrame:
+    """
+    Apply cross-cohort specificity filtering to per-cohort MWU results.
+
+    Mirrors the tiered PRS strategy but uses effect_size_r instead of z_score:
+      Tier 1 (strict)      – significant in matching cohort, NOT significant in
+                             any other cohort.
+      Tier 2 (majority)    – significant in matching cohort, NOT significant in
+                             >= majority_threshold fraction of other cohorts.
+      Tier 3 (differential)– matching cohort has the highest |effect_size_r| AND
+                             that value minus the mean |r| of other cohorts >=
+                             delta_threshold.
+
+    For each feature the tier is determined and it is assigned to the single
+    cohort with the highest |effect_size_r| (among tiers 1/2/3 candidates).
+
+    Parameters
+    ----------
+    cohort_results : dict  {cohort_name: result_df}
+        Each result_df has columns: feature, p_value_fdr, effect_size_r,
+        significant (bool).
+    majority_threshold : float  fraction of other cohorts that must be
+        non-significant for tier 2.
+    delta_threshold : float  minimum |r| advantage over mean-of-others for tier 3.
+
+    Returns
+    -------
+    DataFrame with columns: feature, cohort, effect_size_r, p_value_fdr,
+                             specificity_tier  (1 / 2 / 3),
+                             n_cohorts, feature_source='clinical',
+                             training_data_used='Clinical'
+    """
+    cohorts = list(cohort_results.keys())
+    if not cohorts:
+        return pd.DataFrame()
+
+    # Collect all features that were significant in at least one cohort
+    all_features = set()
+    for df in cohort_results.values():
+        if df.empty:
+            continue
+        all_features.update(df.loc[df['significant'], 'feature'].tolist())
+
+    if not all_features:
+        print("  [clinical cross-cohort] No significant features in any cohort.")
+        return pd.DataFrame()
+
+    # Build lookup: (cohort, feature) → row dict for fast access
+    result_lookup = {}
+    for cohort, df in cohort_results.items():
+        if df.empty:
+            continue
+        for _, row in df.iterrows():
+            result_lookup[(cohort, row['feature'])] = row
+
+    output_rows = []
+    for feat in all_features:
+        # Collect per-cohort effect sizes and significance flags
+        cohort_r    = {}   # cohort → |effect_size_r|  (NaN if not tested)
+        cohort_sig  = {}   # cohort → bool significant
+        cohort_fdr  = {}   # cohort → p_value_fdr
+
+        for cohort in cohorts:
+            row = result_lookup.get((cohort, feat))
+            if row is not None:
+                cohort_r[cohort]   = abs(float(row['effect_size_r'])) if pd.notna(row.get('effect_size_r')) else np.nan
+                cohort_sig[cohort] = bool(row.get('significant', False))
+                cohort_fdr[cohort] = float(row['p_value_fdr']) if pd.notna(row.get('p_value_fdr')) else 1.0
+            else:
+                cohort_r[cohort]   = np.nan
+                cohort_sig[cohort] = False
+                cohort_fdr[cohort] = 1.0
+
+        sig_cohorts  = [c for c in cohorts if cohort_sig[c]]
+        n_sig        = len(sig_cohorts)
+        n_cohorts    = len(cohorts)
+
+        if n_sig == 0:
+            continue
+
+        # Determine best cohort: highest |r| among significant cohorts
+        best_cohort = max(sig_cohorts, key=lambda c: cohort_r[c] if not np.isnan(cohort_r[c]) else -1)
+        best_r      = cohort_r[best_cohort]
+        other_r     = [cohort_r[c] for c in cohorts if c != best_cohort and not np.isnan(cohort_r[c])]
+        n_other_sig = sum(1 for c in cohorts if c != best_cohort and cohort_sig[c])
+
+        tier = None
+
+        # Tier 1: significant ONLY in best_cohort
+        if n_other_sig == 0:
+            tier = 1
+
+        # Tier 2: not significant in >= majority_threshold of other cohorts
+        if tier is None and n_cohorts > 1:
+            frac_other_non_sig = (n_cohorts - 1 - n_other_sig) / (n_cohorts - 1)
+            if frac_other_non_sig >= majority_threshold:
+                tier = 2
+
+        # Tier 3: highest |r| AND delta above mean of others >= delta_threshold
+        if tier is None and other_r:
+            mean_other_r = float(np.nanmean(other_r))
+            if not np.isnan(best_r) and (best_r - mean_other_r) >= delta_threshold:
+                tier = 3
+
+        if tier is None:
+            continue  # feature not specific enough to any cohort
+
+        best_row = result_lookup.get((best_cohort, feat), {})
+        output_rows.append({
+            'feature':            feat,
+            'raw_feature':        feat,
+            'cohort':             best_cohort,
+            'effect_size_r':      float(best_row.get('effect_size_r', np.nan)),
+            'p_value':            float(best_row.get('p_value', np.nan)),
+            'p_value_fdr':        cohort_fdr[best_cohort],
+            'specificity_tier':   tier,
+            'n_cohorts':          n_cohorts,
+            'feature_source':     'clinical',
+            'training_data_used': 'Clinical',
+            'odds_ratio':         np.nan,
+            'n_exclusive_cohorts': np.nan,
+            'exclusive_cohorts':   np.nan,
+        })
+
+    if not output_rows:
+        return pd.DataFrame()
+
+    result = pd.DataFrame(output_rows)
+    print(f"  Clinical cross-cohort filter: {len(all_features)} features tested "
+          f"→ {len(result)} survived")
+    tier_counts = result['specificity_tier'].value_counts().sort_index()
+    for t, n in tier_counts.items():
+        print(f"    Tier {t}: {n} features")
+    return result
+
+
 # =============================================================================
 #  STEP 2b: GENOMIC FEATURES (from pre-computed SHAP)
 # =============================================================================
@@ -1085,7 +1225,16 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
 #  MAIN
 # =============================================================================
 
-def main(pheno_data, filter_strategy='tiered'):
+def main(pheno_data, filter_strategy='tiered',
+         raw_features_file=None,
+         use_set='holdout',
+         balance_strategy='unbalanced',
+         n_iterations=1000,
+         alpha=0.05,
+         min_effect_size=0.1,
+         majority_threshold=0.6,
+         delta_threshold=0.1,
+         use_all=False):
 
     scores_path = os.path.join(pheno_data, 'scores')
     output_path = os.path.join(scores_path, 'functionalEnrichment')
@@ -1110,6 +1259,90 @@ def main(pheno_data, filter_strategy='tiered'):
     annotation_df = load_feature_annotation(scores_path)
 
     # -------------------------------------------------------------------------
+    # Clinical feature analysis (optional — only when raw_features_file given)
+    # -------------------------------------------------------------------------
+    clinical_df = pd.DataFrame()
+    if raw_features_file:
+        print(f"\n--- Step 2a: Clinical feature cross-cohort analysis ---")
+        print(f"  Strategy: {balance_strategy}  |  alpha={alpha}  "
+              f"|  min_effect={min_effect_size}")
+
+        # Load PRS bins to define exclusive groups
+        if use_set == 'holdout':
+            prs_file = os.path.join(scores_path, 'combinedPRSGroups.holdout.filtered.csv')
+            if not os.path.exists(prs_file):
+                prs_file = os.path.join(scores_path, 'combinedPRSGroups.filtered.csv')
+        else:
+            prs_file = os.path.join(scores_path, 'combinedPRSGroups.filtered.csv')
+        combined_prs = pd.read_csv(prs_file)
+        bin_cols = [c for c in combined_prs.columns
+                    if c.startswith('bin_') and 'combined' not in c]
+        if not use_all:
+            bin_cols = [c for c in bin_cols if 'all' not in c]
+        combined_prs = combined_prs[['IID', 'PHENOTYPE'] + bin_cols].set_index('IID')
+        cohort_groups = identify_exclusive_groups(combined_prs, bin_cols)
+
+        # Load and normalise raw clinical features
+        raw_df = pd.read_csv(raw_features_file)
+        if 'Participant ID' in raw_df.columns:
+            raw_df.rename(columns={'Participant ID': 'IID'}, inplace=True)
+        raw_df.set_index('IID', inplace=True)
+        cohort_names = [c.replace('bin_', '') for c in bin_cols]
+        exclude_meta = {'PHENOTYPE', 'SEX', 'age'} | set(bin_cols) | set(cohort_names)
+        feature_cols_raw = [c for c in raw_df.columns if c not in exclude_meta]
+
+        canon_map, _ = normalise_series_names(feature_cols_raw)
+        canonical_seen = {}
+        rename_dict = {}
+        for orig in feature_cols_raw:
+            can = canon_map[orig]
+            if can not in canonical_seen:
+                canonical_seen[can] = orig
+                rename_dict[orig] = can
+            else:
+                print(f"  [NORM] Dropping duplicate canonical '{can}': "
+                      f"keeping '{canonical_seen[can]}', dropping '{orig}'")
+        raw_df = raw_df[[c for c in raw_df.columns
+                         if c in exclude_meta or c in rename_dict]]
+        raw_df.rename(columns=rename_dict, inplace=True)
+        feature_cols = [c for c in raw_df.columns if c not in exclude_meta]
+        print(f"  Clinical columns: {len(feature_cols_raw)} raw "
+              f"→ {len(feature_cols)} after normalisation")
+
+        # Run MWU for each cohort
+        cohort_results = {}
+        for cohort, groups in cohort_groups.items():
+            cases    = [i for i in groups['cases']    if i in raw_df.index]
+            controls = [i for i in groups['controls'] if i in raw_df.index]
+            print(f"  {cohort}: {len(cases)} cases | {len(controls)} controls")
+            if len(cases) < 5 or len(controls) < 5:
+                print(f"    [SKIP] too few samples")
+                cohort_results[cohort] = pd.DataFrame()
+                continue
+            if balance_strategy == 'balanced':
+                res = find_clinical_features_balanced(
+                    raw_df, cases, controls, feature_cols,
+                    alpha=alpha, min_effect_size=min_effect_size,
+                    n_iterations=n_iterations,
+                )
+            else:
+                res = find_clinical_features_unbalanced(
+                    raw_df, cases, controls, feature_cols,
+                    alpha=alpha, min_effect_size=min_effect_size,
+                )
+            cohort_results[cohort] = res
+
+        # Apply cross-cohort specificity filter
+        clinical_df = filter_clinical_features_cross_cohort(
+            cohort_results,
+            majority_threshold=majority_threshold,
+            delta_threshold=delta_threshold,
+        )
+    else:
+        print("\n  [skip] --raw_features_file not provided; "
+              "clinical analysis omitted.")
+
+    # -------------------------------------------------------------------------
     # Build per-cohort feature rows from the filtered CSV
     # -------------------------------------------------------------------------
     print("\n--- Step 3: Building per-cohort feature list ---")
@@ -1123,8 +1356,26 @@ def main(pheno_data, filter_strategy='tiered'):
         cohort_feats['effect_size_r'] = np.nan
         n_genomic  = (cohort_feats['feature_source'] == 'genomic_shap').sum()
         n_clinical = (cohort_feats['feature_source'] == 'clinical').sum()
-        print(f"  {cohort}: {n_genomic} genomic, {n_clinical} clinical features")
+        print(f"  {cohort}: {n_genomic} genomic, {n_clinical} clinical features "
+              f"(from filtered CSV)")
         all_feature_rows.append(cohort_feats)
+
+    # Add cross-cohort clinical features (deduplicated against filtered CSV clinical rows)
+    if not clinical_df.empty:
+        # Avoid double-counting clinical features already present in filtered CSV
+        existing_clinical = set(
+            zip(filtered_df.loc[filtered_df['feature_source'] == 'clinical', 'feature'],
+                filtered_df.loc[filtered_df['feature_source'] == 'clinical', 'cohort'])
+        )
+        novel_clinical = clinical_df[
+            ~clinical_df.apply(
+                lambda r: (r['feature'], r['cohort']) in existing_clinical, axis=1
+            )
+        ].copy()
+        print(f"\n  Clinical cross-cohort: {len(clinical_df)} features "
+              f"→ {len(novel_clinical)} not already in filtered CSV")
+        if not novel_clinical.empty:
+            all_feature_rows.append(novel_clinical)
 
     if not all_feature_rows:
         print("\n[ERROR] No important features found. Check inputs and thresholds.")
@@ -1386,18 +1637,82 @@ if __name__ == '__main__':
         choices=['strict', 'majority', 'differential', 'tiered'],
         help='Filtering strategy used in importantFeaturesAcrossCohortsAndTrainingData.Filtered.*.csv (default: tiered)',
     )
+    parser.add_argument(
+        '--raw_features_file',
+        help='Path to raw (untransformed) clinical features CSV. '
+             'When provided, clinical features are tested with Mann-Whitney U '
+             'across all cohorts and filtered for cross-cohort specificity.',
+    )
+    parser.add_argument(
+        '--use_set', default='holdout',
+        choices=['holdout', 'validation', 'all'],
+        help='PRS bin file to use for defining exclusive case/control groups '
+             'in clinical analysis (default: holdout)',
+    )
+    parser.add_argument(
+        '--balance_strategy', default='unbalanced',
+        choices=['unbalanced', 'balanced'],
+        help='unbalanced (default): all controls vs exclusive cases. '
+             'balanced: bootstrap n_cases controls over n_iterations.',
+    )
+    parser.add_argument(
+        '--n_iterations', type=int, default=1000,
+        help='Bootstrap iterations for balanced clinical strategy (default: 1000)',
+    )
+    parser.add_argument(
+        '--alpha', type=float, default=0.05,
+        help='FDR significance threshold for clinical features (default: 0.05)',
+    )
+    parser.add_argument(
+        '--min_effect_size', type=float, default=0.1,
+        help='Minimum |rank-biserial r| for clinical features (default: 0.1)',
+    )
+    parser.add_argument(
+        '--majority_threshold', type=float, default=0.6,
+        help='Fraction of other cohorts that must be non-significant for '
+             'tier-2 clinical specificity (default: 0.6)',
+    )
+    parser.add_argument(
+        '--delta_threshold', type=float, default=0.1,
+        help='Minimum |r| advantage over mean of other cohorts for '
+             'tier-3 clinical specificity (default: 0.1)',
+    )
+    parser.add_argument(
+        '--use_all', action='store_true',
+        help='Include "all" cohort bins in clinical analysis (excluded by default)',
+    )
 
     args = parser.parse_args()
 
     pheno_data = args.pheno_data or os.environ.get('PHENO_DATA')
+    raw_features_file = args.raw_features_file or os.environ.get('RAW_FEATURES_FILE')
 
     if not pheno_data:
         parser.error('Provide --pheno_data or set PHENO_DATA env var')
 
-    print(f"pheno_data      : {pheno_data}")
-    print(f"filter_strategy : {args.filter_strategy}")
+    print(f"pheno_data        : {pheno_data}")
+    print(f"filter_strategy   : {args.filter_strategy}")
+    print(f"raw_features_file : {raw_features_file or '(not provided — clinical analysis skipped)'}")
+    if raw_features_file:
+        print(f"use_set           : {args.use_set}")
+        print(f"balance_strategy  : {args.balance_strategy}")
+        print(f"n_iterations      : {args.n_iterations}")
+        print(f"alpha             : {args.alpha}")
+        print(f"min_effect_size   : {args.min_effect_size}")
+        print(f"majority_threshold: {args.majority_threshold}")
+        print(f"delta_threshold   : {args.delta_threshold}")
+        print(f"use_all           : {args.use_all}")
 
     main(
         pheno_data=pheno_data,
         filter_strategy=args.filter_strategy,
+        raw_features_file=raw_features_file,
+        use_set=args.use_set,
+        balance_strategy=args.balance_strategy,
+        n_iterations=args.n_iterations,
+        alpha=args.alpha,
+        min_effect_size=args.min_effect_size,
+        majority_threshold=args.majority_threshold,
+        delta_threshold=args.delta_threshold,
+        use_all=args.use_all,
     )
