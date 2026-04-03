@@ -1348,7 +1348,7 @@ def main(pheno_data, filter_strategy='tiered',
     print("\n--- Step 3: Building per-cohort feature list ---")
     all_feature_rows = []
 
-    for cohort in sorted(filtered_df['cohort'].unique()):
+    for cohort in sorted(c for c in filtered_df['cohort'].unique() if pd.notna(c)):
         cohort_feats = filtered_df[filtered_df['cohort'] == cohort].copy()
         cohort_feats['raw_feature'] = cohort_feats['feature']
         cohort_feats['p_value']      = np.nan
