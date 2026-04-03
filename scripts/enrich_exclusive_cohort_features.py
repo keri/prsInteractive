@@ -1514,12 +1514,15 @@ def main(pheno_data, filter_strategy='tiered',
             'raw_feature':               row.get('raw_feature', feat_val),
             'feature':                   feat_val,
             'cohort':                    row['cohort'],
+            'training_data_used':        row.get('training_data_used', np.nan),
             'feature_source':            row.get('feature_source'),
             'p_value':                   row.get('p_value'),
             'p_value_fdr':               row.get('p_value_fdr'),
             'effect_size_r':             row.get('effect_size_r'),
             'odds_ratio':                row.get('odds_ratio'),
             'specificity_tier':          row.get('specificity_tier'),
+            'n_exclusive_cohorts':       row.get('n_exclusive_cohorts', np.nan),
+            'exclusive_cohorts':         row.get('exclusive_cohorts', np.nan),
             'snp1_gene_names':           row.get('snp1_gene_names'),
             'snp2_gene_names':           row.get('snp2_gene_names'),
             'mahajan_clinical_feature':  row.get('mahajan_clinical_feature', ''),
@@ -1561,8 +1564,10 @@ def main(pheno_data, filter_strategy='tiered',
         'mahajan_clinical_feature', 'mahajan_source',
         'match_method', 'n_clusters_matched',
     ]
+    # Only keep meta_cols that were actually populated (some are ExclusiveHighCases-only)
+    present_meta = [c for c in meta_cols if c in output_df.columns]
     cluster_cols_out = [c for c in output_df.columns if c not in meta_cols]
-    output_df = output_df[meta_cols + cluster_cols_out]
+    output_df = output_df[present_meta + cluster_cols_out]
 
     # -------------------------------------------------------------------------
     # Save and summarise
