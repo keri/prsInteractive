@@ -530,7 +530,7 @@ def assign_groups(dfDict, featuresDf, trainingDataHigh, trainingDataLow):
 def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
          majority_threshold=0.6, delta_threshold=0.5, use_all=False,
          run_exclusive=False, n_exclusive_iterations=1000,
-         exclusive_z_threshold=1.0):
+         exclusive_z_threshold=1.0, filter_only=False):
 
     scoresPath = f'{phenoData}/scores'
     figPath = f'{phenoData}/figures/importantCohortFeatures'
@@ -539,192 +539,203 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
     aucTableFile = f"{scoresPath}/importantCohortScores/performanceMetricsAcrossCohortsAndTrainingData.csv"
     filteredImportantFeaturesFile = f"{scoresPath}/importantCohortScores/importantFeaturesAcrossCohortsAndTrainingData.Filtered.{filter_strategy}.csv"
 
-    combinedDf = pd.read_csv(f'{scoresPath}/combinedPRSGroups.filtered.csv')
-    models_bins_to_use = [m for m in combinedDf.columns if 'bin' in m]
-    print('models to use ...', models_bins_to_use)
+    if filter_only:
+        print(f"\n[filter_only] Skipping training — reading existing results from:\n"
+              f"  {featureImportanceFile}")
+        if not os.path.exists(featureImportanceFile):
+            raise FileNotFoundError(
+                f"--filter_only requires an existing featureImportanceFile:\n"
+                f"  {featureImportanceFile}"
+            )
+        # Jump directly to filtering section below
+    else:
+        combinedDf = pd.read_csv(f'{scoresPath}/combinedPRSGroups.filtered.csv')
+        models_bins_to_use = [m for m in combinedDf.columns if 'bin' in m]
+        print('models to use ...', models_bins_to_use)
   
-    models_to_use = [m.replace('bin_', '') for m in models_bins_to_use]
-    print('models to use are : ', models_to_use)
+        models_to_use = [m.replace('bin_', '') for m in models_bins_to_use]
+        print('models to use are : ', models_to_use)
   
-    pattern = os.path.join(f'{scoresPath}/prsScores', "*mixed*")
-    print('pattern to look for files is ..', pattern)
+        pattern = os.path.join(f'{scoresPath}/prsScores', "*mixed*")
+        print('pattern to look for files is ..', pattern)
   
-    tempFiles = glob.glob(pattern)
-    prsFiles = [f for f in tempFiles if 'holdout' not in f]
-    prsFilesFiltered = [f for f in prsFiles if 'FromAll' not in f]
+        tempFiles = glob.glob(pattern)
+        prsFiles = [f for f in tempFiles if 'holdout' not in f]
+        prsFilesFiltered = [f for f in prsFiles if 'FromAll' not in f]
   
-    models_sorted = sorted(models_to_use, key=len, reverse=True)
-    filtered_files = []
-    for filepath in prsFilesFiltered:
-      filename = os.path.basename(filepath)
-      print('[DEBUG] filename before second regex search : ',filename)
-      for model in models_sorted:
-        print('[DEBUG] model match in second regex search to account for main in epi+main : ',model)
-        pat = rf'(^|[._\-\s]){re.escape(model)}([._\-\s]|$)'
-        print('[DEBUG] regex pattern search : ',pat)
-#       if filename == f"{model}.mixed.prs.csv":
-#         filtered_files.append(filepath)
-        if re.search(pat, filename):
-          filtered_files.append(filepath)
-          break
+        models_sorted = sorted(models_to_use, key=len, reverse=True)
+        filtered_files = []
+        for filepath in prsFilesFiltered:
+          filename = os.path.basename(filepath)
+          print('[DEBUG] filename before second regex search : ',filename)
+          for model in models_sorted:
+            print('[DEBUG] model match in second regex search to account for main in epi+main : ',model)
+            pat = rf'(^|[._\-\s]){re.escape(model)}([._\-\s]|$)'
+            print('[DEBUG] regex pattern search : ',pat)
+    #       if filename == f"{model}.mixed.prs.csv":
+    #         filtered_files.append(filepath)
+            if re.search(pat, filename):
+              filtered_files.append(filepath)
+              break
   
-    dfDict = {}
-    for file in filtered_files:
-      print('[DEBUG] reading PRS from file ', file)
-      data_type = file.split('.')[0].split('/')[-1]
-      df = pd.read_csv(file)
-      columns_to_drop = [col for col in df.columns if 'prs' in col]
-      df.drop(columns=['PHENOTYPE'] + columns_to_drop, inplace=True)
-      dfDict[data_type] = df
+        dfDict = {}
+        for file in filtered_files:
+          print('[DEBUG] reading PRS from file ', file)
+          data_type = file.split('.')[0].split('/')[-1]
+          df = pd.read_csv(file)
+          columns_to_drop = [col for col in df.columns if 'prs' in col]
+          df.drop(columns=['PHENOTYPE'] + columns_to_drop, inplace=True)
+          dfDict[data_type] = df
   
-    featuresDf = pd.read_csv(feature_scores_file)
-    featuresDf = featuresDf[
-      (featuresDf['coefs'] != 0) &
-      (~featuresDf['feature'].isin(['(Intercept)', 'SEX', 'age',
-        'PC1', 'PC2', 'PC3', 'PC4', 'PC5',
-        'PC6', 'PC7', 'PC8', 'PC9', 'PC10']))
-    ]
-    featuresDf = featuresDf[featuresDf['model'].isin(models_to_use)]
+        featuresDf = pd.read_csv(feature_scores_file)
+        featuresDf = featuresDf[
+          (featuresDf['coefs'] != 0) &
+          (~featuresDf['feature'].isin(['(Intercept)', 'SEX', 'age',
+            'PC1', 'PC2', 'PC3', 'PC4', 'PC5',
+            'PC6', 'PC7', 'PC8', 'PC9', 'PC10']))
+        ]
+        featuresDf = featuresDf[featuresDf['model'].isin(models_to_use)]
   
-    groupedDf = combinedDf[models_bins_to_use + ['IID', 'PHENOTYPE']].set_index('IID')
+        groupedDf = combinedDf[models_bins_to_use + ['IID', 'PHENOTYPE']].set_index('IID')
   
-    high_risk_mask = pd.Series(False, index=groupedDf.index)
-    low_risk_mask = pd.Series(False, index=groupedDf.index)
-    for col in models_bins_to_use:
-      high_risk_mask |= (groupedDf[col] > 8)
-      low_risk_mask |= (groupedDf[col] < 3)
+        high_risk_mask = pd.Series(False, index=groupedDf.index)
+        low_risk_mask = pd.Series(False, index=groupedDf.index)
+        for col in models_bins_to_use:
+          high_risk_mask |= (groupedDf[col] > 8)
+          low_risk_mask |= (groupedDf[col] < 3)
   
-    trainingDataHigh = groupedDf[high_risk_mask & (groupedDf['PHENOTYPE'] == 2)]
-    trainingDataLow = groupedDf[low_risk_mask & (groupedDf['PHENOTYPE'] == 1)]
+        trainingDataHigh = groupedDf[high_risk_mask & (groupedDf['PHENOTYPE'] == 2)]
+        trainingDataLow = groupedDf[low_risk_mask & (groupedDf['PHENOTYPE'] == 1)]
   
-    groups = dfDict.keys()
-    groupDfList = assign_groups(dfDict, featuresDf, trainingDataHigh, trainingDataLow)
-    featuresDf.rename(columns={'model': 'features_used'}, inplace=True)
+        groups = dfDict.keys()
+        groupDfList = assign_groups(dfDict, featuresDf, trainingDataHigh, trainingDataLow)
+        featuresDf.rename(columns={'model': 'features_used'}, inplace=True)
   
-    for trainingDataTuple in [(trainingDataHigh, 'HighCases'), (trainingDataLow, 'LowControls')]:
-      trainingData = trainingDataTuple[0]
-      trainingData_str = trainingDataTuple[1]
-      probDfFile = f"{scoresPath}/importantCohortScores/probabilitiesAcrossCohortsAndFeaturesUsedInTraining.{trainingData_str}.csv"
+        for trainingDataTuple in [(trainingDataHigh, 'HighCases'), (trainingDataLow, 'LowControls')]:
+          trainingData = trainingDataTuple[0]
+          trainingData_str = trainingDataTuple[1]
+          probDfFile = f"{scoresPath}/importantCohortScores/probabilitiesAcrossCohortsAndFeaturesUsedInTraining.{trainingData_str}.csv"
   
-      print(f'########################  TRAINING {trainingData_str}  ########################')
-      probDf = pd.DataFrame()
+          print(f'########################  TRAINING {trainingData_str}  ########################')
+          probDf = pd.DataFrame()
   
-      for data_type, df in dfDict.items():
-        feature_str = data_type
-        print(f'###################  FEATURE IMPORTANCE WITH {feature_str} FEATURES ###################')
+          for data_type, df in dfDict.items():
+            feature_str = data_type
+            print(f'###################  FEATURE IMPORTANCE WITH {feature_str} FEATURES ###################')
   
-        y = trainingData[groups]
-        X = trainingData[['PHENOTYPE']].merge(df, left_index=True, right_index=True).drop(columns=['PHENOTYPE'])
-        features = X.columns
+            y = trainingData[groups]
+            X = trainingData[['PHENOTYPE']].merge(df, left_index=True, right_index=True).drop(columns=['PHENOTYPE'])
+            features = X.columns
   
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)
   
-        model = MultiOutputClassifier(RandomForestClassifier(n_estimators=1000))
-        model.fit(X_train, y_train)
+            model = MultiOutputClassifier(RandomForestClassifier(n_estimators=1000))
+            model.fit(X_train, y_train)
   
-        y_pred = model.predict(X_test)
-        report_dict = classification_report(y_test, y_pred, target_names=groups, output_dict=True, zero_division=0)
-        report_df = pd.DataFrame(report_dict).transpose().reset_index()
+            y_pred = model.predict(X_test)
+            report_dict = classification_report(y_test, y_pred, target_names=groups, output_dict=True, zero_division=0)
+            report_df = pd.DataFrame(report_dict).transpose().reset_index()
   
-        for i, cl in enumerate(groups):
-          probDfClass = pd.DataFrame(data=model.predict_proba(X_test)[i][:, 1])
-          probDfClass.columns = [f'yHat.{cl}.features.{feature_str}']
+            for i, cl in enumerate(groups):
+              probDfClass = pd.DataFrame(data=model.predict_proba(X_test)[i][:, 1])
+              probDfClass.columns = [f'yHat.{cl}.features.{feature_str}']
   
-          fpr, tpr, _ = roc_curve(y_test[cl], model.predict_proba(X_test)[i][:, 1])
-          roc_auc = auc(fpr, tpr)
-          report_df.loc[report_df['index'] == cl, 'auc'] = roc_auc
-          print(f'AUC for {cl}: {roc_auc}')
+              fpr, tpr, _ = roc_curve(y_test[cl], model.predict_proba(X_test)[i][:, 1])
+              roc_auc = auc(fpr, tpr)
+              report_df.loc[report_df['index'] == cl, 'auc'] = roc_auc
+              print(f'AUC for {cl}: {roc_auc}')
   
-          plt.figure()
-          plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC for {cl} using {feature_str} features (area = {roc_auc:.2f})')
-          plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
-          plt.xlabel('FPR')
-          plt.ylabel('TPR')
-          plt.title(f'AUC for class {cl} using features {feature_str}')
-          plt.savefig(f'{figPath}/{cl}.features.{feature_str}.{trainingData_str}.AUC.png')
-          plt.close()
+              plt.figure()
+              plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC for {cl} using {feature_str} features (area = {roc_auc:.2f})')
+              plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+              plt.xlabel('FPR')
+              plt.ylabel('TPR')
+              plt.title(f'AUC for class {cl} using features {feature_str}')
+              plt.savefig(f'{figPath}/{cl}.features.{feature_str}.{trainingData_str}.AUC.png')
+              plt.close()
   
-          explainer = fasttreeshap.TreeExplainer(model.estimators_[i], algorithm='auto', n_jobs=-1)
-          shap_explainer = explainer(X_test, check_additivity=False)
-          shap_values = shap_explainer.values
+              explainer = fasttreeshap.TreeExplainer(model.estimators_[i], algorithm='auto', n_jobs=-1)
+              shap_explainer = explainer(X_test, check_additivity=False)
+              shap_values = shap_explainer.values
   
-          shap_df = pd.DataFrame(data=shap_values[:, :, 1], columns=features)
-          create_summary_plots(figPath, shap_values[:, :, 1], X_test, i, f'{cl}.{feature_str}.{trainingData_str}.')
+              shap_df = pd.DataFrame(data=shap_values[:, :, 1], columns=features)
+              create_summary_plots(figPath, shap_values[:, :, 1], X_test, i, f'{cl}.{feature_str}.{trainingData_str}.')
   
-          topFeatures, mean_shap_values, shap_z_scores = get_top_shap_features(shap_df, data_type, threshold)
-          plot_and_save_top_features(shap_z_scores, i, figPath, data_type)
+              topFeatures, mean_shap_values, shap_z_scores = get_top_shap_features(shap_df, data_type, threshold)
+              plot_and_save_top_features(shap_z_scores, i, figPath, data_type)
   
-          featureImportance = pd.concat([shap_z_scores, mean_shap_values], axis=1)
-          featureImportance.columns = ['z_score', 'mean_shap']
-          featureImportance.dropna(inplace=True)
-          featureImportance.reset_index(names="feature", inplace=True)
+              featureImportance = pd.concat([shap_z_scores, mean_shap_values], axis=1)
+              featureImportance.columns = ['z_score', 'mean_shap']
+              featureImportance.dropna(inplace=True)
+              featureImportance.reset_index(names="feature", inplace=True)
   
-          featureImportance['feature_importance'] = 0
-          featureImportance.loc[featureImportance['feature'].isin(topFeatures.index.tolist()), 'feature_importance'] = 1
+              featureImportance['feature_importance'] = 0
+              featureImportance.loc[featureImportance['feature'].isin(topFeatures.index.tolist()), 'feature_importance'] = 1
   
-          featureImportance['cohort'] = cl
-          featureImportance['features_used'] = feature_str
-          featureImportance['training_data_used'] = trainingData_str
-          featureImportance = featureImportance.merge(featuresDf, on=['feature', 'features_used'], how='left')
+              featureImportance['cohort'] = cl
+              featureImportance['features_used'] = feature_str
+              featureImportance['training_data_used'] = trainingData_str
+              featureImportance = featureImportance.merge(featuresDf, on=['feature', 'features_used'], how='left')
   
-          probDf = pd.concat([probDf, probDfClass], axis=1)
+              probDf = pd.concat([probDf, probDfClass], axis=1)
   
-          if not os.path.exists(featureImportanceFile):
-            with open(featureImportanceFile, mode='w', newline='') as f:
-              featureImportance.to_csv(f, index=False)
-          else:
-            with open(featureImportanceFile, mode='a', newline='') as f:
-              featureImportance.to_csv(f, index=False, header=False)
+              if not os.path.exists(featureImportanceFile):
+                with open(featureImportanceFile, mode='w', newline='') as f:
+                  featureImportance.to_csv(f, index=False)
+              else:
+                with open(featureImportanceFile, mode='a', newline='') as f:
+                  featureImportance.to_csv(f, index=False, header=False)
   
-          report_df['features_used'] = feature_str
-          report_df['training_data_used'] = trainingData_str
+              report_df['features_used'] = feature_str
+              report_df['training_data_used'] = trainingData_str
   
-          if not os.path.exists(aucTableFile):
-            with open(aucTableFile, mode='w', newline='') as f:
-              report_df.to_csv(f, index=False)
-          else:
-            with open(aucTableFile, mode='a', newline='') as f:
-              report_df.to_csv(f, index=False, header=False)
+              if not os.path.exists(aucTableFile):
+                with open(aucTableFile, mode='w', newline='') as f:
+                  report_df.to_csv(f, index=False)
+              else:
+                with open(aucTableFile, mode='a', newline='') as f:
+                  report_df.to_csv(f, index=False, header=False)
   
-      probDf.index = X_test.index
-      probDf.to_csv(probDfFile)
+          probDf.index = X_test.index
+          probDf.to_csv(probDfFile)
 
-    # =========================================================================
-    #  EXCLUSIVE HIGH-CASES: BOOTSTRAP GBM-SHAP PER COHORT
-    #
-    #  For each cohort find individuals exclusively high-risk there (bin > 8 in
-    #  this cohort, NOT > 8 in any other), train n_exclusive_iterations
-    #  HistGradientBoostedClassifier models each time drawing a fresh balanced
-    #  control sample, extract SHAP values on cases, average across iterations,
-    #  z-score, and append results to the shared featureImportanceFile under
-    #  training_data_used = 'ExclusiveHighCases'.  These rows then participate
-    #  in the same cross-cohort filtering step below as HighCases / LowControls.
-    # =========================================================================
-    if run_exclusive:
-        print('\n########################  EXCLUSIVE HIGH-CASES BOOTSTRAP'
-              '  ########################')
-        exclusive_groups = identify_exclusive_high_cases(groupedDf, models_bins_to_use)
+        # =========================================================================
+        #  EXCLUSIVE HIGH-CASES: BOOTSTRAP GBM-SHAP PER COHORT
+        #
+        #  For each cohort find individuals exclusively high-risk there (bin > 8 in
+        #  this cohort, NOT > 8 in any other), train n_exclusive_iterations
+        #  HistGradientBoostedClassifier models each time drawing a fresh balanced
+        #  control sample, extract SHAP values on cases, average across iterations,
+        #  z-score, and append results to the shared featureImportanceFile under
+        #  training_data_used = 'ExclusiveHighCases'.  These rows then participate
+        #  in the same cross-cohort filtering step below as HighCases / LowControls.
+        # =========================================================================
+        if run_exclusive:
+            print('\n########################  EXCLUSIVE HIGH-CASES BOOTSTRAP'
+                  '  ########################')
+            exclusive_groups = identify_exclusive_high_cases(groupedDf, models_bins_to_use)
 
-        for cohort, group_data in exclusive_groups.items():
-            print(f'\n  --- Cohort: {cohort} ---')
-            for data_type, feat_df in dfDict.items():
-                run_exclusive_high_bootstrap(
-                    cohort               = cohort,
-                    case_index           = group_data['case_index'],
-                    control_index        = group_data['control_index'],
-                    feature_df           = feat_df,
-                    featuresDf           = featuresDf,
-                    feature_str          = data_type,
-                    n_iterations         = n_exclusive_iterations,
-                    z_threshold          = exclusive_z_threshold,
-                    figPath              = figPath,
-                    featureImportanceFile= featureImportanceFile,
-                    rng_seed             = 42,
-                )
+            for cohort, group_data in exclusive_groups.items():
+                print(f'\n  --- Cohort: {cohort} ---')
+                for data_type, feat_df in dfDict.items():
+                    run_exclusive_high_bootstrap(
+                        cohort               = cohort,
+                        case_index           = group_data['case_index'],
+                        control_index        = group_data['control_index'],
+                        feature_df           = feat_df,
+                        featuresDf           = featuresDf,
+                        feature_str          = data_type,
+                        n_iterations         = n_exclusive_iterations,
+                        z_threshold          = exclusive_z_threshold,
+                        figPath              = figPath,
+                        featureImportanceFile= featureImportanceFile,
+                        rng_seed             = 42,
+                    )
 
     # =========================================================================
     #  CROSS-COHORT FILTERING with chosen strategy
     # =========================================================================
+    # (reached either after training completes, or directly when --filter_only)
     importantTrainingDataFeatures = pd.read_csv(featureImportanceFile)
     importantTrainingDataFeatures.drop_duplicates(inplace=True)
     filteredResults = pd.DataFrame()
@@ -842,6 +853,13 @@ if __name__ == '__main__':
                             "the z-score of the averaged per-feature mean SHAP across all "
                             "bootstrap iterations."
                         ))
+    parser.add_argument("--filter_only", action='store_true', default=False,
+                        help=(
+                            "Skip all training and re-run only the cross-cohort filtering "
+                            "step on the existing importantFeaturesAcrossCohortsAndTrainingData.csv. "
+                            "Requires that file to already exist. Use this after manually "
+                            "correcting that CSV without wanting to redo the full analysis."
+                        ))
 
     args = parser.parse_args()
 
@@ -853,13 +871,13 @@ if __name__ == '__main__':
 
     threshold = os.environ.get("THRESHOLD")
     threshold = float(threshold) if threshold else args.threshold
-    
+
 #   pheno_data = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/combinedAnalysis'
 #   feature_scores_file = f"{pheno_data}/scores/featureScoresReducedFinalModel.filtered.csv"
 
     if not pheno_data:
         raise ValueError("You must provide --pheno_data or set PHENO_DATA env var.")
-    if not feature_scores_file:
+    if not args.filter_only and not feature_scores_file:
         raise ValueError("You must provide --feature_scores_file_filtered or set FEATURE_SCORES_FILE_FILTERED env var.")
 
     print(f"Filter strategy        : {args.filter_strategy}")
@@ -869,6 +887,7 @@ if __name__ == '__main__':
     print(f"Run exclusive bootstrap: {args.run_exclusive}")
     print(f"Exclusive iterations   : {args.n_exclusive_iterations}")
     print(f"Exclusive z threshold  : {args.exclusive_z_threshold}")
+    print(f"Filter only            : {args.filter_only}")
 
     main(
         pheno_data,
@@ -880,5 +899,6 @@ if __name__ == '__main__':
         run_exclusive=args.run_exclusive,
         n_exclusive_iterations=args.n_exclusive_iterations,
         exclusive_z_threshold=args.exclusive_z_threshold,
+        filter_only=args.filter_only,
     )
   
