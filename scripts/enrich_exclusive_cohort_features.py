@@ -568,22 +568,30 @@ def expand_to_snp_rows(feature_df, annotation_df):
     DataFrame with additional columns: feature, snp1, snp1_gene_names,
                                        snp2, snp2_gene_names
     """
-    # Build fast lookup: raw feature string → annotation row
+    # Build fast lookup: normalised feature string → annotation row
+    # Keys are strip()+lower() so minor case/whitespace differences don't cause misses.
     ann_lookup = {}
     if not annotation_df.empty and 'feature' in annotation_df.columns:
         for _, arow in annotation_df.iterrows():
-            ann_lookup[str(arow['feature'])] = arow
+            ann_lookup[str(arow['feature']).strip().lower()] = arow
 
     expanded = []
+    n_annotated = 0
+    n_unannotated_genomic = 0
     for _, row in feature_df.iterrows():
         raw = str(row['raw_feature'])
         base = row.to_dict()
-        ann = ann_lookup.get(raw)
+        ann = ann_lookup.get(raw.strip().lower())
 
         snp1 = ann.get('snp1') if ann is not None and pd.notna(ann.get('snp1')) else None
         snp2 = ann.get('snp2') if ann is not None and pd.notna(ann.get('snp2')) else None
         snp1_genes = ann.get('snp1_gene_names') if ann is not None else None
         snp2_genes = ann.get('snp2_gene_names') if ann is not None else None
+
+        if ann is not None:
+            n_annotated += 1
+        elif row.get('feature_source') == 'genomic_shap':
+            n_unannotated_genomic += 1
 
         # Row for snp1 (or raw feature when no annotation)
         resolved_feature = snp1 if snp1 else raw
@@ -606,6 +614,12 @@ def expand_to_snp_rows(feature_df, annotation_df):
                 'snp2': snp2,
                 'snp2_gene_names': snp2_genes,
             })
+
+    print(f"  Annotation lookup: {n_annotated}/{len(feature_df)} features matched in "
+          f"feature_scores_annotated.csv")
+    if n_unannotated_genomic:
+        print(f"  [WARN] {n_unannotated_genomic} genomic features had no annotation entry "
+              f"— loci-based cluster matching will be unavailable for those.")
 
     return pd.DataFrame(expanded)
 
@@ -1150,6 +1164,12 @@ def main(pheno_data, filter_strategy='tiered'):
         subset=['feature', 'cohort', 'feature_source'], inplace=True
     )
     print(f"Features after SNP expansion: {len(expanded_df)}")
+
+    # Gene-name coverage diagnostic — loci matching only works when gene names are present
+    genomic_rows = expanded_df[expanded_df['feature_source'] == 'genomic_shap']
+    has_genes = genomic_rows['snp1_gene_names'].notna() | genomic_rows['snp2_gene_names'].notna()
+    print(f"  Gene-name coverage: {has_genes.sum()}/{len(genomic_rows)} genomic rows "
+          f"have ≥1 gene name from feature_scores_annotated.csv")
 
     # -------------------------------------------------------------------------
     # Load functional cluster files
