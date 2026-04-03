@@ -746,11 +746,14 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
         feature_sets = trainingDataFeatures['features_used'].unique()
 
         # ExclusiveHighCases: each cohort was trained independently on its own
-        # exclusive individuals, so z-scores across cohorts aren't comparable the
-        # same way as HighCases (no requirement for "negative in others" since the
-        # training populations are disjoint). Instead, for each feature assign it
-        # to the single (cohort, features_used) combination with the highest z_score
-        # among feature_importance==1 rows — one authoritative row per feature.
+        # exclusive individuals. Two constraints for the filtered output:
+        #   1. features_used == cohort: the feature set must be the one that
+        #      actually defines this cohort's high-risk individuals; a feature
+        #      important under another cohort's feature set is not useful downstream.
+        #   2. max-z per feature: one authoritative row per feature, assigned to
+        #      the cohort where its bootstrap signal was strongest.
+        # Cross-cohort prevalence (how many cohorts flagged each feature) is stored
+        # in n_exclusive_cohorts / exclusive_cohorts for biological interpretation.
         if trainingData_str == 'ExclusiveHighCases':
             important = trainingDataFeatures[
                 trainingDataFeatures['feature_importance'] == 1
@@ -758,12 +761,32 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
             if important.empty:
                 print(f"\n  ExclusiveHighCases: no features with feature_importance=1.")
                 continue
-            # For each feature keep only the (cohort, features_used) row with max z_score
-            best_idx = important.groupby('feature')['z_score'].idxmax()
-            results_df = important.loc[best_idx].copy()
+
+            # Annotate cross-cohort prevalence from ALL important rows before filtering
+            cohort_list = (important.groupby('feature')['cohort']
+                           .agg(lambda s: ','.join(sorted(s.unique()))))
+            n_cohorts_map = important.groupby('feature')['cohort'].nunique()
+
+            # Keep only rows where the feature set matches the cohort
+            matched = important[important['features_used'] == important['cohort']].copy()
+            if matched.empty:
+                print(f"\n  ExclusiveHighCases: no features with features_used == cohort.")
+                continue
+
+            # Among matching rows, keep the single row with max z_score per feature
+            best_idx = matched.groupby('feature')['z_score'].idxmax()
+            results_df = matched.loc[best_idx].copy()
+
+            # Attach cross-cohort annotations
+            results_df['n_exclusive_cohorts'] = results_df['feature'].map(n_cohorts_map)
+            results_df['exclusive_cohorts'] = results_df['feature'].map(cohort_list)
             results_df['training_data_used'] = trainingData_str
-            print(f"\n  ExclusiveHighCases: {len(important)} feature_importance=1 rows → "
-                  f"{len(results_df)} after max-z (cohort, features_used) assignment.")
+
+            multi = (results_df['n_exclusive_cohorts'] > 1).sum()
+            print(f"\n  ExclusiveHighCases: {len(important)} feature_importance=1 rows "
+                  f"→ {len(matched)} after features_used==cohort "
+                  f"→ {len(results_df)} after max-z assignment "
+                  f"({multi} features important in >1 exclusive cohort).")
             filteredResults = pd.concat([filteredResults, results_df], ignore_index=True)
             continue
 
