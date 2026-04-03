@@ -14,7 +14,7 @@ Pipeline:
      top-20% / bottom-20% split is preserved in both cases.
 
   2. Find important features discriminating exclusive cases from controls:
-       Clinical features : Mann-Whitney U on raw_features_file
+       Clinical features : Mann-Whitney U on raw_feature_scores
                            (unbalanced = all controls; balanced = bootstrap n_cases
                             controls over --n_iterations iterations)
        Genomic features  : loaded from pre-computed SHAP output
@@ -66,7 +66,7 @@ Design note — balanced vs unbalanced:
 Usage:
   python enrich_exclusive_cohort_features.py \\
     --pheno_data  /path/to/combinedAnalysis \\
-    --raw_features_file /path/to/raw_features.csv \\
+    --raw_feature_scores /path/to/raw_features.csv \\
     [--filter_strategy tiered] \\
     [--use_set holdout] \\
     [--balance_strategy unbalanced] \\
@@ -1226,7 +1226,7 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
 # =============================================================================
 
 def main(pheno_data, filter_strategy='tiered',
-         raw_features_file=None,
+         raw_feature_scores=None,
          use_set='holdout',
          balance_strategy='unbalanced',
          n_iterations=1000,
@@ -1259,10 +1259,10 @@ def main(pheno_data, filter_strategy='tiered',
     annotation_df = load_feature_annotation(scores_path)
 
     # -------------------------------------------------------------------------
-    # Clinical feature analysis (optional — only when raw_features_file given)
+    # Clinical feature analysis (optional — only when raw_feature_scores given)
     # -------------------------------------------------------------------------
     clinical_df = pd.DataFrame()
-    if raw_features_file:
+    if raw_feature_scores:
         print(f"\n--- Step 2a: Clinical feature cross-cohort analysis ---")
         print(f"  Strategy: {balance_strategy}  |  alpha={alpha}  "
               f"|  min_effect={min_effect_size}")
@@ -1283,7 +1283,7 @@ def main(pheno_data, filter_strategy='tiered',
         cohort_groups = identify_exclusive_groups(combined_prs, bin_cols)
 
         # Load and normalise raw clinical features
-        raw_df = pd.read_csv(raw_features_file)
+        raw_df = pd.read_csv(raw_feature_scores)
         if 'Participant ID' in raw_df.columns:
             raw_df.rename(columns={'Participant ID': 'IID'}, inplace=True)
         raw_df.set_index('IID', inplace=True)
@@ -1339,7 +1339,7 @@ def main(pheno_data, filter_strategy='tiered',
             delta_threshold=delta_threshold,
         )
     else:
-        print("\n  [skip] --raw_features_file not provided; "
+        print("\n  [skip] --raw_feature_scores not provided; "
               "clinical analysis omitted.")
 
     # -------------------------------------------------------------------------
@@ -1638,7 +1638,7 @@ if __name__ == '__main__':
         help='Filtering strategy used in importantFeaturesAcrossCohortsAndTrainingData.Filtered.*.csv (default: tiered)',
     )
     parser.add_argument(
-        '--raw_features_file',
+        '--raw_feature_scores',
         help='Path to raw (untransformed) clinical features CSV. '
              'When provided, clinical features are tested with Mann-Whitney U '
              'across all cohorts and filtered for cross-cohort specificity.',
@@ -1685,15 +1685,15 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     pheno_data = args.pheno_data or os.environ.get('PHENO_DATA')
-    raw_features_file = args.raw_features_file or os.environ.get('RAW_FEATURES_FILE')
+    raw_feature_scores = args.raw_feature_scores or os.environ.get('RAW_FEATURE_SCORES')
 
     if not pheno_data:
         parser.error('Provide --pheno_data or set PHENO_DATA env var')
 
     print(f"pheno_data        : {pheno_data}")
     print(f"filter_strategy   : {args.filter_strategy}")
-    print(f"raw_features_file : {raw_features_file or '(not provided — clinical analysis skipped)'}")
-    if raw_features_file:
+    print(f"raw_feature_scores : {raw_feature_scores or '(not provided — clinical analysis skipped)'}")
+    if raw_feature_scores:
         print(f"use_set           : {args.use_set}")
         print(f"balance_strategy  : {args.balance_strategy}")
         print(f"n_iterations      : {args.n_iterations}")
@@ -1706,7 +1706,7 @@ if __name__ == '__main__':
     main(
         pheno_data=pheno_data,
         filter_strategy=args.filter_strategy,
-        raw_features_file=raw_features_file,
+        raw_feature_scores=raw_feature_scores,
         use_set=args.use_set,
         balance_strategy=args.balance_strategy,
         n_iterations=args.n_iterations,
