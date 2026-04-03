@@ -89,6 +89,31 @@ from statsmodels.stats.multitest import multipletests
 
 warnings.filterwarnings("ignore")
 
+_RSID_RE = re.compile(r'^rs\d+$', re.IGNORECASE)
+
+
+def _infer_feature_source(feature: str) -> str:
+    """Return 'genomic_shap' or 'clinical' from a feature name.
+
+    Rules (in order):
+      • All comma-separated tokens are rsIDs  → genomic_shap  (G or GxG)
+      • Single rsID                           → genomic_shap
+      • Two-part underscore token (HLA allele)→ genomic_shap
+      • Anything else                         → clinical
+    """
+    feature = str(feature).strip()
+    parts = [p.strip() for p in feature.split(',')]
+    if all(_RSID_RE.match(p) for p in parts if p):
+        return 'genomic_shap'
+    if len(parts) == 1:
+        # HLA allele: two alphanumeric tokens joined by '_', neither is an rsID
+        hla_parts = feature.split('_')
+        if (len(hla_parts) == 2
+                and all(p and p.isalnum() for p in hla_parts)
+                and not _RSID_RE.match(feature)):
+            return 'genomic_shap'
+    return 'clinical'
+
 
 # =============================================================================
 #  COLUMN-NAME NORMALISATION
@@ -473,14 +498,17 @@ def load_genomic_features(scores_path, filter_strategy):
     Load SHAP-based cohort-exclusive genomic features from pre-computed output.
     These are already filtered for cross-cohort exclusivity.
 
-    Returns DataFrame with columns: feature, cohort, odds_ratio, [specificity_tier]
+    Returns DataFrame with columns: feature, cohort, feature_source,
+                                     odds_ratio, [specificity_tier],
+                                     [training_data_used],
+                                     [n_exclusive_cohorts], [exclusive_cohorts]
     """
     path = os.path.join(
         scores_path, 'importantCohortScores',
         f'importantFeaturesAcrossCohortsAndTrainingData.Filtered.{filter_strategy}.csv'
     )
     if not os.path.exists(path):
-        print(f"  [WARN] Pre-computed SHAP features not found: {path}")
+        print(f"  [WARN] Filtered features file not found: {path}")
         return pd.DataFrame()
 
     df = pd.read_csv(path)
@@ -489,14 +517,16 @@ def load_genomic_features(scores_path, filter_strategy):
     if 'feature_set' in df.columns and 'cohort' not in df.columns:
         df.rename(columns={'feature_set': 'cohort'}, inplace=True)
 
-    # Include both the strict cross-cohort RF-SHAP features (HighCases) and the
-    # per-cohort exclusive bootstrap GBM-SHAP features (ExclusiveHighCases).
-    # LowControls are excluded — the enrichment is case-focussed.
+    # Include HighCases, LowControls, and ExclusiveHighCases
     if 'training_data_used' in df.columns:
-        df = df[df['training_data_used'].isin(['HighCases', 'ExclusiveHighCases'])]
+        df = df[df['training_data_used'].isin(
+            ['HighCases', 'LowControls', 'ExclusiveHighCases']
+        )]
 
-    print(f"  Loaded {len(df)} pre-computed genomic features "
-          f"({df['cohort'].nunique()} cohorts)")
+    # Infer feature_source from the feature name itself
+    df['feature_source'] = df['feature'].apply(_infer_feature_source)
+
+    print(f"  Loaded {len(df)} filtered features ({df['cohort'].nunique()} cohorts)")
     if 'training_data_used' in df.columns:
         print('  ' + df.groupby('training_data_used').size()
               .rename('n').reset_index().to_string(index=False))
@@ -1041,146 +1071,46 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
 #  MAIN
 # =============================================================================
 
-def main(pheno_data, raw_features_file,
-         filter_strategy='tiered',
-         use_set='holdout',
-         balance_strategy='unbalanced',
-         n_iterations=1000,
-         alpha=0.05,
-         min_effect_size=0.1,
-         use_all=False):
+def main(pheno_data, filter_strategy='tiered'):
 
     scores_path = os.path.join(pheno_data, 'scores')
     output_path = os.path.join(scores_path, 'functionalEnrichment')
     os.makedirs(output_path, exist_ok=True)
 
     # -------------------------------------------------------------------------
-    # Load PRS bin assignments
+    # Load all important features from the filtered tiered CSV
+    # (HighCases + LowControls + ExclusiveHighCases)
     # -------------------------------------------------------------------------
-    if use_set == 'holdout':
-        prs_file = os.path.join(scores_path, 'combinedPRSGroups.holdout.filtered.csv')
-        if not os.path.exists(prs_file):
-            prs_file = os.path.join(scores_path, 'combinedPRSGroups.filtered.csv')
-    else:
-        prs_file = os.path.join(scores_path, 'combinedPRSGroups.filtered.csv')
-
-    print(f"\nLoading PRS bins: {prs_file}")
-    combined_prs = pd.read_csv(prs_file)
-
-    bin_cols = [c for c in combined_prs.columns
-                if c.startswith('bin_') and 'combined' not in c]
-    if not use_all:
-        bin_cols = [c for c in bin_cols if 'all' not in c]
-
-    combined_prs = combined_prs[['IID', 'PHENOTYPE'] + bin_cols].set_index('IID')
-    cohort_names = [c.replace('bin_', '') for c in bin_cols]
-    print(f"Cohorts: {cohort_names}")
+    print("\n--- Step 1: Loading filtered important features ---")
+    filtered_df = load_genomic_features(scores_path, filter_strategy)
+    if filtered_df.empty:
+        print("[ERROR] No filtered features found. Ensure "
+              "importantFeaturesAcrossCohortsAndTrainingData.Filtered."
+              f"{filter_strategy}.csv exists.")
+        return
 
     # -------------------------------------------------------------------------
-    # Identify exclusive high-risk cases + controls per cohort
+    # Load feature annotation (for SNP expansion)
     # -------------------------------------------------------------------------
-    print("\n--- Step 1: Identifying exclusive high-risk cases ---")
-    cohort_groups = identify_exclusive_groups(combined_prs, bin_cols)
-
-    # -------------------------------------------------------------------------
-    # Load raw clinical features
-    # -------------------------------------------------------------------------
-    print(f"\nLoading raw features: {raw_features_file}")
-    raw_df = pd.read_csv(raw_features_file)
-    if 'Participant ID' in raw_df.columns:
-        raw_df.rename(columns={'Participant ID': 'IID'}, inplace=True)
-    raw_df.set_index('IID', inplace=True)
-
-    exclude_meta = {'PHENOTYPE', 'SEX', 'age'} | set(bin_cols) | set(cohort_names)
-    feature_cols_raw = [c for c in raw_df.columns if c not in exclude_meta]
-
-    # Normalise clinical feature column names to collapse spelling variants.
-    # e.g. "Residual Glycaemia", "residual_glycaemic", "residual glycemia" → same key.
-    canon_map, canon_reverse = normalise_series_names(feature_cols_raw)
-    # Rename raw_df columns using canonical names; keep first occurrence on collision.
-    canonical_cols = {}
-    rename_dict = {}
-    for orig in feature_cols_raw:
-        can = canon_map[orig]
-        if can not in canonical_cols:
-            canonical_cols[can] = orig
-            rename_dict[orig] = can
-        else:
-            # Duplicate canonical name — drop the later occurrence, warn
-            print(f"  [NORM] Dropping duplicate canonical '{can}': keeping "
-                  f"'{canonical_cols[can]}', dropping '{orig}'")
-    raw_df = raw_df[[c for c in raw_df.columns
-                     if c in exclude_meta or c in rename_dict]]
-    raw_df.rename(columns=rename_dict, inplace=True)
-    feature_cols = [c for c in raw_df.columns if c not in exclude_meta]
-    print(f"Clinical feature columns: {len(feature_cols_raw)} raw → "
-          f"{len(feature_cols)} after normalisation")
-
-    # -------------------------------------------------------------------------
-    # Load pre-computed genomic features
-    # -------------------------------------------------------------------------
-    print("\n--- Step 2b: Loading pre-computed genomic SHAP features ---")
-    genomic_df = load_genomic_features(scores_path, filter_strategy)
-
-    # -------------------------------------------------------------------------
-    # Load feature annotation
-    # -------------------------------------------------------------------------
-    print("\n--- Step 3: Loading feature annotation ---")
+    print("\n--- Step 2: Loading feature annotation ---")
     annotation_df = load_feature_annotation(scores_path)
 
     # -------------------------------------------------------------------------
-    # Find important features per cohort
+    # Build per-cohort feature rows from the filtered CSV
     # -------------------------------------------------------------------------
-    print(f"\n--- Step 2a: Finding important clinical features "
-          f"(strategy: {balance_strategy}) ---")
-
+    print("\n--- Step 3: Building per-cohort feature list ---")
     all_feature_rows = []
 
-    for cohort, groups in cohort_groups.items():
-        cases = [i for i in groups['cases'] if i in raw_df.index]
-        controls = [i for i in groups['controls'] if i in raw_df.index]
-
-        print(f"\n  {cohort}: {len(cases)} cases | {len(controls)} controls "
-              f"(after raw-feature filter)")
-
-        # ---- Clinical features ----
-        if len(cases) >= 5 and len(controls) >= 5:
-            if balance_strategy == 'balanced':
-                clin_result = find_clinical_features_balanced(
-                    raw_df, cases, controls, feature_cols,
-                    alpha=alpha, min_effect_size=min_effect_size,
-                    n_iterations=n_iterations,
-                )
-            else:
-                clin_result = find_clinical_features_unbalanced(
-                    raw_df, cases, controls, feature_cols,
-                    alpha=alpha, min_effect_size=min_effect_size,
-                )
-
-            if not clin_result.empty:
-                sig_clin = clin_result[clin_result['significant']].copy()
-                print(f"    Clinical: {len(sig_clin)}/{len(clin_result)} significant")
-                sig_clin['cohort'] = cohort
-                sig_clin['raw_feature'] = sig_clin['feature']
-                sig_clin['feature_source'] = 'clinical'
-                sig_clin['odds_ratio'] = np.nan
-                sig_clin['specificity_tier'] = np.nan
-                all_feature_rows.append(sig_clin)
-        else:
-            print(f"    [SKIP clinical] too few samples")
-
-        # ---- Genomic features (pre-computed SHAP, cohort-specific) ----
-        if not genomic_df.empty:
-            cohort_genomic = genomic_df[genomic_df['cohort'] == cohort].copy()
-            if not cohort_genomic.empty:
-                cohort_genomic['raw_feature'] = cohort_genomic['feature']
-                cohort_genomic['feature_source'] = 'genomic_shap'
-                cohort_genomic['p_value'] = np.nan
-                cohort_genomic['p_value_fdr'] = np.nan
-                cohort_genomic['effect_size_r'] = np.nan
-                cohort_genomic['significant'] = True
-                print(f"    Genomic SHAP: {len(cohort_genomic)} features")
-                all_feature_rows.append(cohort_genomic)
+    for cohort in sorted(filtered_df['cohort'].unique()):
+        cohort_feats = filtered_df[filtered_df['cohort'] == cohort].copy()
+        cohort_feats['raw_feature'] = cohort_feats['feature']
+        cohort_feats['p_value']      = np.nan
+        cohort_feats['p_value_fdr']  = np.nan
+        cohort_feats['effect_size_r'] = np.nan
+        n_genomic  = (cohort_feats['feature_source'] == 'genomic_shap').sum()
+        n_clinical = (cohort_feats['feature_source'] == 'clinical').sum()
+        print(f"  {cohort}: {n_genomic} genomic, {n_clinical} clinical features")
+        all_feature_rows.append(cohort_feats)
 
     if not all_feature_rows:
         print("\n[ERROR] No important features found. Check inputs and thresholds.")
@@ -1191,7 +1121,8 @@ def main(pheno_data, raw_features_file,
     # -------------------------------------------------------------------------
     keep_cols = ['raw_feature', 'feature', 'cohort', 'feature_source',
                  'p_value', 'p_value_fdr', 'effect_size_r',
-                 'odds_ratio', 'specificity_tier']
+                 'odds_ratio', 'specificity_tier',
+                 'training_data_used', 'n_exclusive_cohorts', 'exclusive_cohorts']
 
     combined_features = []
     for df in all_feature_rows:
@@ -1349,9 +1280,12 @@ def main(pheno_data, raw_features_file,
 
     # Canonical column order: metadata | match tracking | cluster binary columns
     meta_cols = [
-        'raw_feature', 'feature', 'cohort', 'feature_source',
+        'raw_feature', 'feature', 'cohort', 'training_data_used', 'feature_source',
         'p_value', 'p_value_fdr', 'effect_size_r', 'odds_ratio',
-        'specificity_tier', 'snp1_gene_names', 'snp2_gene_names',
+        'specificity_tier',
+        # ExclusiveHighCases cross-cohort prevalence annotations
+        'n_exclusive_cohorts', 'exclusive_cohorts',
+        'snp1_gene_names', 'snp2_gene_names',
         # Mahajan clinical linkage (populated for genomic features only)
         'mahajan_clinical_feature', 'mahajan_source',
         'match_method', 'n_clusters_matched',
@@ -1364,7 +1298,7 @@ def main(pheno_data, raw_features_file,
     # -------------------------------------------------------------------------
     out_file = os.path.join(
         output_path,
-        f'functional_cluster_enrichment_{use_set}_{balance_strategy}.csv'
+        f'functional_cluster_enrichment_{filter_strategy}.csv'
     )
     output_df.to_csv(out_file, index=False)
 
@@ -1374,9 +1308,11 @@ def main(pheno_data, raw_features_file,
     print(f"Shape : {output_df.shape}")
     print(f"Features mapped to ≥1 cluster: {n_any_cluster}/{len(output_df)}")
 
-    print("\nPer-cohort feature counts (cohort × source):")
+    print("\nPer-cohort feature counts (training_data_used × cohort × source):")
+    grp_cols = [c for c in ['training_data_used', 'cohort', 'feature_source']
+                if c in output_df.columns]
     summary = (
-        output_df.groupby(['cohort', 'feature_source'])
+        output_df.groupby(grp_cols)
         .size()
         .rename('n_features')
         .reset_index()
@@ -1426,74 +1362,22 @@ if __name__ == '__main__':
              'subtypeResearch/ is expected one level up (results/type2Diabetes/subtypeResearch/)',
     )
     parser.add_argument(
-        '--raw_features_file',
-        help='Path to raw (untransformed) clinical features CSV',
-    )
-    parser.add_argument(
         '--filter_strategy', default='tiered',
         choices=['strict', 'majority', 'differential', 'tiered'],
-        help='Strategy used when loading pre-computed SHAP genomic features (default: tiered)',
-    )
-    parser.add_argument(
-        '--use_set', default='holdout',
-        choices=['holdout', 'validation', 'all'],
-        help='Which individual set to use for clinical comparisons (default: holdout)',
-    )
-    parser.add_argument(
-        '--balance_strategy', default='unbalanced',
-        choices=['unbalanced', 'balanced'],
-        help=(
-            'unbalanced (default): all controls vs exclusive cases — '
-            'maximises power when control pool >> n_cases. '
-            'balanced: bootstrap n_cases controls over n_iterations — '
-            'recommended when pool is only 2–5× cases.'
-        ),
-    )
-    parser.add_argument(
-        '--n_iterations', type=int, default=1000,
-        help='Number of bootstrap iterations for balanced strategy (default: 1000)',
-    )
-    parser.add_argument(
-        '--alpha', type=float, default=0.05,
-        help='FDR significance threshold (default: 0.05)',
-    )
-    parser.add_argument(
-        '--min_effect_size', type=float, default=0.1,
-        help='Minimum |rank-biserial r| to flag as meaningful (default: 0.1)',
-    )
-    parser.add_argument(
-        '--use_all', action='store_true',
-        help='Include "all" cohort bins (excluded by default)',
+        help='Filtering strategy used in importantFeaturesAcrossCohortsAndTrainingData.Filtered.*.csv (default: tiered)',
     )
 
     args = parser.parse_args()
 
     pheno_data = args.pheno_data or os.environ.get('PHENO_DATA')
-    raw_features_file = args.raw_features_file or os.environ.get('RAW_FEATURES_FILE')
 
     if not pheno_data:
         parser.error('Provide --pheno_data or set PHENO_DATA env var')
-    if not raw_features_file:
-        parser.error('Provide --raw_features_file or set RAW_FEATURES_FILE env var')
 
-    print(f"pheno_data       : {pheno_data}")
-    print(f"raw_features_file: {raw_features_file}")
-    print(f"filter_strategy  : {args.filter_strategy}")
-    print(f"use_set          : {args.use_set}")
-    print(f"balance_strategy : {args.balance_strategy}")
-    print(f"n_iterations     : {args.n_iterations}")
-    print(f"alpha            : {args.alpha}")
-    print(f"min_effect_size  : {args.min_effect_size}")
-    print(f"use_all          : {args.use_all}")
+    print(f"pheno_data      : {pheno_data}")
+    print(f"filter_strategy : {args.filter_strategy}")
 
     main(
         pheno_data=pheno_data,
-        raw_features_file=raw_features_file,
         filter_strategy=args.filter_strategy,
-        use_set=args.use_set,
-        balance_strategy=args.balance_strategy,
-        n_iterations=args.n_iterations,
-        alpha=args.alpha,
-        min_effect_size=args.min_effect_size,
-        use_all=args.use_all,
     )
