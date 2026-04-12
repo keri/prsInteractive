@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
 
+import argparse
+import os
+import re
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
@@ -2368,214 +2371,827 @@ def create_combined_visualization(df, forest_data, output_path, top_n_clusters=1
 	
 	
 
+# ============================================================================
+# NEW: CLUSTER SUBTYPE ASSIGNMENT FROM TIERED ENRICHMENT CSV
+# ============================================================================
+
+# Maps the source prefix in column names to the corresponding column in cluster_subtype_map.csv
+SOURCE_TO_MAP_COLUMN = {
+    'kim':        'kim_2023',
+    'suzuki':     'suzuki_2024',
+    'udler':      'udler_2019',
+    'smith':      'smith_2024_ma',
+    'yaghootkar': 'yaghootkar_2014',
+    'hla':        'hla_cluster',   # custom HLA autoimmune cluster (→ SAID)
+}
+
+# ── Directional cluster–feature map ──────────────────────────────────────────
+# Expected direction of a clinical feature *within a cluster's phenotypic profile*
+# +1 = elevated  (feature value is HIGHER in people carrying this cluster's loci)
+# -1 = reduced   (feature value is LOWER)
+# Sources: Udler 2019, Suzuki 2024, Yaghootkar 2014, Ahlqvist 2018, Kim 2023
+# Keys are lowercase_underscore normalized feature names (partial match applied).
+CLUSTER_FEATURE_DIRECTION: dict = {
+    'beta_cell_1': {
+        'fasting_glucose': +1, 'glucose': +1, 'hba1c': +1,
+        '2h_glucose': +1, 'glucose_2h': +1,
+        'fasting_insulin': -1,
+    },
+    'beta_cell_2': {
+        'fasting_glucose': +1, 'hba1c': +1,
+        '2h_glucose': +1, 'glucose_2h': +1,
+        'fasting_insulin': -1,
+    },
+    'proinsulin': {
+        'fasting_glucose': +1, 'hba1c': +1, 'proinsulin': +1,
+        'fasting_insulin': -1, 'c_peptide': -1,
+    },
+    'hyper_insulin': {
+        'fasting_insulin': +1, 'c_peptide': +1,
+        'triglycerides': +1,
+        'hdl': -1, 'hdl_cholesterol': -1,
+    },
+    'res_glycaemic': {
+        'fasting_glucose': +1, 'hba1c': +1,
+        # NOT strongly associated with insulin direction
+    },
+    'obesity': {
+        'bmi': +1, 'body_mass_index': +1, 'weight': +1,
+        'waist_circumference': +1, 'waist_hip_ratio': +1, 'whr': +1,
+        'hip_circumference': +1,
+        'body_fat': +1, 'body_fat_percentage': +1,
+        'basal_metabolic_rate': +1,
+        'hdl': -1, 'hdl_cholesterol': -1,
+    },
+    'body_fat': {
+        # Elevated body fat / visceral fat; NOT strongly tied to BMI or standard lipids
+        'body_fat': +1, 'body_fat_percentage': +1,
+        'android_fat_mass': +1, 'asat': +1,
+        'visceral_adipose_tissue': +1, 'vat': +1,
+    },
+    'lipodystrophy': {
+        # Paradoxical: insulin-resistant despite low fat; HIGH insulin, TG, BP, WHR; LOW fat/HDL
+        'fasting_insulin': +1, 'c_peptide': +1,
+        'triglycerides': +1,
+        'waist_hip_ratio': +1, 'whr': +1,
+        'systolic_blood_pressure': +1, 'diastolic_blood_pressure': +1,
+        'body_fat': -1, 'body_fat_percentage': -1,
+        'bmi': -1, 'body_mass_index': -1,
+        'hdl': -1, 'hdl_cholesterol': -1,
+        'gfat': -1,   # gluteofemoral adipose tissue
+    },
+    'metabolic_syndrome': {
+        'triglycerides': +1,
+        'systolic_blood_pressure': +1, 'diastolic_blood_pressure': +1,
+        'fasting_glucose': +1,
+        'waist_circumference': +1,
+        'hdl': -1, 'hdl_cholesterol': -1,
+    },
+    'liver_lipid': {
+        'alanine_aminotransferase': +1, 'alt': +1,
+        'aspartate_aminotransferase': +1, 'ast': +1,
+        'gamma_glutamyltransferase': +1, 'ggt': +1,
+        'alkaline_phosphatase': +1, 'alp': +1,
+        'urate': +1, 'triglycerides': +1,
+        # Lower cholesterol transport (lipo A pathway)
+        'ldl': -1, 'ldl_cholesterol': -1,
+        'total_cholesterol': -1,
+    },
+}
+
+
+def _feature_concordance(feature: str, cluster_key: str,
+                          effect_size_r, odds_ratio) -> int:
+    """
+    Compare the observed direction of a feature to the cluster's expected direction.
+
+    Returns
+    -------
+    +1  concordant  — observed direction matches cluster phenotype
+    -1  discordant  — opposite direction
+     0  neutral     — no directional information available
+
+    Rules
+    -----
+    * Genomic loci (have odds_ratio, no effect_size_r): already filtered to OR>1
+      (risk direction), so always concordant (+1).
+    * Clinical features: compare sign of effect_size_r to CLUSTER_FEATURE_DIRECTION.
+    * If the feature is not in the map, return 0 (neutral).
+    """
+    has_r  = pd.notna(effect_size_r) and float(effect_size_r) != 0.0
+    has_or = pd.notna(odds_ratio)
+
+    # Genomic locus: all retained loci are OR>1, always concordant
+    if has_or and not has_r:
+        return 1
+
+    # Clinical feature without valid r: neutral
+    if not has_r:
+        return 0
+
+    cluster_map = CLUSTER_FEATURE_DIRECTION.get(cluster_key, {})
+    if not cluster_map:
+        return 0
+
+    # Normalise feature key: lowercase, underscores
+    feat_key = re.sub(r'[\s\-]+', '_', str(feature).lower().strip())
+
+    # Exact match first
+    expected = cluster_map.get(feat_key, None)
+
+    # Partial substring match (e.g. 'hdl_direct' matches key 'hdl')
+    if expected is None:
+        for k, v in cluster_map.items():
+            if k in feat_key or feat_key in k:
+                expected = v
+                break
+
+    if expected is None:
+        return 0
+
+    observed = 1 if float(effect_size_r) > 0 else -1
+    return 1 if observed == expected else -1
+
+
+def load_cluster_subtype_map(mapping_file):
+    """
+    Load the research-based cluster-to-subtype mapping from cluster_subtype_map.csv.
+
+    The file has columns: cluster_key, display_name, subtypes (semicolon-separated),
+    udler_2019, kim_2023, smith_2024_ma, yaghootkar_2014, suzuki_2024, assign_manually, ...
+
+    Returns
+    -------
+    cluster_key_to_subtypes : dict  {cluster_key: [subtype, ...]}
+    source_cluster_to_key   : dict  {(source_prefix, cluster_name_lower): cluster_key}
+    map_df                  : DataFrame  (full table for downstream use)
+    """
+    df = pd.read_csv(mapping_file)
+
+    # cluster_key → list[subtype]
+    cluster_key_to_subtypes = {}
+    for _, row in df.iterrows():
+        ck = row['cluster_key']
+        subtypes_raw = str(row.get('subtypes', ''))
+        subtypes = [s.strip() for s in subtypes_raw.split(';')
+                    if s.strip() and s.strip().lower() != 'nan']
+        cluster_key_to_subtypes[ck] = subtypes
+
+    # (source_prefix, cluster_name_lower) → cluster_key
+    source_cluster_to_key = {}
+    for _, row in df.iterrows():
+        ck = row['cluster_key']
+        for src_prefix, col_name in SOURCE_TO_MAP_COLUMN.items():
+            val = row.get(col_name, '')
+            if pd.notna(val) and str(val).strip():
+                name_lower = str(val).strip().lower()
+                source_cluster_to_key[(src_prefix, name_lower)] = ck
+
+    print(f"Loaded cluster_subtype_map: {len(df)} clusters, "
+          f"{len(source_cluster_to_key)} source-name entries")
+    return cluster_key_to_subtypes, source_cluster_to_key, df
+
+
+def map_tiered_columns_to_cluster_keys(tiered_df, source_cluster_to_key):
+    """
+    Map each binary cluster column in the tiered enrichment CSV to a cluster_key.
+
+    Column format: {source}_functional_cluster_{loci|clinical}_map__{ClusterName}
+    Source prefix: first token before the first underscore (kim, suzuki, udler, smith).
+
+    Returns
+    -------
+    col_to_cluster_key : dict  {column_name: cluster_key or None}
+    """
+    cluster_cols = [
+        c for c in tiered_df.columns
+        if '__' in c and any(c.startswith(p + '_') for p in SOURCE_TO_MAP_COLUMN)
+    ]
+
+    import re
+
+    def _normalise(s):
+        """Lower-case; replace hyphens/slashes/underscores with space;
+        remove filler word 'and'; insert space before digits after letters
+        ('cell1' → 'cell 1'); collapse multiple spaces."""
+        s = s.lower()
+        s = re.sub(r'[-/_]', ' ', s)
+        s = re.sub(r'\band\b', ' ', s)            # 'liver and lipid' → 'liver  lipid'
+        s = re.sub(r'([a-z])(\d)', r'\1 \2', s)   # 'cell1' → 'cell 1'
+        s = re.sub(r'\s+', ' ', s).strip()
+        return s
+
+    # Pre-normalise the lookup keys
+    normalised_lookup = {
+        (src, _normalise(name)): ck
+        for (src, name), ck in source_cluster_to_key.items()
+    }
+
+    col_to_cluster_key = {}
+    unmapped = []
+
+    for col in cluster_cols:
+        # Skip pandas unnamed artifact columns
+        if 'Unnamed' in col:
+            col_to_cluster_key[col] = None
+            continue
+
+        source_prefix = col.split('_')[0]
+        raw_name = col.split('__', 1)[1].strip()
+        cluster_name = _normalise(raw_name)
+
+        # Exact match on normalised string
+        key = normalised_lookup.get((source_prefix, cluster_name))
+
+        # Fallback: partial match on normalised strings
+        if key is None:
+            for (src, norm_name), ck in normalised_lookup.items():
+                if src == source_prefix and (norm_name in cluster_name or cluster_name in norm_name):
+                    key = ck
+                    break
+
+        col_to_cluster_key[col] = key
+        if key is None:
+            unmapped.append(col)
+
+    if unmapped:
+        print(f"  Warning: {len(unmapped)} cluster columns could not be mapped to a cluster_key:")
+        for col in unmapped:
+            print(f"    {col}")
+
+    mapped_count = sum(1 for v in col_to_cluster_key.values() if v is not None)
+    print(f"  Mapped {mapped_count}/{len(cluster_cols)} cluster columns to cluster_keys")
+    return col_to_cluster_key
+
+
+def assign_subtypes_to_features(tiered_df, col_to_cluster_key,
+                                 cluster_key_to_subtypes, cluster_subtype_map_df,
+                                 cohort_col='cohort'):
+    """
+    For each feature row in the tiered enrichment CSV, assign subtypes based on
+    which functional cluster binary columns equal 1.
+
+    A feature in cohort C mapped to a cluster that links to subtype S produces one
+    record (feature, C, cluster_key, S).  If the same gene appears in two cohorts
+    it generates two records, one per cohort — as requested.
+
+    Returns
+    -------
+    assigned_df : long-format DataFrame with one row per feature×cohort×cluster_key×subtype
+    """
+    key_to_display  = dict(zip(cluster_subtype_map_df['cluster_key'],
+                                cluster_subtype_map_df['display_name']))
+    key_to_manual   = dict(zip(cluster_subtype_map_df['cluster_key'],
+                                cluster_subtype_map_df['assign_manually'].fillna(0).astype(int)))
+
+    valid_cluster_cols = {col: ck for col, ck in col_to_cluster_key.items()
+                          if ck is not None}
+
+    meta_cols = [
+        'feature', 'cohort', 'training_data_used', 'feature_source',
+        'odds_ratio', 'effect_size_r', 'specificity_tier',
+        'n_exclusive_cohorts', 'exclusive_cohorts',
+        'snp1_gene_names', 'snp2_gene_names', 'mahajan_clinical_feature',
+    ]
+    present_meta = [c for c in meta_cols if c in tiered_df.columns]
+
+    rows = []
+    for _, row in tiered_df.iterrows():
+        cohort = row.get(cohort_col)
+        if pd.isna(cohort):
+            continue
+
+        for col, cluster_key in valid_cluster_cols.items():
+            val = row.get(col)
+            if pd.notna(val) and val == 1:
+                conc = _feature_concordance(
+                    row.get('feature', ''),
+                    cluster_key,
+                    row.get('effect_size_r'),
+                    row.get('odds_ratio'),
+                )
+                for subtype in cluster_key_to_subtypes.get(cluster_key, []):
+                    entry = {c: row.get(c) for c in present_meta}
+                    entry['cluster_key']    = cluster_key
+                    entry['display_name']   = key_to_display.get(cluster_key, cluster_key)
+                    entry['subtype']        = subtype
+                    entry['assign_manually'] = key_to_manual.get(cluster_key, 0)
+                    entry['source_column']  = col
+                    entry['concordance']    = conc
+                    rows.append(entry)
+
+    assigned_df = pd.DataFrame(rows)
+    print(f"  Assigned {len(assigned_df)} feature×cohort×cluster×subtype records "
+          f"({assigned_df['feature'].nunique() if len(assigned_df) else 0} unique features)")
+    return assigned_df
+
+
+def compute_subtype_cohort_enrichment(assigned_df, tiered_df,
+                                       col_to_cluster_key, cohort_col='cohort'):
+    """
+    Compute per-subtype cohort enrichment with two normalizations.
+
+    Normalization 1 — by cohort feature total
+        norm_by_cohort = n_features(subtype, cohort) / total_features(cohort)
+
+    Normalization 2 — by cluster gene count per cohort
+        norm_by_cluster = n_features(subtype, cluster, cohort)
+                          / total_features_in_cluster(cluster, cohort)
+
+    Returns
+    -------
+    subtype_cohort_df   : DataFrame  enrichment summary (subtype × cohort)
+    subtype_cluster_df  : DataFrame  detailed breakdown (subtype × cluster × cohort)
+    """
+    # --- Total features per cohort in the tiered CSV ---
+    cohort_totals = tiered_df[cohort_col].dropna().value_counts().to_dict()
+
+    # --- Features per cluster_key per cohort in the tiered CSV ---
+    # De-duplicate by (feature, cohort, cluster_key) so a feature matched by both
+    # clinical and loci map for the same cluster only counts once
+    valid_cols = {col: ck for col, ck in col_to_cluster_key.items()
+                  if ck is not None and col in tiered_df.columns}
+
+    cluster_cohort_totals = {}   # {cluster_key: {cohort: count}}
+    seen = set()
+    for col, cluster_key in valid_cols.items():
+        sub = tiered_df[tiered_df[col] == 1][[cohort_col, 'feature']]
+        for _, r in sub.iterrows():
+            cohort = r[cohort_col]
+            feature = r['feature']
+            if pd.isna(cohort):
+                continue
+            dedup_key = (cluster_key, cohort, feature)
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
+            cluster_cohort_totals.setdefault(cluster_key, {})
+            cluster_cohort_totals[cluster_key][cohort] = \
+                cluster_cohort_totals[cluster_key].get(cohort, 0) + 1
+
+    # --- De-duplicate assigned_df before counting ---
+    dedup = assigned_df.drop_duplicates(
+        subset=['feature', 'cohort', 'cluster_key', 'subtype']
+    )
+
+    # --- Normalization 1: subtype × cohort ---
+    sc = (dedup.groupby(['subtype', 'cohort']).size().reset_index(name='n_features'))
+    sc['total_cohort_features'] = sc['cohort'].map(cohort_totals).fillna(0)
+    sc['norm_by_cohort_features'] = (
+        sc['n_features'] / sc['total_cohort_features'].replace(0, np.nan)
+    )
+
+    # --- Normalization 2: subtype × cluster × cohort ---
+    scc = (dedup.groupby(['subtype', 'cluster_key', 'cohort'])
+               .size().reset_index(name='n_features_in_cluster'))
+
+    def _cluster_cohort_total(row):
+        return cluster_cohort_totals.get(row['cluster_key'], {}).get(row['cohort'], 0)
+
+    scc['n_cluster_genes_in_cohort'] = scc.apply(_cluster_cohort_total, axis=1)
+    scc['norm_by_cluster_gene_count'] = (
+        scc['n_features_in_cluster'] /
+        scc['n_cluster_genes_in_cohort'].replace(0, np.nan)
+    )
+
+    return sc, scc
+
+
+# ============================================================================
+# DIRECT EVIDENCE: subtype*_map.csv FILES FROM LITERATURE
+# ============================================================================
+
+# Recognised subtype names (used to detect wide-format files)
+KNOWN_SUBTYPES = {'SAID', 'SIDD', 'SIRD', 'MOD', 'MARD', 'LADA', 'MODY'}
+
+
+def load_subtype_direct_maps(subtype_research_path: str) -> List[dict]:
+    """
+    Scan *subtype_research_path* for files matching ``subtype*_map.csv``
+    (case-insensitive glob) and parse each into feature→subtype assignments.
+
+    Two formats are handled automatically:
+
+    **Wide format** (feature as first / unlabelled column, subtypes as other columns)::
+
+        feature    SAID  SIDD  SIRD  MOD  MARD
+        BMI        23.1  24.7  28.3  26.1  24.0
+        HbA1c      70.5  89.1  57.4  53.0  54.1
+
+    For each feature, the subtype(s) whose column value has a Z-score ≥ *z_thresh*
+    (default 0.5) above the cross-subtype mean are considered associated.
+    At minimum the top-scoring subtype is always returned.
+
+    **Long format** (one row per feature×subtype)::
+
+        feature     subtype  effect_size
+        rs7903146   SIDD     0.8
+        rs7903146   SAID     0.4
+
+    Returns
+    -------
+    list of dicts, each with keys:
+        source_file  : str   basename of the CSV
+        feature      : str   normalised feature name
+        subtype      : str   T2D subtype
+        evidence     : float column value (or 1.0 for long-format presence)
+        z_score      : float Z-score across subtypes (NaN for long format)
+    """
+    import glob as _glob
+
+    pattern = os.path.join(subtype_research_path, 'subtype*_map.csv')
+    files = sorted(_glob.glob(pattern, recursive=False))
+    if not files:
+        return []
+
+    print(f"\n  Found {len(files)} subtype direct-map file(s):")
+    all_records = []
+
+    for fpath in files:
+        src = os.path.basename(fpath)
+        try:
+            df = pd.read_csv(fpath)
+        except Exception as e:
+            print(f"    [WARN] Could not load {src}: {e}")
+            continue
+
+        # Detect subtype columns — any column whose name (uppercased) is in KNOWN_SUBTYPES
+        subtype_cols = [c for c in df.columns if c.strip().upper() in KNOWN_SUBTYPES]
+
+        if subtype_cols:
+            # ---- Wide format ----
+            # Feature column = first column not in subtype_cols
+            feat_col = next((c for c in df.columns if c not in subtype_cols), None)
+            if feat_col is None:
+                print(f"    [WARN] {src}: no feature column found — skipping")
+                continue
+
+            n_recs = 0
+            for _, row in df.iterrows():
+                feat = str(row[feat_col]).strip()
+                if not feat or feat.lower() == 'nan':
+                    continue
+
+                vals = pd.to_numeric(
+                    pd.Series({c: row[c] for c in subtype_cols}), errors='coerce'
+                ).dropna()
+                if vals.empty:
+                    continue
+
+                # Z-score across subtypes for this feature
+                mean_v, std_v = vals.mean(), vals.std()
+                z_scores = (vals - mean_v) / std_v if std_v > 0 else pd.Series(0.0, index=vals.index)
+
+                z_thresh = 0.5
+                associated = z_scores[z_scores >= z_thresh].index.tolist()
+                # Always include the maximum subtype even below threshold
+                if not associated:
+                    associated = [z_scores.idxmax()]
+
+                for sub in associated:
+                    all_records.append({
+                        'source_file': src,
+                        'feature':     feat,
+                        'subtype':     sub.strip().upper(),
+                        'evidence':    float(vals[sub]),
+                        'z_score':     float(z_scores[sub]),
+                    })
+                    n_recs += 1
+
+            print(f"    {src}  [wide]: {len(df)} features × {len(subtype_cols)} subtypes "
+                  f"→ {n_recs} feature×subtype records")
+
+        elif 'subtype' in df.columns:
+            # ---- Long format ----
+            feat_candidates = [c for c in df.columns
+                               if c.lower() in ('feature', 'locus', 'loci', 'snp', 'rsid',
+                                                 'gene', 'cluster', 'cluster_key')]
+            feat_col = feat_candidates[0] if feat_candidates else df.columns[0]
+            ev_col   = next((c for c in df.columns
+                             if c.lower() in ('effect_size', 'beta', 'or', 'odds_ratio',
+                                              'z_score', 'score', 'value')), None)
+
+            n_recs = 0
+            for _, row in df.iterrows():
+                feat = str(row[feat_col]).strip()
+                sub  = str(row['subtype']).strip().upper()
+                if not feat or feat.lower() == 'nan' or sub not in KNOWN_SUBTYPES:
+                    continue
+                ev = float(row[ev_col]) if ev_col and pd.notna(row.get(ev_col)) else 1.0
+                all_records.append({
+                    'source_file': src,
+                    'feature':     feat,
+                    'subtype':     sub,
+                    'evidence':    ev,
+                    'z_score':     float('nan'),
+                })
+                n_recs += 1
+
+            print(f"    {src}  [long]: {n_recs} feature×subtype records")
+
+        else:
+            print(f"    [WARN] {src}: no recognised subtype columns or 'subtype' column — skipping")
+
+    return all_records
+
+
+def match_direct_maps_to_tiered(direct_records: List[dict],
+                                 tiered_df: pd.DataFrame,
+                                 cohort_col: str = 'cohort') -> pd.DataFrame:
+    """
+    Match features from ``direct_records`` (output of
+    :func:`load_subtype_direct_maps`) against rows in *tiered_df*.
+
+    Matching priority (first hit wins, case-insensitive):
+    1. ``feature`` column in tiered_df  (exact, normalised)
+    2. ``mahajan_clinical_feature`` column  (clinical bridge)
+    3. ``snp1_gene_names`` / ``snp2_gene_names``  (gene-symbol substring)
+
+    Each matched tiered row produces one record per (matched_feature × cohort × subtype).
+
+    Returns
+    -------
+    DataFrame compatible with ``assigned_df`` from
+    :func:`assign_subtypes_to_features`.
+    """
+    if not direct_records:
+        return pd.DataFrame()
+
+    def _norm(s):
+        return str(s).strip().lower() if pd.notna(s) else ''
+
+    # Build lookup indices on tiered_df
+    feat_idx     = {_norm(v): idxs
+                    for v, idxs in tiered_df.groupby(tiered_df['feature'].map(_norm)).groups.items()}
+    mahajan_col  = 'mahajan_clinical_feature'
+    mahajan_idx  = {}
+    if mahajan_col in tiered_df.columns:
+        for v, idxs in tiered_df.groupby(tiered_df[mahajan_col].map(_norm)).groups.items():
+            if v:
+                mahajan_idx[v] = idxs
+
+    rows = []
+    for rec in direct_records:
+        raw = rec['feature']
+        norm_feat = _norm(raw)
+
+        # Try exact feature match first
+        matched_indices = feat_idx.get(norm_feat, [])
+
+        # Try Mahajan clinical bridge
+        if len(matched_indices) == 0 and mahajan_idx:
+            matched_indices = mahajan_idx.get(norm_feat, [])
+
+        # HLA gene-region prefix match:
+        # Map entries like 'HLA-DQB1' match tiered features 'HLA-dqb1*504', 'HLA-dqb1*301' etc.
+        # Pattern: map feature = 'HLA-<GENE>' (no allele suffix), tiered feature = 'HLA-<gene>*<allele>'
+        if len(matched_indices) == 0 and re.match(r'^hla-[a-z0-9]+$', norm_feat):
+            matched_indices = tiered_df[
+                tiered_df['feature'].str.lower().str.startswith(norm_feat, na=False)
+            ].index.tolist()
+
+        # Try gene name substring (token match in snp1_gene_names / snp2_gene_names).
+        # Only applied to features that look like genomic identifiers (gene symbols,
+        # SNP IDs, locus names) — NOT to clinical trait names like "eGFR", "BMI",
+        # "Glucose" which could accidentally match gene abbreviations.
+        def _looks_genomic(s):
+            """Return True if s resembles a gene symbol, SNP ID, or locus name."""
+            s = str(s).strip()
+            if re.match(r'^rs\d+$', s, re.IGNORECASE):          # rsXXXX SNP ID
+                return True
+            if re.match(r'^HLA[-_*]', s, re.IGNORECASE):        # HLA alleles/genes
+                return True
+            # Gene symbols: all uppercase + digits/hyphens, ≥ 4 chars, no spaces
+            if re.match(r'^[A-Z][A-Z0-9_-]{3,}$', s):
+                return True
+            return False
+
+        if len(matched_indices) == 0 and _looks_genomic(raw):
+            gene_tokens = set(re.split(r'[;,\s]+', norm_feat)) - {''}
+            for g in gene_tokens:
+                if not g:
+                    continue
+                for col in ('snp1_gene_names', 'snp2_gene_names'):
+                    if col not in tiered_df.columns:
+                        continue
+                    mask = tiered_df[col].str.contains(g, case=False, na=False, regex=False)
+                    matched_indices = tiered_df[mask].index.tolist()
+                    if matched_indices:
+                        break
+                if matched_indices:
+                    break
+
+        for idx in matched_indices:
+            trow = tiered_df.loc[idx]
+            cohort = trow.get(cohort_col)
+            if pd.isna(cohort):
+                continue
+            rows.append({
+                'feature':         trow.get('feature', raw),
+                'cohort':          cohort,
+                'subtype':         rec['subtype'],
+                'cluster_key':     f"direct__{rec['source_file'].replace('.csv', '')}",
+                'display_name':    f"Direct ({rec['source_file']})",
+                'assign_manually': 0,
+                'source_column':   rec['source_file'],
+                'training_data_used': trow.get('training_data_used'),
+                'feature_source':  trow.get('feature_source'),
+                'odds_ratio':      trow.get('odds_ratio'),
+                'effect_size_r':   trow.get('effect_size_r'),
+                'specificity_tier': trow.get('specificity_tier'),
+                'evidence':        rec['evidence'],
+                'z_score_direct':  rec['z_score'],
+            })
+
+    result = pd.DataFrame(rows)
+    if not result.empty:
+        print(f"\n  Direct-map matches: {len(result)} feature×cohort×subtype records "
+              f"({result['feature'].nunique()} unique features)")
+    return result
+
+
 if __name__ == "__main__":
-	"""
-	Complete example of how to use all subtype enrichment functions
-	"""
-	
-	print("=" * 80)
-	print("SUBTYPE ENRICHMENT ANALYSIS - COMPLETE WORKFLOW")
-	print("=" * 80)
-	
-	pheno_path = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
-	# Load your data
-	df = pd.read_csv(f'{pheno_path}/scores/clusterWeights.csv')  # or pd.read_csv() if it's actually CSV
-	
-	# Run the analysis
-	results = rank_functional_clusters_by_cohort(df)
-	
-	# Display results
-#	display_results(results)
-	display_direction_analysis(results)
-	
-	signatures = pd.DataFrame()
-	for cohort in results['scores_df'].index:
-		signature = find_cohort_signature_clusters(results,cohort,top_n=results['scores_df'].shape[1])
-		signature['cohort'] = cohort
-		signatures = pd.concat([signature,signatures],ignore_index=True)
-	
 
-	# Step 1: Load cluster-subtype mapping
-	print("\nLoading cluster-subtype mapping...")
-	cluster_mapping = load_cluster_subtype_mapping(f'{pheno_path}/scores/clusterToSubtype.csv')
-	
-	print("=" * 80)
-	print("COMPARING WEIGHTING METHODS")
-	print("=" * 80)
-	
-	# Method 1: Effect size weighting
-	print("\n1. Effect Size Weighting (recommended)")
-	subtype_weighted = calculate_weighted_subtype_enrichment(
-		df, results, cluster_mapping,
-		weighting='effect_size'
-	)
-	display_weighted_results(subtype_weighted)
-	
-	#plot forest plot
-	forest_data = prepare_forest_plot_data(
-		subtype_weighted['risk_contributions'],
-		subtype_weighted['protective_contributions'],
-		results['risk_scores'],
-		cluster_mapping
-	)
-	
-	create_combined_visualization(subtype_weighted['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/clinicalFigures/combined_pie_forest_weighted_by_effect_size.riskOnly.png')
-	
-	
-#	create_forest_plot(
-#		forest_data,
-#		f'{pheno_path}/figures/cohort_composition_forest_plot_combined_weighted_by_effect_size.png'
-#	)
-	
-	plot_weighted_subtype_pies(subtype_weighted, f'{pheno_path}/figures/clinicalFigures/pie_weighted_by_effect_size.png')
+    # ------------------------------------------------------------------
+    # CLI argument parsing
+    # ------------------------------------------------------------------
+    parser = argparse.ArgumentParser(
+        description=(
+            "Cluster-subtype assignment from tiered enrichment CSV. "
+            "Joins cluster_subtype_map.csv onto functional_cluster_enrichment_tiered.csv, "
+            "assigns subtypes to each feature×cohort, and computes normalised enrichment."
+        )
+    )
+    parser.add_argument(
+        '--tiered_csv', required=True,
+        help='Path to functional_cluster_enrichment_tiered.csv'
+    )
+    parser.add_argument(
+        '--cluster_subtype_map', required=True,
+        help='Path to cluster_subtype_map.csv (subtypeResearch/)'
+    )
+    parser.add_argument(
+        '--out_dir', required=True,
+        help='Output directory for the annotated and enrichment CSVs'
+    )
+    parser.add_argument(
+        '--cluster_weights', default=None,
+        help='(Optional) Path to clusterWeights.csv for the legacy OR-weighted analysis'
+    )
+    parser.add_argument(
+        '--legacy_mapping', default=None,
+        help='(Optional) Path to clusterToSubtype.csv for the legacy analysis'
+    )
+    args = parser.parse_args()
 
-	
-	# Method 2: Distinctiveness weighting
-	print("\n2. Distinctiveness Weighting (effect × uniqueness)")
-	subtype_distinctive = calculate_weighted_subtype_enrichment(
-		df, results, cluster_mapping,
-		weighting='distinctiveness'
-	)
-	#plot forest plot
-	forest_data = prepare_forest_plot_data(
-		subtype_distinctive['risk_contributions'],
-		subtype_distinctive['protective_contributions'],
-		results['risk_scores'],
-		cluster_mapping
-	)
-	
-	create_combined_visualization(subtype_distinctive['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/clinicalFigures/combined_pie_forest_weighted_by_distinctiveness.riskOnly.png')
-	
-#	create_forest_plot(
-#		forest_data,
-#		f'{pheno_path}/figures/cohort_composition_forest_plot_combined_weighted_by_distinctiveness.png'
-#	)
-	
-	
-	plot_weighted_subtype_pies(subtype_distinctive, f'{pheno_path}/figures/clinicalFigures/pie_weighted_by_distinctiveness.png')
-	
-	# Method 3: Normalized weighting
-	print("\n3. Normalized Score Weighting")
-	subtype_normalized = calculate_weighted_subtype_enrichment(
-		df, results, cluster_mapping,
-		weighting='normalized'
-	)
-	
-	#plot forest plot
-	forest_data = prepare_forest_plot_data(
-		subtype_normalized['risk_contributions'],
-		subtype_normalized['protective_contributions'],
-		results['risk_scores'],
-		cluster_mapping
-	)
-	
-	create_combined_visualization(subtype_normalized['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/clinicalFigures/combined_pie_forest_weighted_by_effect_size_normalized.riskOnly.png')
-	
-	#Method 4: Normalized weighting for subtype pie chart with effect_size weighting for the forest plot
-	
-	forest_data = prepare_forest_plot_data(
-		subtype_weighted['risk_contributions'],
-		subtype_weighted['protective_contributions'],
-		results['risk_scores'],
-		cluster_mapping
-	)
-	
-	create_combined_visualization(subtype_normalized['cohort_percentages_per_subtype'], forest_data, f'{pheno_path}/figures/clinicalFigures/combined_pie_forest_normalized_forest_weighted_by_effect_size.riskOnly.png')	
-	
-	
-	
-#	create_forest_plot(
-#		forest_data,
-#		f'{pheno_path}/figures/cohort_composition_forest_plot_combined_weighted_by_effect_size_normalized.png'
-#	)
-	
-	
-	plot_weighted_subtype_pies(subtype_normalized, f'{pheno_path}/figures/clinicalFigures/pie_weighted_by_normalized.png')
-	
-	
-	# Create comparison
-	print("\n4. Creating Comparison Plots...")
-	fig, comparison = plot_contribution_comparison(subtype_weighted)
+    os.makedirs(args.out_dir, exist_ok=True)
 
+    print("=" * 80)
+    print("SUBTYPE ASSIGNMENT FROM TIERED ENRICHMENT CSV")
+    print("=" * 80)
 
-	# Export results to Excel with multiple sheets
-	with pd.ExcelWriter(f'{pheno_path}/scores/cluster_rankings_results.xlsx') as writer:
-		results['scores_df'].to_excel(writer, sheet_name='Normalized Scores')
-		results['cluster_ranks_df'].to_excel(writer, sheet_name='Cluster Rankings')
-		results['cohort_ranks_df'].to_excel(writer, sheet_name='Cohort Rankings')
-		results['top_cohorts'].to_excel(writer, sheet_name='Top Cohorts by Cluster')
-		results['effect_directions'].to_excel(writer, sheet_name='Direction of Top Clusters')
-		results['protective_scores'].to_excel(writer, sheet_name='Protective scores')
-		results['risk_scores'].to_excel(writer, sheet_name='Risk scores')
-		signatures.to_excel(writer,sheet_name='Signature Clusters by Cohort')
-		
-	print("\nResults exported to 'cluster_rankings_results.xlsx'")
-	
-		
-	with pd.ExcelWriter(f'{pheno_path}/scores/cluster_subtype_results_distinctiveness.xlsx') as writer:
-		subtype_distinctive['cohort_weights_per_subtype'].to_excel(writer, sheet_name='cohort_weights_per_subtype')
-		subtype_distinctive['cohort_percentages_per_subtype'].to_excel(writer, sheet_name='cohort_percentages_per_subtype')
-		subtype_distinctive['gene_counts'].to_excel(writer, sheet_name='gene_counts')
-		subtype_distinctive['risk_contributions'].to_excel(writer, sheet_name='risk_contributions')
-		subtype_distinctive['protective_contributions'].to_excel(writer, sheet_name='protective_contributions')
-		
-	print("\nResults exported to 'cluster_subtype_results_distinctiveness.xlsx'")
-	
-		
-	with pd.ExcelWriter(f'{pheno_path}/scores/cluster_subtype_results_effect_sizes.xlsx') as writer:
-		subtype_weighted['cohort_weights_per_subtype'].to_excel(writer, sheet_name='cohort_weights_per_subtype')
-		subtype_weighted['cohort_percentages_per_subtype'].to_excel(writer, sheet_name='cohort_percentages_per_subtype')
-		subtype_weighted['gene_counts'].to_excel(writer, sheet_name='gene_counts')
-		subtype_weighted['risk_contributions'].to_excel(writer, sheet_name='risk_contributions')
-		subtype_weighted['protective_contributions'].to_excel(writer, sheet_name='protective_contributions')
-		
-	print("\nResults exported to 'cluster_subtype_results_effect_sizes.xlsx'")
-	
-	with pd.ExcelWriter(f'{pheno_path}/scores/cluster_subtype_results_effect_size_normalized_gene_count.xlsx') as writer:
-		subtype_normalized['cohort_weights_per_subtype'].to_excel(writer, sheet_name='cohort_weights_per_subtype')
-		subtype_normalized['cohort_percentages_per_subtype'].to_excel(writer, sheet_name='cohort_percentages_per_subtype')
-		subtype_normalized['gene_counts'].to_excel(writer, sheet_name='gene_counts')
-		subtype_normalized['risk_contributions'].to_excel(writer, sheet_name='risk_contributions')
-		subtype_normalized['protective_contributions'].to_excel(writer, sheet_name='protective_contributions')
-	
-	print("\nResults exported to 'cluster_subtype_results_normalized_gene_count.xlsx'")
-	
+    # ------------------------------------------------------------------
+    # Step 1: Load tiered enrichment CSV
+    # ------------------------------------------------------------------
+    print(f"\nLoading tiered enrichment CSV: {args.tiered_csv}")
+    tiered_df = pd.read_csv(args.tiered_csv)
+    print(f"  {len(tiered_df)} rows, {len(tiered_df.columns)} columns")
+    print(f"  Cohorts: {sorted(tiered_df['cohort'].dropna().unique().tolist())}")
 
+    # ------------------------------------------------------------------
+    # Step 2: Load cluster-subtype map
+    # ------------------------------------------------------------------
+    print(f"\nLoading cluster-subtype map: {args.cluster_subtype_map}")
+    cluster_key_to_subtypes, source_cluster_to_key, cluster_map_df = \
+        load_cluster_subtype_map(args.cluster_subtype_map)
 
-	
-	print("\n5. Creating composition and risk_protective comparison Plots...")
-	
-	scores_df_plot = results['scores_df']
-	scores_df_plot.columns = [col.replace("_count","") for col in scores_df_plot.columns]
-	
-	
-	
-	#plot heatmaps
-	fig = create_cohort_cluster_heatmaps(
-		subtype_weighted['risk_contributions'],
-		subtype_weighted['protective_contributions'],
-		results['scores_df'],
-		cluster_mapping,
-		'separate',
-		(12, 5),
-		'Reds',
-		'Blues',
-		'RdBu_r',
-		save_path=f'{pheno_path}/figures/cohort_composition_heatmap_separated.png'
-	)
-		
-#	plot_signature_distinctiveness_scatter(results,save_path=f'{pheno_path}/figures/subtype_composition_by_cohort.png')
-	plot_risk_protective_comparison(results, save_path=f'{pheno_path}/figures/risk_protective_comparison.png')
-	
-	print("\n" + "=" * 80)
-	print("ANALYSIS COMPLETE!")
-	print("=" * 80)
-	print("\nOutputs created:")
-	print("  ✓ Console: Detailed subtype analysis")
-	print("  ✓ subtype_composition_by_cohort.png: 5 pie charts (custom colors)")
-	print("  ✓ weighted_by_effect_size.png")
-	print("  ✓ weighted_by_distinctiveness.png")
-	print("  ✓ weighted_by_normalized.png")
-	print("  ✓ contribution_comparison.png")
-	print("  ✓ signature_distinctiveness_scatter.png: Scatter plot of top clusters")
-	print("  ✓ risk_protective_comparison.png: bar chart of risk protection of top cluster comparisons")
+    # ------------------------------------------------------------------
+    # Step 3: Map tiered CSV columns → cluster_keys
+    # ------------------------------------------------------------------
+    print("\nMapping cluster columns to cluster_keys...")
+    col_to_cluster_key = map_tiered_columns_to_cluster_keys(tiered_df, source_cluster_to_key)
+
+    # ------------------------------------------------------------------
+    # Step 4: Assign subtypes to features
+    # ------------------------------------------------------------------
+    print("\nAssigning subtypes to features...")
+    assigned_df = assign_subtypes_to_features(
+        tiered_df, col_to_cluster_key,
+        cluster_key_to_subtypes, cluster_map_df
+    )
+
+    # ------------------------------------------------------------------
+    # Step 4b: Direct-evidence from subtype*_map.csv files
+    # ------------------------------------------------------------------
+    subtype_research_path = os.path.dirname(args.cluster_subtype_map)
+    print(f"\nScanning for subtype direct-map files in: {subtype_research_path}")
+    direct_records = load_subtype_direct_maps(subtype_research_path)
+
+    if direct_records:
+        direct_df = match_direct_maps_to_tiered(direct_records, tiered_df)
+        if not direct_df.empty:
+            assigned_df = pd.concat([assigned_df, direct_df], ignore_index=True)
+            print(f"  Combined assigned_df: {len(assigned_df)} total records")
+            # Save direct-evidence breakdown separately for inspection
+            direct_path = os.path.join(args.out_dir, 'subtype_direct_evidence.csv')
+            direct_df.to_csv(direct_path, index=False)
+            print(f"  Saved direct evidence → {direct_path}")
+    else:
+        print("  No subtype*_map.csv files found — skipping direct-evidence step.")
+
+    # Save long-format annotated table
+    annotated_path = os.path.join(args.out_dir, 'subtype_feature_assignments.csv')
+    assigned_df.to_csv(annotated_path, index=False)
+    print(f"\n  Saved annotated assignments → {annotated_path}")
+
+    # ------------------------------------------------------------------
+    # Step 5: Compute enrichment (two normalizations)
+    # ------------------------------------------------------------------
+    print("\nComputing subtype-cohort enrichment...")
+    subtype_cohort_df, subtype_cluster_df = compute_subtype_cohort_enrichment(
+        assigned_df, tiered_df, col_to_cluster_key
+    )
+
+    # Save enrichment tables
+    enrich_cohort_path = os.path.join(args.out_dir, 'subtype_cohort_enrichment.csv')
+    enrich_cluster_path = os.path.join(args.out_dir, 'subtype_cluster_cohort_enrichment.csv')
+    subtype_cohort_df.to_csv(enrich_cohort_path, index=False)
+    subtype_cluster_df.to_csv(enrich_cluster_path, index=False)
+    print(f"  Saved subtype×cohort enrichment     → {enrich_cohort_path}")
+    print(f"  Saved subtype×cluster×cohort detail → {enrich_cluster_path}")
+
+    # ------------------------------------------------------------------
+    # Step 6: Console summary
+    # ------------------------------------------------------------------
+    print("\n" + "=" * 80)
+    print("SUBTYPE COHORT ENRICHMENT SUMMARY")
+    print("=" * 80)
+    print("\nn_features per subtype×cohort:")
+    pivot_n = subtype_cohort_df.pivot(
+        index='subtype', columns='cohort', values='n_features'
+    ).fillna(0).astype(int)
+    print(pivot_n.to_string())
+
+    print("\nnorm_by_cohort_features (fraction of cohort's features assigned to subtype):")
+    pivot_norm = subtype_cohort_df.pivot(
+        index='subtype', columns='cohort', values='norm_by_cohort_features'
+    ).fillna(0)
+    print(pivot_norm.round(4).to_string())
+
+    if len(assigned_df):
+        print("\nassign_manually=1 entries (review recommended):")
+        manual = assigned_df[assigned_df['assign_manually'] == 1][
+            ['feature', 'cohort', 'cluster_key', 'subtype']
+        ].drop_duplicates()
+        if len(manual):
+            print(manual.to_string(index=False))
+        else:
+            print("  None — all assignments are automatic.")
+
+    # ------------------------------------------------------------------
+    # Step 7: (Optional) legacy OR-weighted analysis
+    # ------------------------------------------------------------------
+    if args.cluster_weights and args.legacy_mapping:
+        pheno_path = os.path.dirname(os.path.dirname(args.cluster_weights))
+        print("\n" + "=" * 80)
+        print("LEGACY OR-WEIGHTED ANALYSIS (clusterWeights.csv)")
+        print("=" * 80)
+
+        df = pd.read_csv(args.cluster_weights)
+        results = rank_functional_clusters_by_cohort(df)
+        display_direction_analysis(results)
+
+        cluster_mapping = load_cluster_subtype_mapping(args.legacy_mapping)
+
+        subtype_weighted = calculate_weighted_subtype_enrichment(
+            df, results, cluster_mapping, weighting='effect_size'
+        )
+        display_weighted_results(subtype_weighted)
+
+        fig_dir = os.path.join(pheno_path, 'figures', 'clinicalFigures')
+        os.makedirs(fig_dir, exist_ok=True)
+
+        forest_data = prepare_forest_plot_data(
+            subtype_weighted['risk_contributions'],
+            subtype_weighted['protective_contributions'],
+            results['risk_scores'],
+            cluster_mapping
+        )
+        create_combined_visualization(
+            subtype_weighted['cohort_percentages_per_subtype'],
+            forest_data,
+            os.path.join(fig_dir, 'combined_pie_forest_weighted_by_effect_size.riskOnly.png')
+        )
+        plot_weighted_subtype_pies(
+            subtype_weighted,
+            os.path.join(fig_dir, 'pie_weighted_by_effect_size.png')
+        )
+        plot_risk_protective_comparison(
+            results,
+            save_path=os.path.join(pheno_path, 'figures', 'risk_protective_comparison.png')
+        )
+
+    print("\n" + "=" * 80)
+    print("ANALYSIS COMPLETE!")
+    print("=" * 80)
+    print("\nOutputs written to:", args.out_dir)
