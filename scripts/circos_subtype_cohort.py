@@ -219,15 +219,18 @@ def build_bar_frame(df: pd.DataFrame, cohort: str,
     agg['bar_height'] = agg['bar_value'].abs()
     agg['is_inward']  = agg['bar_value'] < 0
 
-    # Clinical features (non-rsID, feature_source='clinical') → #AA4499;
-    # positive direction is solid, negative direction is hatched.
-    is_rsid_final    = agg['feature'].str.match(r'^rs\d+$', case=False, na=False)
-    is_clinical_final = (~is_rsid_final) & (agg['feature_source'] == 'clinical')
-    agg['bar_color'] = np.where(
-        is_clinical_final, CLINICAL_CLR,
-        np.where(agg['bar_value'] > 0, BAR_POS, BAR_NEG)
-    )
-    agg['bar_hatch'] = np.where(is_clinical_final & (agg['bar_value'] < 0), '//', '')
+    # Colour / hatch scheme:
+    #   Genomic risk     (OR > 1, outward) : solid red      BAR_POS
+    #   Genomic protect  (OR < 1, inward)  : hashed red     BAR_POS + hatch '//'
+    #   Clinical risk    (r > 0, outward)  : solid clinical  CLINICAL_CLR
+    #   Clinical protect (r < 0, inward)   : hashed clinical CLINICAL_CLR + hatch '//'
+    is_rsid_final     = agg['feature'].str.match(r'^rs\d+$', case=False, na=False)
+    is_hla_final      = agg['feature'].str.match(r'^HLA[-_*]', case=False, na=False)
+    is_genomic_final  = is_rsid_final | is_hla_final | (agg['feature_source'] == 'genomic_shap')
+    is_clinical_final = ~is_genomic_final
+
+    agg['bar_color'] = np.where(is_clinical_final, CLINICAL_CLR, BAR_POS)
+    agg['bar_hatch'] = np.where(agg['bar_value'] < 0, '//', '')
     agg['label']     = agg.apply(_gene_label, axis=1)
     return agg
 
@@ -464,10 +467,10 @@ def draw_circos(bars: list, subtype_map: dict, cohort: str, out_path: str,
 
     # ── legend: colour key ────────────────────────────────────────────────────
     colour_handles = [
-        mpatches.Patch(color=BAR_POS,      label='Genomic OR > 1  (outward)'),
-        mpatches.Patch(color=CLINICAL_CLR, label='Clinical r > 0  (outward)'),
-        mpatches.Patch(color=CLINICAL_CLR, hatch='//',
-                       label='Clinical r < 0  (inward)'),
+        mpatches.Patch(color=BAR_POS,                   label='Genomic OR > 1  (outward)'),
+        mpatches.Patch(color=BAR_POS,      hatch='//',  label='Genomic OR < 1  (inward, hashed)'),
+        mpatches.Patch(color=CLINICAL_CLR,              label='Clinical r > 0  (outward)'),
+        mpatches.Patch(color=CLINICAL_CLR, hatch='//',  label='Clinical r < 0  (inward, hashed)'),
     ] + [mpatches.Patch(color=c, label=st) for st, c in SUBTYPE_COLORS.items()]
 
     leg1 = ax.legend(handles=colour_handles,

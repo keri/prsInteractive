@@ -92,21 +92,32 @@ warnings.filterwarnings("ignore")
 _RSID_RE = re.compile(r'^rs\d+$', re.IGNORECASE)
 
 
+_HLA_RE = re.compile(r'^HLA[-_*]', re.IGNORECASE)
+
+
 def _infer_feature_source(feature: str) -> str:
     """Return 'genomic_shap' or 'clinical' from a feature name.
 
     Rules (in order):
       • All comma-separated tokens are rsIDs  → genomic_shap  (G or GxG)
       • Single rsID                           → genomic_shap
-      • Two-part underscore token (HLA allele)→ genomic_shap
+      • HLA allele (any form starting HLA-,   → genomic_shap
+        HLA_, HLA* or legacy TOKEN_TOKEN)
       • Anything else                         → clinical
+
+    HLA alleles are genomic loci despite being encoded as named alleles rather
+    than rsIDs.  Examples matched: HLA-drb1*401, HLA-b*4002, HLA-dqb1*504,
+    HLA_DRB1_401 (legacy underscore form).
     """
     feature = str(feature).strip()
     parts = [p.strip() for p in feature.split(',')]
     if all(_RSID_RE.match(p) for p in parts if p):
         return 'genomic_shap'
     if len(parts) == 1:
-        # HLA allele: two alphanumeric tokens joined by '_', neither is an rsID
+        # HLA allele: starts with HLA followed by -, _, or *
+        if _HLA_RE.match(feature):
+            return 'genomic_shap'
+        # Legacy HLA form: two alphanumeric tokens joined by '_' (e.g. DRB1_401)
         hla_parts = feature.split('_')
         if (len(hla_parts) == 2
                 and all(p and p.isalnum() for p in hla_parts)
