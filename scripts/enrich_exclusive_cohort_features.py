@@ -681,36 +681,67 @@ def load_genomic_features(scores_path, filter_strategy):
     if len(df) < n_before:
         print(f"  [WARN] Dropped {n_before - len(df)} rows with missing cohort")
 
-    # ── Issue 3: ExclusiveHighCases odds_ratio ────────────────────────────────
-    # ExclusiveHighCases rows are produced by a different bootstrap procedure
-    # that writes coefs (log-odds coefficients) but does not pre-compute
-    # odds_ratio.  Derive it from coefs so downstream ranking works correctly.
-    if 'coefs' in df.columns and 'odds_ratio' in df.columns:
-        exc_mask = (
-            df.get('training_data_used', pd.Series()) == 'ExclusiveHighCases'
-        ) & df['odds_ratio'].isna() & df['coefs'].notna()
-        if exc_mask.any():
-            df.loc[exc_mask, 'odds_ratio'] = np.exp(df.loc[exc_mask, 'coefs'])
-            print(f"  Computed odds_ratio from coefs for "
-                  f"{exc_mask.sum()} ExclusiveHighCases rows")
+    # ── ExclusiveHighCases: compute OR and apply quality filters ─────────────
+    # The exclusive-high-risk bootstrap writes coefs (log-odds) but not
+    # odds_ratio.  Derive OR = exp(coefs) so downstream ranking works.
+    #
+    # Two additional filters are required for biological validity:
+    #   1. n_exclusive_cohorts == 1 : feature must be exclusive to a single
+    #      cohort.  n > 1 means the feature reached the high-risk threshold in
+    #      multiple cohorts simultaneously — it is a shared risk feature, not a
+    #      cohort-specific signal.
+    #   2. coefs > 0 (OR > 1) : risk-elevating direction only.  coefs < 0
+    #      features reduce the probability of being an exclusive high-risk case;
+    #      they are not informative for the cohort's risk signature.
+    if 'coefs' in df.columns:
+        is_exc = df.get('training_data_used', pd.Series(dtype=str)) == 'ExclusiveHighCases'
 
-    # ── Issue 1: LowControls direction ───────────────────────────────────────
-    # LowControls features represent the protective signature of each cohort
-    # (bottom 20 % PRS).  Only features with OR < 1 are biologically meaningful
-    # as protective associations; OR > 1 features from this stratum are risk-
-    # allele carry-overs from the shared classifier and should not be reported
-    # as protective evidence.
-    if 'training_data_used' in df.columns and 'odds_ratio' in df.columns:
-        lc_risk_mask = (
-            (df['training_data_used'] == 'LowControls')
-            & df['odds_ratio'].notna()
-            & (df['odds_ratio'] >= 1.0)
-        )
-        n_lc_risk = lc_risk_mask.sum()
+        # Derive OR from coefs where odds_ratio is missing
+        if 'odds_ratio' in df.columns:
+            need_or = is_exc & df['odds_ratio'].isna() & df['coefs'].notna()
+            if need_or.any():
+                df.loc[need_or, 'odds_ratio'] = np.exp(df.loc[need_or, 'coefs'])
+                print(f"  Computed odds_ratio from coefs for "
+                      f"{need_or.sum()} ExclusiveHighCases rows")
+
+        # Filter 1: keep only truly cohort-exclusive features (n_exclusive_cohorts == 1)
+        if 'n_exclusive_cohorts' in df.columns:
+            multi_mask = is_exc & (df['n_exclusive_cohorts'].fillna(1) > 1)
+            n_multi = multi_mask.sum()
+            if n_multi:
+                df = df[~multi_mask].copy()
+                is_exc = df.get('training_data_used', pd.Series(dtype=str)) == 'ExclusiveHighCases'
+                print(f"  Removed {n_multi} ExclusiveHighCases rows with "
+                      f"n_exclusive_cohorts > 1 (not cohort-specific)")
+
+        # Filter 2: keep only risk-elevating direction (coefs > 0 / OR > 1)
+        risk_or  = df['odds_ratio'].notna() & (df['odds_ratio'] >= 1.0) if 'odds_ratio' in df.columns else pd.Series(True, index=df.index)
+        risk_cef = df['coefs'].notna() & (df['coefs'] >= 0.0)
+        is_protective_exc = is_exc & ~(risk_or | risk_cef)
+        n_prot_exc = is_protective_exc.sum()
+        if n_prot_exc:
+            df = df[~is_protective_exc].copy()
+            print(f"  Removed {n_prot_exc} ExclusiveHighCases rows with "
+                  f"coefs < 0 / OR < 1 (protective direction, not a risk signature)")
+
+    # ── LowControls: keep only protective direction (OR < 1 / coefs < 0) ────
+    # LowControls features represent the bottom-20%-PRS protective signature.
+    # OR ≥ 1 (coefs ≥ 0) features are risk carry-overs from the shared
+    # classifier and must not be reported as protective evidence.
+    # Use coefs as the primary criterion (always present); fall back to OR.
+    if 'training_data_used' in df.columns:
+        is_lc = df['training_data_used'] == 'LowControls'
+        if 'coefs' in df.columns:
+            lc_risk = is_lc & df['coefs'].notna() & (df['coefs'] >= 0.0)
+        elif 'odds_ratio' in df.columns:
+            lc_risk = is_lc & df['odds_ratio'].notna() & (df['odds_ratio'] >= 1.0)
+        else:
+            lc_risk = pd.Series(False, index=df.index)
+        n_lc_risk = lc_risk.sum()
         if n_lc_risk:
-            df = df[~lc_risk_mask].copy()
-            print(f"  Removed {n_lc_risk} LowControls features with OR ≥ 1 "
-                  f"(risk direction, not protective)")
+            df = df[~lc_risk].copy()
+            print(f"  Removed {n_lc_risk} LowControls features with "
+                  f"coefs ≥ 0 / OR ≥ 1 (risk direction, not protective)")
 
     # Infer feature_source from the feature name itself
     df['feature_source'] = df['feature'].apply(_infer_feature_source)
