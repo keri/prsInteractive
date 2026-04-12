@@ -339,13 +339,32 @@ def main(pheno_data, raw_features_file, holdout_ids_file=None,
     print(f"Individuals after merging PRS + clinical data: {len(merged)}")
 
     # -------------------------------------------------------------------------
-    # 5. Assign cohort membership for high-risk and low-risk
-    #    A person can appear in multiple cohorts (not mutually exclusive)
+    # 5. Assign cohort membership for high-risk, low-risk, and exclusive high-risk
+    #    High/LowRisk: a person can appear in multiple cohorts (overlapping)
+    #    ExclusiveHighRisk: a person must be in the top bin for exactly ONE cohort
     # -------------------------------------------------------------------------
+    # Detect bin scale (deciles 1-10 vs quantiles 1-1000) and derive thresholds
+    bin_max = merged[bin_cols].max().max()
+    high_thresh = 0.8 * bin_max   # top 20 %
+    low_thresh  = 0.2 * bin_max   # bottom 20 %
+
     for col in bin_cols:
         cohort = col.replace('bin_', '')
-        merged[f'highrisk_{cohort}'] = (merged[col] > 8).astype(int)
-        merged[f'lowrisk_{cohort}'] = (merged[col] < 3).astype(int)
+        merged[f'highrisk_{cohort}'] = (merged[col] > high_thresh).astype(int)
+        merged[f'lowrisk_{cohort}']  = (merged[col] < low_thresh).astype(int)
+
+    # Exclusive high-risk: above threshold in THIS cohort only
+    for col in bin_cols:
+        cohort     = col.replace('bin_', '')
+        other_cols = [c for c in bin_cols if c != col]
+        is_high_this  = merged[col] > high_thresh
+        is_high_other = (
+            merged[other_cols].gt(high_thresh).any(axis=1)
+            if other_cols else pd.Series(False, index=merged.index)
+        )
+        merged[f'exclusive_{cohort}'] = (
+            is_high_this & ~is_high_other
+        ).astype(int)
 
     # -------------------------------------------------------------------------
     # 6. Missingness report
@@ -367,8 +386,9 @@ def main(pheno_data, raw_features_file, holdout_ids_file=None,
     all_results = []
 
     for risk_tier, prefix, phenotype_filter in [
-        ('HighRisk', 'highrisk', 2),
-        ('LowRisk',  'lowrisk',  1)
+        ('HighRisk',          'highrisk',  2),
+        ('LowRisk',           'lowrisk',   1),
+        ('ExclusiveHighRisk', 'exclusive', 2),
     ]:
         print(f"\n{'='*60}")
         print(f"  Comparing {risk_tier} cohorts")
@@ -453,7 +473,7 @@ def main(pheno_data, raw_features_file, holdout_ids_file=None,
         print(f"  Saved results → clinical_comparison_{risk_tier}_{use_set}.csv")
 
     # -------------------------------------------------------------------------
-    # 8. Combined output and summary table
+    # 8. Combined output, priority logic, and summary table
     # -------------------------------------------------------------------------
     if all_results:
         combined = pd.concat(all_results, ignore_index=True)
@@ -462,10 +482,41 @@ def main(pheno_data, raw_features_file, holdout_ids_file=None,
             index=False
         )
 
+        # ── Priority logic: ExclusiveHighRisk supersedes HighRisk ──────────
+        # When a clinical feature is significant (FDR < alpha, |r| >= min_effect)
+        # in BOTH HighRisk and ExclusiveHighRisk for the same cohort, keep only
+        # the ExclusiveHighRisk row (higher specificity).  If ExclusiveHighRisk
+        # is not significant for that feature × cohort, retain the HighRisk row.
+        hr  = combined[combined['risk_tier'] == 'HighRisk'].copy()
+        exc = combined[combined['risk_tier'] == 'ExclusiveHighRisk'].copy()
+        lr  = combined[combined['risk_tier'] == 'LowRisk'].copy()
+
+        exc_sig = exc[exc['meaningful_effect']].set_index(['feature', 'cohort'])
+
+        def _superseded(row):
+            return (row['feature'], row['cohort']) in exc_sig.index
+
+        hr['exclusive_supersedes'] = hr.apply(_superseded, axis=1)
+        exc['exclusive_supersedes'] = False
+        lr['exclusive_supersedes']  = False
+
+        # Priority output: ExclusiveHighRisk rows where significant; HighRisk
+        # rows only where ExclusiveHighRisk is not significant for that pair.
+        hr_kept = hr[~hr['exclusive_supersedes']]
+        priority = pd.concat([hr_kept, exc, lr], ignore_index=True)
+        priority.sort_values(['cohort', 'risk_tier', 'p_value_fdr'], inplace=True)
+        priority.to_csv(
+            os.path.join(outputPath, f'clinical_comparison_priority_{use_set}.csv'),
+            index=False
+        )
+        print(f"\n  Priority output ({len(priority)} rows): HighRisk rows superseded "
+              f"by ExclusiveHighRisk = {hr['exclusive_supersedes'].sum()}")
+        print(f"  Saved → clinical_comparison_priority_{use_set}.csv")
+
         # Concise summary: features significant for epi_product in either tier
-        epi_summary = combined[
-            (combined['cohort'] == 'epi_product') &
-            combined['meaningful_effect']
+        epi_summary = priority[
+            (priority['cohort'] == 'epi_product') &
+            priority['meaningful_effect']
         ][['risk_tier', 'feature', 'n_a', 'mean_a', 'median_a',
            'mean_b', 'median_b', 'effect_size_r',
            'p_value_fdr', 'pct_missing']].sort_values(['risk_tier', 'p_value_fdr'])
@@ -481,7 +532,7 @@ def main(pheno_data, raw_features_file, holdout_ids_file=None,
         print(f"Total tests run       : {len(combined)}")
         print(f"Significant (FDR<{alpha}) : {combined['significant_fdr'].sum()}")
         print(f"Meaningful effect     : {combined['meaningful_effect'].sum()}")
-        print(f"\nepi_product meaningful clinical features: {len(epi_summary)}")
+        print(f"\nepi_product meaningful clinical features (priority): {len(epi_summary)}")
         if not epi_summary.empty:
             print(epi_summary[['risk_tier', 'feature', 'effect_size_r',
                                 'p_value_fdr']].to_string(index=False))

@@ -164,7 +164,8 @@ def _gene_label(row) -> str:
     return feat.title()
 
 
-def build_bar_frame(df: pd.DataFrame, cohort: str) -> pd.DataFrame:
+def build_bar_frame(df: pd.DataFrame, cohort: str,
+                    include_protective: bool = True) -> pd.DataFrame:
     sub = df[df['cohort'] == cohort].copy()
     if sub.empty:
         return pd.DataFrame()
@@ -198,10 +199,17 @@ def build_bar_frame(df: pd.DataFrame, cohort: str) -> pd.DataFrame:
     # HighCases / ExclusiveHighCases: only OR > 1 (risk direction).
     is_lowcontrols = agg.get('training_data_used', pd.Series('', index=agg.index)) == 'LowControls'
 
-    keep_genomic_risk       = is_genomic & ~is_lowcontrols & (agg['bar_value'] > 0)
-    keep_genomic_protective = is_genomic & is_lowcontrols  & (agg['bar_value'] < 0)
-    # True clinical traits: both directions (direction already encoded in bar_value sign)
-    keep_clinical = (~is_rsid) & (agg['feature_source'] == 'clinical')
+    keep_genomic_risk = is_genomic & ~is_lowcontrols & (agg['bar_value'] > 0)
+
+    if include_protective:
+        keep_genomic_protective = is_genomic & is_lowcontrols & (agg['bar_value'] < 0)
+        # Clinical traits: both directions
+        keep_clinical = (~is_rsid) & (agg['feature_source'] == 'clinical')
+    else:
+        # Risk-only plot: drop all LowControls and negative-r clinical features
+        keep_genomic_protective = pd.Series(False, index=agg.index)
+        keep_clinical = (~is_rsid) & (agg['feature_source'] == 'clinical') & (agg['bar_value'] > 0)
+
     agg = pd.concat([
         agg[keep_genomic_risk],
         agg[keep_genomic_protective],
@@ -288,7 +296,7 @@ def _radial_rot(a_deg: float) -> float:
 # ── main draw ─────────────────────────────────────────────────────────────────
 
 def draw_circos(bars: list, subtype_map: dict, cohort: str, out_path: str,
-                show_labels: bool = True):
+                show_labels: bool = True, include_protective: bool = True):
     if not bars:
         print(f'  [{cohort}] no bars – skipping')
         return
@@ -481,7 +489,8 @@ def draw_circos(bars: list, subtype_map: dict, cohort: str, out_path: str,
               title='Cluster key', title_fontsize=9.5)
 
     title_cohort = cohort.replace('_', ' ').title()
-    ax.set_title(f'Cluster–Subtype Circos  |  {title_cohort}  ({n} features)',
+    sig_tag = '' if include_protective else '  |  risk only'
+    ax.set_title(f'Cluster–Subtype Circos  |  {title_cohort}  ({n} features){sig_tag}',
                  fontsize=14, fontweight='bold', pad=35)
 
     fig.savefig(out_path, dpi=180, bbox_inches='tight', facecolor='white')
@@ -509,18 +518,23 @@ def main():
     print(f'Cohorts: {cohorts}\n')
 
     for cohort in cohorts:
-        bars        = ordered_bars(build_bar_frame(df, cohort))
         subtype_map = build_subtype_map(df, cohort)
 
-        # Version 1: with labels (reference for Inkscape manual annotation)
-        draw_circos(bars, subtype_map, cohort,
-                    os.path.join(args.out_dir, f'circos_{cohort}_labelled.png'),
-                    show_labels=True)
-
-        # Version 2: clean, no labels
-        draw_circos(bars, subtype_map, cohort,
-                    os.path.join(args.out_dir, f'circos_{cohort}_clean.png'),
-                    show_labels=False)
+        for incl_prot, suffix in [(True, ''), (False, '_risk')]:
+            bars = ordered_bars(build_bar_frame(df, cohort,
+                                                include_protective=incl_prot))
+            # labelled (Inkscape reference)
+            draw_circos(bars, subtype_map, cohort,
+                        os.path.join(args.out_dir,
+                                     f'circos_{cohort}{suffix}_labelled.png'),
+                        show_labels=True,
+                        include_protective=incl_prot)
+            # clean (no labels)
+            draw_circos(bars, subtype_map, cohort,
+                        os.path.join(args.out_dir,
+                                     f'circos_{cohort}{suffix}_clean.png'),
+                        show_labels=False,
+                        include_protective=incl_prot)
 
     print('\nDone.')
 
