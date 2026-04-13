@@ -1,0 +1,131 @@
+\section*{Methods}
+
+\subsection*{Cohort Definition and Important Feature Discovery}
+
+Individuals were stratified into five non-overlapping analytical cohorts on the basis of their polygenic risk score (PRS) profile across established type~2 diabetes (T2D) genetic architectures.
+Within each cohort, exclusive high-risk cases were defined as individuals scoring in the top 20\,\% of the PRS distribution for that cohort but \emph{not} exceeding the top-20\,\% threshold in any other cohort.
+Within-cohort controls comprised individuals scoring in the bottom 20\,\% of the same PRS distribution with a confirmed non-T2D phenotype.
+
+Individuals were assigned to three training strata, each subject to directional quality filters applied prior to enrichment:
+\begin{itemize}
+  \item \textbf{HighCases}: top-20\,\% T2D cases; only features with OR\,$>$\,1 (risk-elevating direction, $\beta > 0$) were retained.
+  \item \textbf{LowControls}: bottom-20\,\% non-cases; only features with OR\,$<$\,1 (protective direction, $\beta < 0$) were retained. Risk-direction features ($\beta \geq 0$) were excluded to prevent contamination of the protective signal by poorly fitting model coefficients.
+  \item \textbf{ExclusiveHighCases}: top-20\,\% T2D cases in exactly one cohort (i.e.\ \texttt{n\_exclusive\_cohorts}\,$= 1$) with OR\,$>$\,1; OR was derived as $\exp(\hat\beta)$ when not directly available from model output.
+\end{itemize}
+
+Important features were identified separately for two data modalities:
+
+\paragraph{Genomic features.}
+Cohort-exclusive genomic features were derived from pre-computed SHAP (SHapley Additive exPlanations) values obtained from gradient-boosted ensemble classifiers trained to discriminate high-risk cases from controls.
+A feature was retained if it received a non-zero SHAP contribution in the high-risk case stratum (\texttt{HighCases} or \texttt{LowControls} training partitions, or the exclusive high-risk stratum \texttt{ExclusiveHighCases}).
+The magnitude of each genomic feature's effect was summarised by its odds ratio (OR), derived as $\exp(\hat\beta)$ from the model logistic coefficient.
+Features were classified as \texttt{genomic\_shap} if the feature identifier matched a dbSNP rs-identifier pattern or an HLA allele notation (e.g.\ \texttt{HLA-DRB1*401}, \texttt{HLA-B*4002}), and as \texttt{clinical} otherwise.
+
+\paragraph{Clinical features.}
+The importance of continuous clinical variables was assessed using two complementary Mann--Whitney~U frameworks.
+
+\textit{Enrichment analysis} (\texttt{enrich\_exclusive\_cohort\_features.py}): clinical features were tested by comparing \texttt{ExclusiveHighCases} against within-cohort bottom-20\,\% controls using a two-sided Mann--Whitney~U test.
+Both unbalanced (all controls) and balanced (bootstrap-resampled controls matched to $n_\text{cases}$) designs were applied; the median $p$-value across bootstrap replicates was used as the final significance statistic in the balanced mode.
+Effect size was quantified as the rank-biserial correlation coefficient $r$.
+Features were retained when Benjamini--Hochberg-corrected $p < 0.05$ and $|r| \geq 0.1$, and further filtered for cross-cohort specificity (see below).
+
+\textit{Cross-cohort clinical comparison} (\texttt{compare\_clinical\_features\_across\_cohorts.py}): to characterise cohort-level clinical phenotype differences more broadly, the same Mann--Whitney~U framework was applied across three risk tiers:
+\begin{itemize}
+  \item \textbf{HighRisk}: each top-20\,\% cohort versus all remaining top-20\,\% cohorts combined (each-vs-others design);
+  \item \textbf{LowRisk}: each bottom-20\,\% cohort versus all remaining bottom-20\,\% cohorts combined;
+  \item \textbf{ExclusiveHighRisk}: exclusive top-20\,\% cases (one cohort only) versus within-cohort bottom-20\,\% controls, matching the case-vs-control design of the enrichment analysis.
+\end{itemize}
+FDR correction was applied independently within each tier.
+A priority output was generated in which ExclusiveHighRisk results supersede HighRisk results for any feature--cohort pair that is significant in both, preserving the higher-specificity comparison where available.
+
+\paragraph{Cross-cohort specificity tiering.}
+To identify features whose importance was cohort-specific rather than globally elevated, a three-tier specificity filter was applied.
+Tier~1 (strict): a feature was significant in the target cohort and not significant in any other cohort.
+Tier~2 (majority): a feature was significant in the target cohort and non-significant in at least 60\,\% of the remaining cohorts.
+Tier~3 (differential): a feature was significant in the target cohort, which exhibited the highest $|\text{effect}|$ across all cohorts, with a minimum advantage of $\Delta r \geq 0.1$ over the mean of other cohorts.
+Each feature was assigned exclusively to the cohort with the highest $|r|$ or OR among all tier-qualifying cohorts.
+Across the five analytical cohorts, between 4 and 333 features per cohort passed these criteria, spanning genomic (SHAP-derived, \texttt{genomic\_shap}) and clinical (\texttt{clinical}) data modalities.
+
+\subsection*{Functional Cluster Enrichment}
+
+\paragraph{Published functional cluster definitions.}
+Functional clusters of T2D-associated loci and clinical biomarkers were sourced from four published resources:
+\citet{Udler2018} defined five clusters of T2D loci (beta-cell function, proinsulin processing, obesity, lipodystrophy, and liver/lipid metabolism) using Bayesian non-negative matrix factorisation of GWAS summary statistics;
+\citet{Kim2023} extended this framework to 16 clusters using multi-trait GWAS and co-localisation analyses, adding clusters for hyper-insulin secretion, lipoprotein~A, alkaline phosphatase, and SHBG;
+\citet{Suzuki2024} applied a genome-wide signal aggregation approach identifying 380 distinct T2D signals grouped into eight functional clusters including a novel residual glycaemic cluster comprising the largest number of signals ($n = 389$), body fat, and metabolic syndrome;
+\citet{Smith2024} performed a multi-ancestry meta-analysis extending the functional cluster architecture with additional clusters for lipodystrophy subtype~2, cholesterol, and bilirubin.
+Clinical phenotype associations for each cluster were additionally informed by \citet{Mahajan2018} and \citet{Popovic2023}, who characterised the relationship between individual loci and quantitative clinical traits (HbA\textsubscript{1c}, fasting glucose, BMI, HOMA-B, HOMA-IR, triglycerides, HDL-cholesterol, and others).
+
+\paragraph{Feature-to-cluster assignment.}
+For each important feature identified in each cohort, cluster membership was determined by cross-referencing binary cluster indicator columns derived from the above publications.
+Separate indicator matrices were constructed for loci maps and clinical phenotype maps from Udler~\textit{et al.}, Kim~\textit{et al.}, and Suzuki~\textit{et al.}
+Cluster column names were normalised by converting to lower case, replacing hyphens, slashes, and underscores with spaces, removing the conjunction ``and'', inserting spaces before digit characters (e.g.\ \textit{beta cell1} $\to$ \textit{beta cell 1}), and collapsing consecutive whitespace.
+Columns were matched to a curated \texttt{cluster\_subtype\_map.csv} by exact string match followed by a partial-substring fallback.
+Genomic features (rs-identifiers) were matched to cluster membership via their nearest annotated gene symbol, prioritising the biological candidate gene (typically the second of two annotated flanking genes) over index-SNP neighbours such as \texttt{LOC}-prefix pseudogenes, \texttt{LINC}-prefix non-coding RNA genes, and antisense transcripts.
+Clinical features were matched to cluster membership via a Mahajan~\textit{et al.}\ clinical phenotype bridge table that maps clinical variable names to the loci with which they are associated.
+HLA-region alleles were classified as \texttt{genomic\_shap} features (not clinical features) and matched by gene-prefix; the classifier accepts both hyphen-delimited (\texttt{HLA-DQB1*504}) and underscore-delimited (\texttt{HLA\_DQB1\_504}) notations, as well as asterisk-containing allele designations (e.g.\ \texttt{HLA-drb1*401}), via the regular expression \texttt{\^{}HLA[-\_*]} applied case-insensitively.
+
+\paragraph{Enrichment normalisation.}
+For each cohort $c$ and functional cluster $k$, cluster enrichment was quantified as the number of cohort-exclusive important features mapping to that cluster:
+\begin{equation}
+  E_{c,k} = \left|\{f \in \mathcal{F}_c : f \mapsto k\}\right|,
+\end{equation}
+where $\mathcal{F}_c$ is the set of important features in cohort $c$.
+Two normalisation schemes were applied to render counts comparable across cohorts of different sizes and clusters of different sizes:
+
+\begin{enumerate}
+  \item \textbf{Normalisation by cohort size}: the fraction of a cohort's total important features that map to cluster $k$,
+  \begin{equation}
+    \tilde{E}_{c,k}^{\text{cohort}} = \frac{E_{c,k}}{|\mathcal{F}_c|};
+  \end{equation}
+
+  \item \textbf{Normalisation by cluster size}: the fraction of a cluster's known constituent loci that are represented among cohort $c$'s important features,
+  \begin{equation}
+    \tilde{E}_{c,k}^{\text{cluster}} = \frac{E_{c,k}}{G_{c,k}},
+  \end{equation}
+  where $G_{c,k}$ is the total number of cluster-$k$ genes observed in cohort $c$.
+\end{enumerate}
+
+Bar heights in the circos plots reflect $|\log_2(\text{OR})|$ for genomic loci or $|r|$ for clinical features, scaled to the within-cohort maximum.
+Bars extend outward when the association is risk-elevating ($\text{OR} > 1$ or $r > 0$) and inward when protective ($\text{OR} < 1$ or $r < 0$); inward bars are rendered with diagonal hatching (\texttt{//}) to distinguish them visually from outward bars of the same colour.
+Genomic features are coloured red and clinical features yellow-green, regardless of direction.
+A risk-only variant of each plot omits inward bars and protective (\texttt{LowControls}) loci entirely, showing only outward genomic and positive-effect clinical bars.
+
+\paragraph{Directional concordance filtering.}
+Each feature--cluster pair was assigned a concordance score based on the agreement between the observed direction of association and the published phenotypic profile of the corresponding functional cluster.
+For clinical features, the observed direction was defined by the sign of the rank-biserial correlation $r$: a positive value indicates elevation of the trait in high-risk cases relative to controls; a negative value indicates reduction.
+Published cluster phenotype profiles (derived from \citet{Udler2018}, \citet{Suzuki2024}, \citet{Kim2023}, and \citet{Yaghootkar2014}) were used to construct an expected-direction map specifying whether each measurable clinical trait should be elevated (+1) or reduced ($-$1) in individuals whose T2D genetic architecture is dominated by each functional cluster.
+A concordance score of $+1$ was assigned when the observed and expected directions agreed; $-1$ when they were opposite (discordant); and $0$ when no directional expectation could be established (neutral).
+Genomic loci were always assigned concordance $+1$ because the pipeline retains only OR\,$>$\,1 variants (risk-elevating direction), which is by construction concordant with the cluster's genetic risk profile.
+
+Example discordant assignments that motivated this filter: in the cardiovascular-enriched cohort (\texttt{cardio\_product}), waist circumference, hip circumference, and basal metabolic rate were all negatively associated with T2D case status ($r < 0$), yet their genome-wide loci map into the obesity cluster.
+This pattern---reduced adiposity phenotypes alongside genetic loading at obesity-related loci---is consistent with a lean insulin-resistant phenotype (mechanistically proximate to the lipodystrophy and body-fat clusters of \citet{Suzuki2024}) rather than classical obesity, and is analogous to the ``fat-distribution without obesity'' phenotype described by \citet{Yaghootkar2014}.
+
+Concordance scores were propagated to the subtype-assignment step: for each functional cluster within a cohort, the net concordance score per putative T2D subtype was computed as the sum of feature-level concordance values (concordant~$= 1.0$, neutral~$= 0.5$, discordant~$= 0.0$).
+Only subtypes with a positive net concordance score were retained in the circos visualisation and the cohort-enrichment pie charts.
+This ensures that subtype annotations reflect the direction of the underlying phenotypic signal rather than purely the genomic locus membership of each feature.
+
+\subsection*{Assignment of Functional Clusters to T2D Subtypes}
+
+Functional clusters were assigned to T2D subtypes using a curated evidence map (\texttt{cluster\_subtype\_map.csv}) drawing on published subtype characterisation studies.
+
+The five-subtype taxonomy of \citet{Ahlqvist2018}---severe autoimmune diabetes (SAID), severe insulin-deficient diabetes (SIDD), severe insulin-resistant diabetes (SIRD), mild obesity-related diabetes (MOD), and mild age-related diabetes (MARD)---provided the primary classification framework.
+In accordance with the literature, LADA was considered mechanistically equivalent to SAID (autoimmune beta-cell destruction) and MODY was considered an extreme of the SIDD spectrum (monogenic beta-cell dysfunction); neither was retained as a distinct subtype category.
+
+Cluster-to-subtype assignments were based on:
+\begin{itemize}
+  \item \citet{Yaghootkar2014} and \citet{Kim2023}, who demonstrated that lipodystrophy-related loci (IRS1, GRB14, PPARG) and body fat distribution loci segregate with SIRD through fat-distribution-mediated insulin resistance;
+  \item \citet{Ahlqvist2018} and \citet{Kim2023}, who showed that beta-cell clusters (beta-cell~1, beta-cell~2, proinsulin, and residual glycaemic) are enriched in SIDD and, for shared autoimmune loci, in SAID;
+  \item \citet{Aly2023}, who characterised the metabolic syndrome and hyper-insulin secretion clusters as predominantly MOD through compensatory hyperinsulinaemia in the context of insulin resistance;
+  \item \citet{Suzuki2024}, whose cluster clinical phenotype profiles (HbA\textsubscript{1c}, HOMA-2B, HOMA-2IR, BMI, triglycerides, eGFR) were used directly as quantitative evidence, with subtype association declared where the standardised $z$-score of the clinical mean exceeded a threshold of $z \geq 0.5$ relative to the cross-subtype distribution.
+\end{itemize}
+
+HLA-region features were handled separately: consistent with \citet{Mansour2023}, only alleles at \textit{HLA-DQB1} and \textit{HLA-DQA1} loci were assigned to SAID; all other HLA alleles (\textit{HLA-A}, \textit{-B}, \textit{-C}, \textit{-DPA1}, \textit{-DPB1}, \textit{-DRB1}, \textit{-DRB4}, \textit{-DRB5}) were retained in the HLA-autoimmune tracking cluster without an automatic subtype assignment.
+
+Clusters for which direct published evidence was unavailable (ALP-negative, SHBG/LpA, lipoprotein~A, cholesterol, bilirubin) were flagged for manual review (\texttt{assign\_manually = 1}) and excluded from automated subtype enrichment calculations.
+
+Direct evidence from Suzuki~\textit{et al.}\ clinical phenotype tables and Mansour~\textit{et al.}\ HLA locus data were incorporated as additional feature-level subtype assignments via files matching the pattern \texttt{subtype*\_map.csv} in the subtype research directory, providing 27 and 2 feature--subtype records, respectively.
+These direct assignments supplemented but did not override cluster-level assignments.
+
+The relative contribution of each PRS cohort to each T2D subtype was summarised using concordance-weighted feature counts normalised to the subtype total, and visualised as donut pie charts (one per subtype).
+Cohort contributions that were entirely discordant (net concordance score $\leq 0$) were excluded from these charts, so each wedge size reflects only the evidence supporting—rather than contradicting—a given subtype's phenotypic profile within that cohort.
