@@ -27,6 +27,8 @@
 #   --use-set            STR    holdout | validation | all  (default: holdout)
 #   --filter-strategy    STR    tiered | strict | majority | differential  (default: tiered)
 #   --balance-strategy   STR    unbalanced | balanced  (default: unbalanced)
+#   --run-exclusive             Run ExclusiveHighCases bootstrap in Step 1 (slow; adds --run_exclusive flag)
+#   --exclusive-iterations INT  Bootstrap iterations for ExclusiveHighCases (default: 1000)
 #   --skip-calculate            Skip Step 1 (use existing importantFeaturesAcrossCohortsAndTrainingData.Filtered.*.csv)
 #   --only-plots                Skip Steps 1-4, regenerate circos + pie charts only
 #   --help
@@ -51,6 +53,8 @@ BALANCE_STRATEGY="${BALANCE_STRATEGY:-unbalanced}"
 
 SKIP_CALCULATE=0
 ONLY_PLOTS=0
+RUN_EXCLUSIVE=0
+EXCLUSIVE_ITERATIONS=1000
 
 # ── Parse arguments ───────────────────────────────────────────────────────────
 while [[ $# -gt 0 ]]; do
@@ -62,6 +66,8 @@ while [[ $# -gt 0 ]]; do
         --use-set)           USE_SET="$2";              shift 2 ;;
         --filter-strategy)   FILTER_STRATEGY="$2";     shift 2 ;;
         --balance-strategy)  BALANCE_STRATEGY="$2";    shift 2 ;;
+        --run-exclusive)     RUN_EXCLUSIVE=1;            shift ;;
+        --exclusive-iterations) EXCLUSIVE_ITERATIONS="$2"; shift 2 ;;
         --skip-calculate)    SKIP_CALCULATE=1;          shift ;;
         --only-plots)        ONLY_PLOTS=1;              shift ;;
         --help|-h)
@@ -116,6 +122,8 @@ echo "  filter_strategy  : ${FILTER_STRATEGY}"
 echo "  balance_strategy : ${BALANCE_STRATEGY}"
 echo "  skip_calculate   : ${SKIP_CALCULATE}"
 echo "  only_plots       : ${ONLY_PLOTS}"
+echo "  run_exclusive    : ${RUN_EXCLUSIVE}"
+echo "  excl_iterations  : ${EXCLUSIVE_ITERATIONS}"
 echo ""
 
 if [[ ${ONLY_PLOTS} -eq 0 ]]; then
@@ -130,10 +138,16 @@ fi
 if [[ ${ONLY_PLOTS} -eq 0 && ${SKIP_CALCULATE} -eq 0 ]]; then
     step_header "SHAP feature importance + cross-cohort filtering (calculate_top_features_in_cohort.py)"
 
-    python "${SCRIPT_DIR}/calculate_top_features_in_cohort.py" \
-        --pheno_data              "${PHENO_DATA}" \
-        --feature_scores_file_filtered "${FEATURE_SCORES}" \
+    CALC_ARGS=(
+        --pheno_data              "${PHENO_DATA}"
+        --feature_scores_file_filtered "${FEATURE_SCORES}"
         --filter_strategy         "${FILTER_STRATEGY}"
+    )
+    if [[ ${RUN_EXCLUSIVE} -eq 1 ]]; then
+        CALC_ARGS+=( --run_exclusive --n_exclusive_iterations "${EXCLUSIVE_ITERATIONS}" )
+    fi
+
+    python "${SCRIPT_DIR}/calculate_top_features_in_cohort.py" "${CALC_ARGS[@]}"
 
     check_file "${TIERED_CSV}"
     echo "  Output: ${TIERED_CSV}"
