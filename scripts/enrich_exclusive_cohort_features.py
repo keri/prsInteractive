@@ -735,6 +735,26 @@ def load_genomic_features(scores_path, filter_strategy):
             print(f"  Removed {n_prot_exc} ExclusiveHighCases rows with "
                   f"coefs < 0 / OR < 1 (protective direction, not a risk signature)")
 
+    # ── HighCases: keep only risk direction (OR > 1 / coefs > 0) ────────────
+    # HighCases features represent the top-20%-PRS risk signature.
+    # coefs < 0 (OR < 1) features reduce the probability of being a high-risk
+    # case; they are carried over from the shared multi-output classifier but
+    # are not informative for the cohort's risk profile and must be excluded.
+    # Use coefs as the primary criterion; fall back to OR.
+    if 'training_data_used' in df.columns:
+        is_hc = df['training_data_used'] == 'HighCases'
+        if 'coefs' in df.columns:
+            hc_protective = is_hc & df['coefs'].notna() & (df['coefs'] <= 0.0)
+        elif 'odds_ratio' in df.columns:
+            hc_protective = is_hc & df['odds_ratio'].notna() & (df['odds_ratio'] <= 1.0)
+        else:
+            hc_protective = pd.Series(False, index=df.index)
+        n_hc_prot = hc_protective.sum()
+        if n_hc_prot:
+            df = df[~hc_protective].copy()
+            print(f"  Removed {n_hc_prot} HighCases features with "
+                  f"coefs ≤ 0 / OR ≤ 1 (protective direction, not a risk signature)")
+
     # ── LowControls: keep only protective direction (OR < 1 / coefs < 0) ────
     # LowControls features represent the bottom-20%-PRS protective signature.
     # OR ≥ 1 (coefs ≥ 0) features are risk carry-overs from the shared
