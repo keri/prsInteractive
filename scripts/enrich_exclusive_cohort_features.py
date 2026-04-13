@@ -1654,6 +1654,16 @@ def main(pheno_data, filter_strategy='tiered',
 
     output_df = pd.DataFrame(output_rows)
 
+    # Clinical rows must always carry feature_source == 'clinical'.
+    # _infer_feature_source reads only the feature name and can misclassify
+    # clinical measure names that share tokens with genomic notation (e.g. a
+    # clinical variable whose name happens to start with 'rs' or 'HLA').
+    clin_mask = output_df['training_data_used'].str.lower() == 'clinical'
+    if clin_mask.any():
+        output_df.loc[clin_mask, 'feature_source'] = 'clinical'
+        print(f"  Set feature_source='clinical' for {clin_mask.sum()} "
+              f"Clinical rows (training_data_used == 'Clinical')")
+
     # Ensure every cluster column is present (fill 0 if a file errored out)
     for ck in all_cluster_col_keys:
         if ck not in output_df.columns:
