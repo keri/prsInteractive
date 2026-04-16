@@ -839,8 +839,13 @@ def expand_to_snp_rows(feature_df, annotation_df):
         for _, arow in annotation_df.iterrows():
             ann_lookup[str(arow['feature']).strip().lower()] = arow
 
-    _rsid_pat = re.compile(r'^rs\d+$', re.I)
-    _hla_pat  = re.compile(r'^HLA[-_*]', re.I)
+    _rsid_pat       = re.compile(r'^rs\d+$', re.I)
+    _hla_pat        = re.compile(r'^HLA[-_*]', re.I)
+    _legacy_hla_pat = re.compile(
+        r'^(DRB[0-9]*|DQB[0-9]*|DPB[0-9]*|DQA[0-9]*|DPA[0-9]*'
+        r'|HLA[_-]?[ABC][0-9]*)_[0-9A-Za-z]+$',
+        re.IGNORECASE
+    )
 
     expanded = []
     n_annotated = 0
@@ -894,6 +899,9 @@ def expand_to_snp_rows(feature_df, annotation_df):
         # as the first token.  That clinical name also warrants matching against
         # clinical cluster maps (e.g. liver/lipid metabolism).  The OR from the
         # interaction is used as the effect metric (no r value available here).
+        # Additionally, any subsequent tokens that are HLA alleles in legacy
+        # GENE_ALLELE notation (e.g. DRB5_9901) get their own genomic row so
+        # they are picked up by the HLA cluster assignment step.
         parts = [p.strip() for p in raw.split(',')]
         if len(parts) > 1:
             first = parts[0]
@@ -909,6 +917,20 @@ def expand_to_snp_rows(feature_df, annotation_df):
                     'snp2': None,
                     'snp2_gene_names': None,
                 })
+                # Subsequent tokens that look like legacy HLA alleles (GENE_ALLELE)
+                # need their own row so the HLA cluster regex can match them.
+                for tok in parts[1:]:
+                    if tok and not _rsid_pat.match(tok) and not _hla_pat.match(tok):
+                        if _legacy_hla_pat.match(tok):
+                            expanded.append({
+                                **base,
+                                'feature': tok,
+                                'feature_source': 'genomic_shap',
+                                'snp1': tok,
+                                'snp1_gene_names': None,
+                                'snp2': None,
+                                'snp2_gene_names': None,
+                            })
 
     print(f"  Annotation lookup: {n_annotated}/{len(feature_df)} features matched in "
           f"feature_scores_annotated.csv")
@@ -1728,7 +1750,22 @@ def main(pheno_data, filter_strategy='tiered',
     # (e.g. HLA-drb1*401) are not present in the standard functional cluster CSVs.
     # -------------------------------------------------------------------------
     HLA_COL = 'hla_cluster__HLA Region'
-    hla_mask = output_df['feature'].str.match(r'^HLA[-_*]', case=False, na=False)
+    # Match both standard HLA notation (HLA-DRB1*401, HLA_DRB1_401) and the
+    # legacy two-token form used in feature names without the HLA prefix
+    # (e.g. DRB5_9901 = HLA-DRB5*99:01).
+    # Legacy pattern: two alphanumeric tokens joined by '_', first token is a
+    # known HLA gene name (DRB, DQB, DPB, DQA, DPA, DRB1, DRB3-5, B, C, A …).
+    _HLA_GENE_RE = re.compile(
+        r'^HLA[-_*]'                             # standard prefix, OR
+        r'|^(DRB[0-9]*|DQB[0-9]*|DPB[0-9]*'    # legacy gene-only notation:
+        r'|DQA[0-9]*|DPA[0-9]*'                  #   HLA class II genes
+        r'|HLA[_-]?[ABC][0-9]*'                  #   HLA class I (A, B, C)
+        r')_[0-9A-Za-z]+$',                       #   followed by _allele
+        re.IGNORECASE
+    )
+    hla_mask = output_df['feature'].apply(
+        lambda f: bool(_HLA_GENE_RE.match(str(f))) if pd.notna(f) else False
+    )
     output_df[HLA_COL] = hla_mask.astype(int)
     if hla_mask.any():
         print(f"  HLA autoimmune cluster ({HLA_COL}): {hla_mask.sum()} features assigned")
