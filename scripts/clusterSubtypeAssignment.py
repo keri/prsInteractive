@@ -2974,7 +2974,7 @@ def match_direct_maps_to_tiered(direct_records: List[dict],
                 for col in ('snp1_gene_names', 'snp2_gene_names'):
                     if col not in tiered_df.columns:
                         continue
-                    mask = tiered_df[col].str.contains(g, case=False, na=False, regex=False)
+                    mask = tiered_df[col].astype(str).str.contains(g, case=False, na=False, regex=False)
                     matched_indices = tiered_df[mask].index.tolist()
                     if matched_indices:
                         break
@@ -3099,6 +3099,19 @@ if __name__ == "__main__":
     else:
         print("  No subtype*_map.csv files found — skipping direct-evidence step.")
 
+    # Deduplicate before saving — a feature matched by both cluster columns and a
+    # direct-map entry can appear twice with different cluster_key values; keep
+    # the first occurrence (cluster-column match has priority as it was appended
+    # first, direct-evidence appended second in the concat above).
+    before_dedup = len(assigned_df)
+    assigned_df = assigned_df.drop_duplicates(
+        subset=['feature', 'cohort', 'cluster_key', 'subtype']
+    ).reset_index(drop=True)
+    n_removed = before_dedup - len(assigned_df)
+    if n_removed:
+        print(f"  Removed {n_removed} duplicate feature×cohort×cluster×subtype rows "
+              f"before saving ({before_dedup} → {len(assigned_df)})")
+
     # Save long-format annotated table
     annotated_path = os.path.join(args.out_dir, 'subtype_feature_assignments.csv')
     assigned_df.to_csv(annotated_path, index=False)
@@ -3147,6 +3160,65 @@ if __name__ == "__main__":
             print(manual.to_string(index=False))
         else:
             print("  None — all assignments are automatic.")
+
+    # ------------------------------------------------------------------
+    # Weighted cluster → subtype contribution summary
+    # ------------------------------------------------------------------
+    # Shows, for each cohort, what fraction of its features each functional
+    # cluster contributes to each subtype.  Uses concordance-weighted counts
+    # (same denominator as the pie charts) so the table directly explains the
+    # relative slice sizes visible in subtype_cohort_pies.
+    if len(assigned_df):
+        print("\n" + "=" * 80)
+        print("WEIGHTED CLUSTER → SUBTYPE CONTRIBUTION PER COHORT")
+        print("(concordance-weighted; fraction of cohort total features)")
+        print("=" * 80)
+
+        has_conc = 'concordance' in assigned_df.columns
+        # Concordance weight: +1 concordant, 0 neutral, -1 discordant → clamp [0,1]
+        if has_conc:
+            assigned_df['_weight'] = assigned_df['concordance'].clip(lower=0)
+        else:
+            assigned_df['_weight'] = 1.0
+
+        dedup_w = assigned_df.drop_duplicates(
+            subset=['feature', 'cohort', 'cluster_key', 'subtype']
+        )
+        # Cohort total weighted features (denominator for pie slices)
+        cohort_weighted_totals = (
+            dedup_w.groupby('cohort')['_weight'].sum().rename('cohort_total_w')
+        )
+
+        # Cluster × subtype × cohort weighted counts
+        summary = (
+            dedup_w.groupby(['cohort', 'cluster_key', 'subtype'])['_weight']
+            .sum()
+            .reset_index(name='weighted_n')
+        )
+        summary = summary.merge(cohort_weighted_totals, on='cohort')
+        summary['pct_of_cohort'] = (
+            summary['weighted_n'] / summary['cohort_total_w'].replace(0, np.nan) * 100
+        ).round(1)
+        summary = summary.sort_values(
+            ['cohort', 'subtype', 'pct_of_cohort'], ascending=[True, True, False]
+        )
+
+        for cohort, grp in summary.groupby('cohort'):
+            print(f"\n  {cohort}  (total weighted features: "
+                  f"{cohort_weighted_totals.get(cohort, 0):.1f})")
+            print(f"  {'cluster_key':<52}  {'subtype':<6}  {'weighted_n':>10}  {'% cohort':>9}")
+            print(f"  {'-'*52}  {'-'*6}  {'-'*10}  {'-'*9}")
+            for _, r in grp.iterrows():
+                print(f"  {r['cluster_key']:<52}  {r['subtype']:<6}  "
+                      f"{r['weighted_n']:>10.1f}  {r['pct_of_cohort']:>8.1f}%")
+
+        # Save the summary table
+        summary_path = os.path.join(args.out_dir, 'cluster_subtype_cohort_weighted.csv')
+        summary[['cohort', 'cluster_key', 'subtype', 'weighted_n',
+                 'cohort_total_w', 'pct_of_cohort']].to_csv(summary_path, index=False)
+        print(f"\n  Saved weighted cluster→subtype summary → {summary_path}")
+
+        assigned_df.drop(columns=['_weight'], inplace=True, errors='ignore')
 
     # ------------------------------------------------------------------
     # Step 7: (Optional) legacy OR-weighted analysis

@@ -839,6 +839,9 @@ def expand_to_snp_rows(feature_df, annotation_df):
         for _, arow in annotation_df.iterrows():
             ann_lookup[str(arow['feature']).strip().lower()] = arow
 
+    _rsid_pat = re.compile(r'^rs\d+$', re.I)
+    _hla_pat  = re.compile(r'^HLA[-_*]', re.I)
+
     expanded = []
     n_annotated = 0
     n_unannotated_genomic = 0
@@ -868,20 +871,44 @@ def expand_to_snp_rows(feature_df, annotation_df):
             'feature': resolved_feature,
             'snp1': snp1,
             'snp1_gene_names': snp1_genes,
-            'snp2': snp2,
-            'snp2_gene_names': snp2_genes,
+            'snp2': None,            # snp2 context kept only in its own row (see below)
+            'snp2_gene_names': None,
         })
 
-        # Additional row for snp2 in GxG features
+        # Additional row for snp2 in GxG features.
+        # Promote snp2 to be the primary SNP so map_row_to_clusters() only uses
+        # snp2's rsID and gene names for this row, preventing it from re-matching
+        # on snp1's evidence and producing duplicate cluster hits.
         if snp2:
             expanded.append({
                 **base,
                 'feature': snp2,
-                'snp1': snp1,
-                'snp1_gene_names': snp1_genes,
-                'snp2': snp2,
-                'snp2_gene_names': snp2_genes,
+                'snp1': snp2,            # snp2 is the primary SNP for this row
+                'snp1_gene_names': snp2_genes,
+                'snp2': None,            # no secondary SNP context
+                'snp2_gene_names': None,
             })
+
+        # Clinical-prefix row for GxG interaction features.
+        # Features like "Total bilirubin,rs459193,rs75981964" have a clinical measure
+        # as the first token.  That clinical name also warrants matching against
+        # clinical cluster maps (e.g. liver/lipid metabolism).  The OR from the
+        # interaction is used as the effect metric (no r value available here).
+        parts = [p.strip() for p in raw.split(',')]
+        if len(parts) > 1:
+            first = parts[0]
+            if first and not _rsid_pat.match(first) and not _hla_pat.match(first):
+                clin_base = {k: v for k, v in base.items()}
+                clin_base['effect_size_r'] = None   # no r value; circos uses log2(OR)
+                expanded.append({
+                    **clin_base,
+                    'feature': first,
+                    'feature_source': 'clinical',
+                    'snp1': None,
+                    'snp1_gene_names': None,
+                    'snp2': None,
+                    'snp2_gene_names': None,
+                })
 
     print(f"  Annotation lookup: {n_annotated}/{len(feature_df)} features matched in "
           f"feature_scores_annotated.csv")

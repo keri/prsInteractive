@@ -219,6 +219,16 @@ def build_bar_frame(df: pd.DataFrame, cohort: str,
     agg['bar_height'] = agg['bar_value'].abs()
     agg['is_inward']  = agg['bar_value'] < 0
 
+    # ── Proportional weighting ────────────────────────────────────────────────
+    # Scale each bar so that the visual area of a cluster reflects the fraction
+    # of the cohort's features it contains — mirroring the pie chart proportions.
+    # Within each cluster, bars are still ranked by effect size (OR or r).
+    # Formula: bar_height_i = (effect_i / max_effect_in_cluster) × (n_cluster / n_total)
+    n_total = max(len(agg), 1)
+    cluster_maxes = agg.groupby('cluster_key')['bar_height'].transform('max').clip(lower=1e-9)
+    cluster_ns    = agg.groupby('cluster_key')['bar_height'].transform('count')
+    agg['bar_height'] = (agg['bar_height'] / cluster_maxes) * (cluster_ns / n_total)
+
     # Colour / hatch scheme:
     #   Genomic risk     (OR > 1, outward) : solid red      BAR_POS
     #   Genomic protect  (OR < 1, inward)  : hashed red     BAR_POS + hatch '//'
