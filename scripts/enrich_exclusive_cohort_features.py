@@ -92,21 +92,32 @@ warnings.filterwarnings("ignore")
 _RSID_RE = re.compile(r'^rs\d+$', re.IGNORECASE)
 
 
+_HLA_RE = re.compile(r'^HLA[-_*]', re.IGNORECASE)
+
+
 def _infer_feature_source(feature: str) -> str:
     """Return 'genomic_shap' or 'clinical' from a feature name.
 
     Rules (in order):
       • All comma-separated tokens are rsIDs  → genomic_shap  (G or GxG)
       • Single rsID                           → genomic_shap
-      • Two-part underscore token (HLA allele)→ genomic_shap
+      • HLA allele (any form starting HLA-,   → genomic_shap
+        HLA_, HLA* or legacy TOKEN_TOKEN)
       • Anything else                         → clinical
+
+    HLA alleles are genomic loci despite being encoded as named alleles rather
+    than rsIDs.  Examples matched: HLA-drb1*401, HLA-b*4002, HLA-dqb1*504,
+    HLA_DRB1_401 (legacy underscore form).
     """
     feature = str(feature).strip()
     parts = [p.strip() for p in feature.split(',')]
     if all(_RSID_RE.match(p) for p in parts if p):
         return 'genomic_shap'
     if len(parts) == 1:
-        # HLA allele: two alphanumeric tokens joined by '_', neither is an rsID
+        # HLA allele: starts with HLA followed by -, _, or *
+        if _HLA_RE.match(feature):
+            return 'genomic_shap'
+        # Legacy HLA form: two alphanumeric tokens joined by '_' (e.g. DRB1_401)
         hla_parts = feature.split('_')
         if (len(hla_parts) == 2
                 and all(p and p.isalnum() for p in hla_parts)
@@ -681,6 +692,68 @@ def load_genomic_features(scores_path, filter_strategy):
     if len(df) < n_before:
         print(f"  [WARN] Dropped {n_before - len(df)} rows with missing cohort")
 
+    # ── ExclusiveHighCases: compute OR and apply quality filters ─────────────
+    # The exclusive-high-risk bootstrap writes coefs (log-odds) but not
+    # odds_ratio.  Derive OR = exp(coefs) so downstream ranking works.
+    #
+    # Two additional filters are required for biological validity:
+    #   1. n_exclusive_cohorts == 1 : feature must be exclusive to a single
+    #      cohort.  n > 1 means the feature reached the high-risk threshold in
+    #      multiple cohorts simultaneously — it is a shared risk feature, not a
+    #      cohort-specific signal.
+    #   2. coefs > 0 (OR > 1) : risk-elevating direction only.  coefs < 0
+    #      features reduce the probability of being an exclusive high-risk case;
+    #      they are not informative for the cohort's risk signature.
+    if 'coefs' in df.columns:
+        is_exc = df.get('training_data_used', pd.Series(dtype=str)) == 'ExclusiveHighCases'
+
+        # Derive OR from coefs where odds_ratio is missing
+        if 'odds_ratio' in df.columns:
+            need_or = is_exc & df['odds_ratio'].isna() & df['coefs'].notna()
+            if need_or.any():
+                df.loc[need_or, 'odds_ratio'] = np.exp(df.loc[need_or, 'coefs'])
+                print(f"  Computed odds_ratio from coefs for "
+                      f"{need_or.sum()} ExclusiveHighCases rows")
+
+        # Filter 1: keep only truly cohort-exclusive features (n_exclusive_cohorts == 1)
+        if 'n_exclusive_cohorts' in df.columns:
+            multi_mask = is_exc & (df['n_exclusive_cohorts'].fillna(1) > 1)
+            n_multi = multi_mask.sum()
+            if n_multi:
+                df = df[~multi_mask].copy()
+                is_exc = df.get('training_data_used', pd.Series(dtype=str)) == 'ExclusiveHighCases'
+                print(f"  Removed {n_multi} ExclusiveHighCases rows with "
+                      f"n_exclusive_cohorts > 1 (not cohort-specific)")
+
+        # Filter 2: keep only risk-elevating direction (coefs > 0 / OR > 1)
+        risk_or  = df['odds_ratio'].notna() & (df['odds_ratio'] >= 1.0) if 'odds_ratio' in df.columns else pd.Series(True, index=df.index)
+        risk_cef = df['coefs'].notna() & (df['coefs'] >= 0.0)
+        is_protective_exc = is_exc & ~(risk_or | risk_cef)
+        n_prot_exc = is_protective_exc.sum()
+        if n_prot_exc:
+            df = df[~is_protective_exc].copy()
+            print(f"  Removed {n_prot_exc} ExclusiveHighCases rows with "
+                  f"coefs < 0 / OR < 1 (protective direction, not a risk signature)")
+
+    # ── LowControls: keep only protective direction (OR < 1 / coefs < 0) ────
+    # LowControls features represent the bottom-20%-PRS protective signature.
+    # OR ≥ 1 (coefs ≥ 0) features are risk carry-overs from the shared
+    # classifier and must not be reported as protective evidence.
+    # Use coefs as the primary criterion (always present); fall back to OR.
+    if 'training_data_used' in df.columns:
+        is_lc = df['training_data_used'] == 'LowControls'
+        if 'coefs' in df.columns:
+            lc_risk = is_lc & df['coefs'].notna() & (df['coefs'] >= 0.0)
+        elif 'odds_ratio' in df.columns:
+            lc_risk = is_lc & df['odds_ratio'].notna() & (df['odds_ratio'] >= 1.0)
+        else:
+            lc_risk = pd.Series(False, index=df.index)
+        n_lc_risk = lc_risk.sum()
+        if n_lc_risk:
+            df = df[~lc_risk].copy()
+            print(f"  Removed {n_lc_risk} LowControls features with "
+                  f"coefs ≥ 0 / OR ≥ 1 (risk direction, not protective)")
+
     # Infer feature_source from the feature name itself
     df['feature_source'] = df['feature'].apply(_infer_feature_source)
 
@@ -696,14 +769,27 @@ def load_genomic_features(scores_path, filter_strategy):
 # =============================================================================
 
 def load_feature_annotation(scores_path):
-    """Load feature_scores_annotated.csv if it exists."""
-    path = os.path.join(scores_path, 'feature_scores_annotated.csv')
-    if not os.path.exists(path):
-        print(f"  [WARN] feature_scores_annotated.csv not found at: {path}")
-        return pd.DataFrame()
-    df = pd.read_csv(path)
-    print(f"  Loaded feature_scores_annotated: {len(df)} rows")
-    return df
+    """Load feature_scores_annotated.csv.
+
+    Searches in order:
+      1. {scores_path}/feature_scores_annotated.csv  (e.g. combinedAnalysis/scores/)
+      2. {pheno_data}/feature_scores_annotated.csv   (parent = combinedAnalysis/)
+      3. {type2Diabetes}/feature_scores_annotated.csv (grandparent)
+    """
+    candidates = [
+        os.path.join(scores_path, 'feature_scores_annotated.csv'),
+        os.path.join(os.path.dirname(scores_path), 'feature_scores_annotated.csv'),
+        os.path.join(os.path.dirname(os.path.dirname(scores_path)),
+                     'feature_scores_annotated.csv'),
+    ]
+    for path in candidates:
+        if os.path.exists(path):
+            df = pd.read_csv(path)
+            print(f"  Loaded feature_scores_annotated: {len(df)} rows  [{path}]")
+            return df
+    print(f"  [WARN] feature_scores_annotated.csv not found. Searched:\n"
+          + '\n'.join(f"    {p}" for p in candidates))
+    return pd.DataFrame()
 
 
 def expand_to_snp_rows(feature_df, annotation_df):
@@ -738,6 +824,10 @@ def expand_to_snp_rows(feature_df, annotation_df):
     n_unannotated_genomic = 0
     for _, row in feature_df.iterrows():
         raw = str(row['raw_feature'])
+        # raw_feature may be NaN when load_genomic_features provided 'feature' only;
+        # in that case fall back to the 'feature' column for annotation lookup.
+        if raw.strip().lower() == 'nan' or not raw.strip():
+            raw = str(row.get('feature', ''))
         base = row.to_dict()
         ann = ann_lookup.get(raw.strip().lower())
 
@@ -1428,6 +1518,14 @@ def main(pheno_data, filter_strategy='tiered',
     # -------------------------------------------------------------------------
     print("--- Step 3: Expanding to individual SNPs and merging annotation ---")
     expanded_df = expand_to_snp_rows(feature_df, annotation_df)
+
+    # ── Issue 2: re-infer feature_source after expansion ─────────────────────
+    # A raw_feature like "Total bilirubin,rs459193,rs75981964" is classified as
+    # 'clinical' by _infer_feature_source (because not all comma-parts are rsIDs).
+    # After expansion each part becomes its own row: the rsID rows must be
+    # reclassified as 'genomic_shap' now that their resolved feature is a bare rsID.
+    expanded_df['feature_source'] = expanded_df['feature'].apply(_infer_feature_source)
+
     # Deduplicate expanded (same snp can appear in snp1 of one row and snp2 of another)
     expanded_df.drop_duplicates(
         subset=['feature', 'cohort', 'feature_source'], inplace=True
@@ -1565,6 +1663,25 @@ def main(pheno_data, filter_strategy='tiered',
     # A non-null, non-zero value → 1; null or zero → 0.
     for ck in all_cluster_col_keys:
         output_df[ck] = (output_df[ck].fillna(0) != 0).astype(int)
+
+    # -------------------------------------------------------------------------
+    # HLA autoimmune cluster: features whose name starts with HLA- are assigned
+    # directly to the hla_autoimmune cluster (→ SAID in cluster_subtype_map.csv).
+    # This bypasses the SNP/locus-matching pipeline because HLA allele calls
+    # (e.g. HLA-drb1*401) are not present in the standard functional cluster CSVs.
+    # -------------------------------------------------------------------------
+    HLA_COL = 'hla_cluster__HLA Region'
+    hla_mask = output_df['feature'].str.match(r'^HLA[-_*]', case=False, na=False)
+    output_df[HLA_COL] = hla_mask.astype(int)
+    if hla_mask.any():
+        print(f"  HLA autoimmune cluster ({HLA_COL}): {hla_mask.sum()} features assigned")
+        # Update match_method for HLA rows that had no other match
+        if 'match_method' in output_df.columns:
+            output_df.loc[
+                hla_mask & (output_df['match_method'] == 'none'),
+                'match_method'
+            ] = 'hla_direct'
+    all_cluster_col_keys = all_cluster_col_keys + [HLA_COL]
 
     # Recompute n_clusters_matched after enforcing binary ints
     if all_cluster_col_keys:
