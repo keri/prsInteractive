@@ -35,7 +35,7 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    pheno_data = args.pheno_path or os.environ.get("PHENO_DATA")
+    pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
 #   print(f"[PYTHON] Reading from: {pheno_path}")
 
     
