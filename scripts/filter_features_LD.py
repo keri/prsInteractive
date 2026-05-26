@@ -117,11 +117,10 @@ def filter_main_in_ld(ld2,featuresMain,rank_feature):
 	return(mainFeaturesInLD)
 
 #def main(phenoPath,features_filter_ld,pre_post_association):
-def main(phenoPath,features_filter_ld):
+def main(pheno_data,features_filter_ld):
 	'''run the LD command separately which generates the plink.ld'''
-	
-#	filePath = f'/your/directory/ukbiobank/{pheno}/tanigawaSet'
-	ld = pd.read_csv(f'{phenoPath}/finalModel.ld',sep='\s+')
+
+	ld = pd.read_csv(f'{pheno_data}/finalModel.ld',sep='\s+')
 	ld2 = ld[ld['R2'] > .6]
 #	features = pd.read_csv(f'{phenoPath}/scores/importantFeaturesPostShap.csv')
 	features = pd.read_csv(features_filter_ld)
@@ -149,7 +148,7 @@ def main(phenoPath,features_filter_ld):
 #		features.to_csv(f'{file_root}.preLD.csv',index=False)
 	except KeyError:
 		#the LD is done post glm modelling in early stages
-		input_file_root = '/'.join(phenoPath.split('/')[:-1])
+		input_file_root = '/'.join(pheno_data.split('/')[:-1])
 		input_file = f'{input_file_root}/featureScoresReducedFinalModel.csv'
 		features = pd.read_csv(input_file)
 		rank_feature = [col for col in features.columns if 'coef' in col][0]
@@ -189,38 +188,22 @@ def main(phenoPath,features_filter_ld):
 if __name__ == '__main__':
 	
 	parser = argparse.ArgumentParser(description="creating LD snp list ....")
-	parser.add_argument("--pheno_path", help="Path to the input pheno folder")
+	parser.add_argument("--pheno_data", help="Path to epi data folder (or pheno root for default LD run)")
 	parser.add_argument("--features_to_ld_file", help="file used to filter ld")
-	
-	
-	
-	args = parser.parse_args()
-	
-	# Prefer command-line input if provided; fallback to env var
-#	pheno_path = '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
-#	pre_post_association='pre'
-	pheno_path = args.pheno_path or os.environ.get("PHENO_PATH")
-	print(f"[PYTHON] Reading from: {pheno_path}")
 
-#	pre_post_association = args.pre_post_association or os.environ.get("PRE_POST_ASSOCIATION")
-#	print(f"pre or post association set to : {pre_post_association}")
-	
+	args = parser.parse_args()
+
+	pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
+	print(f"[PYTHON] Reading from: {pheno_data}")
+
 	features_to_ld_file = args.features_to_ld_file or os.environ.get("FEATURES_TO_FILTER_LD")
 	print(f'[PYTHON] Reading from feature files to filter for ld {features_to_ld_file}')
-	
-	#f"{pheno_data}/scores/importantFeaturesPostShap.csv"
-#	print(f"[PYTHON] Reading features for LD from: {features_to_ld_file}")
-	
-#	pheno_path = '/Users/kerimulterer/prsInteractive/results/celiacDisease'
-#	features_to_ld_file = f"{pheno_path}/productEpi/scores/importantFeaturesPostShap.csv"
-	
-	
-	if not pheno_path:
-		raise ValueError("You must provide a data pheno path via --pheno_path or set the PHENO_DATA environment variable.")
-	
-	if not features_to_ld_file:
-		raise ValueError("You must provide a feature file to perform LD via --features_to_ld_file or set the FEATURES_TO_FILTER_LD environment variable.")	
 
-		
-	main(pheno_path,features_to_ld_file)
+	if not pheno_data:
+		raise ValueError("You must provide a data path via --pheno_data or set the PHENO_DATA environment variable.")
+
+	if not features_to_ld_file:
+		raise ValueError("You must provide a feature file to perform LD via --features_to_ld_file or set the FEATURES_TO_FILTER_LD environment variable.")
+
+	main(pheno_data,features_to_ld_file)
 	

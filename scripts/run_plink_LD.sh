@@ -1,65 +1,63 @@
 #!/bin/bash
 
 pheno=$1
+epi_subfolder=${2:-""}   # optional: "productEpi" or "summedEpi"
+                          # omit to run LD at the pheno root (default: post-epi discovery, pre gene-environment)
 
-#pheno='type2Diabetes'
-
-#PRE_POST_ASSOCIATION=${2:-"pre"}
-
-
-
-# Source config with error handling
+# Source global config
 if [ ! -f "../env.config" ]; then
 	echo "ERROR: ../env.config not found!"
 	echo "Current directory: $(pwd)"
 	echo "Looking for: $(realpath ../env.config 2>/dev/null || echo '../env.config')"
 	exit 1
-	
-else
-	source ../env.config
 fi
+source ../env.config
 
-echo "PHENO_DATA: ${PHENO_DATA}"
-
-
-#FEATURE_SCORES_FILE=${FEATURE_SCORES_FILE:-"${PHENO_PATH}/scores/importantFeaturesPostShap.csv"}
-
-#check that a results folder for phenotype exists
+# Construct and validate PHENO_PATH
+PHENO_PATH="${RESULTS_PATH}/${pheno}"
 if [ ! -d "${PHENO_PATH}" ]; then
 	echo "Folder '${PHENO_PATH}' does not exist..."
 	echo "run envSetUp.sh <pheno> <icd10> <phenoStr> <n cores to use in epistatic interaction analysis>"
 	exit 1
-	
-else
-	echo "sourcing $pheno env variables."
-	#source pheno specific environment variables
-	source "${PHENO_DATA}/pheno.config"
 fi
 
+# Default: PHENO_DATA = pheno root (LD run before gene-environment feature discovery)
+# With epi_subfolder: PHENO_DATA = subfolder, sources its pheno.config for additional env vars
+if [ -n "${epi_subfolder}" ]; then
+	PHENO_DATA="${PHENO_PATH}/${epi_subfolder}"
+	if [ ! -d "${PHENO_DATA}" ]; then
+		echo "Subfolder '${PHENO_DATA}' does not exist..."
+		exit 1
+	fi
+	source "${PHENO_DATA}/pheno.config"
+else
+	PHENO_DATA="${PHENO_PATH}"
+fi
+
+echo "PHENO_PATH: ${PHENO_PATH}"
+echo "PHENO_DATA: ${PHENO_DATA}"
 echo "[DIR] scripts directory : $SCRIPTS_DIR"
 
-
+# Build SNP list from importantFeaturesPostShap.csv
 export PHENO_DATA
 python "$SCRIPTS_DIR/helper/create_LD_SnpList.py"
 
-wait 
+wait
 
-#creates the LD SNP data files to be used after looking for important features step
-plink --bfile "$PHENO_PATH/merged_allChromosomes" --extract "$PHENO_DATA/finalModelLDSnps.txt" --indep-pairwise 100kb 1 .6 --r2 --show-tags all --out "$PHENO_PATH/finalModel"
+# Compute pairwise LD — genotype data always at pheno root, output in PHENO_DATA
+plink --bfile "$PHENO_PATH/merged_allChromosomes" \
+      --extract "$PHENO_DATA/finalModelLDSnps.txt" \
+      --indep-pairwise 100kb 1 .6 --r2 --show-tags all \
+      --out "$PHENO_DATA/finalModel"
 
-#creates new feature_scores_file with pruned features in LD and reversed
-
-export PHENO_PATH
+# Filter features for LD
 FEATURES_TO_FILTER_LD="${PHENO_DATA}/scores/importantFeaturesPostShap.csv"
-#ensure the reduced features file is present
 if [ ! -f "${FEATURES_TO_FILTER_LD}" ]; then
-	echo "reduced feature file to use in LD analysis is not present"
+	echo "Feature file for LD filtering not found: ${FEATURES_TO_FILTER_LD}"
 	exit 1
-
 fi
 
-
+export PHENO_PATH
+export PHENO_DATA
 export FEATURES_TO_FILTER_LD
 python "$SCRIPTS_DIR/filter_features_LD.py"
-
-
