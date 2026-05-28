@@ -642,14 +642,14 @@ def merge_genes_into_feature_scores(
 
     Added columns
     -------------
-    snp1                : first (or only) rsID from 'feature' cell
-    snp1_gene_names     : semicolon-joined gene name(s) for snp1 (best tier first)
-    snp1_gene_ids       : semicolon-joined NCBI gene ID(s) for snp1
+    SNP1                : first (or only) rsID from 'feature' cell
+    gene_names_SNP1     : semicolon-joined gene name(s) for SNP1 (best tier first)
+    snp1_gene_ids       : semicolon-joined NCBI gene ID(s) for SNP1
     snp1_gene_source    : how genes were found — 'snp_db' | 'elink' | 'gene_db'
-    snp2                : second rsID (GxG rows only)
-    snp2_gene_names     : gene name(s) for snp2
-    snp2_gene_ids       : gene ID(s) for snp2
-    snp2_gene_source    : gene lookup tier for snp2
+    SNP2                : second rsID (GxG rows only)
+    gene_names_SNP2     : gene name(s) for SNP2
+    snp2_gene_ids       : gene ID(s) for SNP2
+    snp2_gene_source    : gene lookup tier for SNP2
     entrez_matched      : True if at least one rsID in this row had any gene hit
 
     Note: ``feature_type`` (G / GxG / other) is used internally to drive
@@ -735,12 +735,20 @@ def merge_genes_into_feature_scores(
     )
     annotated = pd.concat([df, annotation_df], axis=1)
 
+    # Rename to consistent output column names before any further references
+    annotated = annotated.rename(columns={
+        "snp1":             "SNP1",
+        "snp1_gene_names":  "gene_names_SNP1",
+        "snp2":             "SNP2",
+        "snp2_gene_names":  "gene_names_SNP2",
+    })
+
     matched   = int(annotated["entrez_matched"].sum())
-    # Infer SNP vs other rows from the presence of a parsed snp1 value;
+    # Infer SNP vs other rows from the presence of a parsed SNP1 value;
     # feature_type is no longer written to the output.
-    snp_rows  = annotated["snp1"].notna().sum()
+    snp_rows  = annotated["SNP1"].notna().sum()
     unmatched = int(snp_rows - matched)
-    other     = int(annotated["snp1"].isna().sum())
+    other     = int(annotated["SNP1"].isna().sum())
 
     # Source-tier breakdown (genomic rows only)
     source_counts = (
