@@ -5,11 +5,11 @@ merge_gene_annotation.py
 Merge gene_annotation_previous_research.csv into feature_scores_annotated.csv,
 preserving all rows from feature_scores_annotated.csv (left join on feature).
 
-Post-merge fills (each done independently):
-  - gene_names_SNP1: NaN values filled from research file SNP1→gene_names lookup
-  - gene_names_SNP2: NaN values filled from research file SNP2→gene_names lookup
-  - previously_known: NaN values filled from per-SNP lookups; epi pairs get
-    "snp1_result,snp2_result" (e.g. "yes,no")
+previously_known NaN fill:
+  For each rsID, check every row in the research file where that rsID appears
+  as SNP1 or SNP2 (single-SNP features AND within pairs).  If the SNP is
+  'yes' in any of those rows it is annotated 'yes'; otherwise 'no'.
+  Epi pair rows get "snp1_result,snp2_result" (e.g. "yes,no").
 
 Covariate rows ((Intercept), SEX, age, PC1–PC10) are excluded from output.
 entrez_matched column is dropped.
@@ -20,6 +20,8 @@ Output: results/type2Diabetes/merged_gene_annotation.csv
 import argparse
 import os
 import re
+from collections import defaultdict
+
 import pandas as pd
 
 
@@ -57,64 +59,59 @@ def deduplicate_by_feature(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def build_gene_name_lookups(df: pd.DataFrame) -> tuple[dict, dict]:
+def _parse_pk(raw: str) -> tuple[str, str]:
     """
-    Build per-SNP gene name lookups from the research file.
+    Parse a previously_known value into (pk_snp1, pk_snp2).
 
-    Returns
-    -------
-    snp1_lookup : {SNP1_value -> gene_names_SNP1}
-    snp2_lookup : {SNP2_value -> gene_names_SNP2}
+    Single value ('yes' / 'no') → both positions get that value.
+    Pair value ('yes,no' / 'no,yes' / 'yes,yes(BMI)') → split on first comma.
+    Returns normalised 'yes' or 'no' (anything starting with 'yes' → 'yes').
     """
-    snp1_lookup: dict = {}
-    snp2_lookup: dict = {}
-
-    for _, row in df[df['SNP1'].notna() & df['gene_names_SNP1'].notna()].iterrows():
-        key = str(row['SNP1']).strip()
-        val = str(row['gene_names_SNP1']).strip()
-        if key and val and val.lower() != 'nan' and key not in snp1_lookup:
-            snp1_lookup[key] = val
-
-    for _, row in df[df['SNP2'].notna() & df['gene_names_SNP2'].notna()].iterrows():
-        key = str(row['SNP2']).strip()
-        val = str(row['gene_names_SNP2']).strip()
-        if key and val and val.lower() != 'nan' and key not in snp2_lookup:
-            snp2_lookup[key] = val
-
-    return snp1_lookup, snp2_lookup
+    raw = str(raw).strip().lower()
+    if ',' in raw:
+        parts = raw.split(',', 1)
+        pk1 = 'yes' if parts[0].strip().startswith('yes') else ('no' if parts[0].strip().startswith('no') else '')
+        pk2 = 'yes' if parts[1].strip().startswith('yes') else ('no' if parts[1].strip().startswith('no') else '')
+    else:
+        pk1 = 'yes' if raw.startswith('yes') else ('no' if raw.startswith('no') else '')
+        pk2 = pk1
+    return pk1, pk2
 
 
 def build_previously_known_lookup(df: pd.DataFrame) -> dict:
     """
-    Build {rsid -> previously_known} from single-SNP rows in the research file.
-    Used to fill missing previously_known for epi pairs and unmatched features.
+    Build {rsid_lower: 'yes' | 'no'} by scanning every row in the research file.
+
+    Each rsID is checked wherever it appears as SNP1 or SNP2 — in single-SNP
+    features and within pairs.  A SNP is 'yes' if it is 'yes' in any row;
+    'no' only if every row that contains it says 'no'.
     """
-    single = df[df['feature'].str.match(r'^rs\d+$', case=False, na=False)]
-    lookup = {}
-    for _, row in single.iterrows():
-        pk = str(row.get('previously_known', '')).strip()
-        if pk and pk.lower() != 'nan':
-            lookup[row['feature'].lower()] = pk
-    return lookup
+    snp_pk_values: dict = defaultdict(set)
 
+    for _, row in df.iterrows():
+        pk_raw = str(row.get('previously_known', '')).strip()
+        if not pk_raw or pk_raw.lower() == 'nan':
+            continue
 
-def fill_gene_names(merged: pd.DataFrame, snp1_lookup: dict, snp2_lookup: dict) -> pd.DataFrame:
-    """Fill NaN gene_names_SNP1 and gene_names_SNP2 separately from per-SNP lookups."""
-    merged = merged.copy()
+        pk1, pk2 = _parse_pk(pk_raw)
 
-    mask1 = merged['gene_names_SNP1'].isna()
-    merged.loc[mask1, 'gene_names_SNP1'] = merged.loc[mask1, 'SNP1'].map(snp1_lookup)
+        snp1 = str(row.get('SNP1', '')).strip().lower()
+        snp2 = str(row.get('SNP2', '')).strip().lower()
 
-    mask2 = merged['gene_names_SNP2'].isna()
-    merged.loc[mask2, 'gene_names_SNP2'] = merged.loc[mask2, 'SNP2'].map(snp2_lookup)
+        if snp1 and snp1 != 'nan' and pk1:
+            snp_pk_values[snp1].add(pk1)
+        if snp2 and snp2 != 'nan' and pk2:
+            snp_pk_values[snp2].add(pk2)
 
-    return merged
+    # 'yes' in any row wins
+    return {snp: ('yes' if 'yes' in vals else 'no')
+            for snp, vals in snp_pk_values.items()}
 
 
 def fill_previously_known(merged: pd.DataFrame, snp_lookup: dict) -> pd.DataFrame:
     """
-    Fill missing previously_known from per-SNP lookups.
-    Epi pairs get "snp1_result,snp2_result"; single-SNP rows get the direct result.
+    Fill missing previously_known using per-SNP lookups.
+    Epi pairs: "snp1_result,snp2_result".  Single SNPs: direct result.
     """
     merged = merged.copy()
     missing_mask = (
@@ -160,24 +157,18 @@ def main(pheno_path: str) -> None:
     merged = feature_scores.merge(prev_dedup, on='feature', how='left')
     print(f"  {merged['previously_known'].notna().sum()} rows with previously_known after merge")
 
-    # Fill gene_names_SNP1 and gene_names_SNP2 separately
-    snp1_gene_lookup, snp2_gene_lookup = build_gene_name_lookups(prev_research)
-    print(f"  Gene name lookups: {len(snp1_gene_lookup)} SNP1 entries, {len(snp2_gene_lookup)} SNP2 entries")
-    merged = fill_gene_names(merged, snp1_gene_lookup, snp2_gene_lookup)
-    print(f"  gene_names_SNP1 filled: {merged['gene_names_SNP1'].notna().sum()} rows")
-    print(f"  gene_names_SNP2 filled: {merged['gene_names_SNP2'].notna().sum()} rows")
-
-    # Fill previously_known from per-SNP lookups
+    # Fill missing previously_known from per-SNP lookup across all research rows
     snp_pk_lookup = build_previously_known_lookup(prev_research)
-    print(f"  previously_known SNP lookup: {len(snp_pk_lookup)} entries")
+    print(f"  Per-SNP lookup built: {len(snp_pk_lookup)} unique rsIDs")
     merged = fill_previously_known(merged, snp_pk_lookup)
     print(f"  {merged['previously_known'].notna().sum()} rows with previously_known after SNP fill")
 
-    # Drop covariate rows and entrez_matched
+    # Drop covariate rows
     before = len(merged)
     merged = merged[~merged['feature'].astype(str).str.match(COVARIATE_RE)]
-    print(f"\n  Dropped {before - len(merged)} covariate rows (Intercept, SEX, age, PC1-PC10)")
+    print(f"\n  Dropped {before - len(merged)} covariate rows (Intercept, SEX, age, PC1–PC10)")
 
+    # Drop entrez_matched
     if 'entrez_matched' in merged.columns:
         merged = merged.drop(columns=['entrez_matched'])
 
