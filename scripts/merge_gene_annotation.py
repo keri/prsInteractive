@@ -5,16 +5,21 @@ merge_gene_annotation.py
 Merge gene_annotation_previous_research.csv into feature_scores_annotated.csv,
 preserving all rows from feature_scores_annotated.csv (left join on feature).
 
-Missing previously_known values are filled from individual SNP lookups:
-  - For epi pairs (SNP1,SNP2): look up each SNP separately and combine as
-    "snp1_result,snp2_result" (e.g. "yes,no").
-  - For single-SNP features: use the SNP's own lookup result directly.
+Post-merge fills (each done independently):
+  - gene_names_SNP1: NaN values filled from research file SNP1→gene_names lookup
+  - gene_names_SNP2: NaN values filled from research file SNP2→gene_names lookup
+  - previously_known: NaN values filled from per-SNP lookups; epi pairs get
+    "snp1_result,snp2_result" (e.g. "yes,no")
+
+Covariate rows ((Intercept), SEX, age, PC1–PC10) are excluded from output.
+entrez_matched column is dropped.
 
 Output: results/type2Diabetes/merged_gene_annotation.csv
 """
 
 import argparse
 import os
+import re
 import pandas as pd
 
 
@@ -30,10 +35,11 @@ MERGE_COLS = [
     '95% CI (TEXT)_SNP2',
 ]
 
+COVARIATE_RE = re.compile(r'^\(?intercept\)?$|^(sex|age|pc\d+)$', re.IGNORECASE)
+
 
 def load_previous_research(path: str) -> pd.DataFrame:
     df = pd.read_csv(path, low_memory=False)
-    # Drop Excel padding columns and blank rows
     df = df[[c for c in df.columns if not c.startswith('Unnamed')]]
     df = df[df['feature'].notna() & (df['feature'].astype(str).str.strip() != '')]
     df['feature'] = df['feature'].astype(str).str.strip()
@@ -51,10 +57,37 @@ def deduplicate_by_feature(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def build_snp_lookup(df: pd.DataFrame) -> dict:
+def build_gene_name_lookups(df: pd.DataFrame) -> tuple[dict, dict]:
     """
-    Build {rsid_lower: previously_known} from single-SNP rows in the research file.
-    Used to fill missing previously_known for epi pairs.
+    Build per-SNP gene name lookups from the research file.
+
+    Returns
+    -------
+    snp1_lookup : {SNP1_value -> gene_names_SNP1}
+    snp2_lookup : {SNP2_value -> gene_names_SNP2}
+    """
+    snp1_lookup: dict = {}
+    snp2_lookup: dict = {}
+
+    for _, row in df[df['SNP1'].notna() & df['gene_names_SNP1'].notna()].iterrows():
+        key = str(row['SNP1']).strip()
+        val = str(row['gene_names_SNP1']).strip()
+        if key and val and val.lower() != 'nan' and key not in snp1_lookup:
+            snp1_lookup[key] = val
+
+    for _, row in df[df['SNP2'].notna() & df['gene_names_SNP2'].notna()].iterrows():
+        key = str(row['SNP2']).strip()
+        val = str(row['gene_names_SNP2']).strip()
+        if key and val and val.lower() != 'nan' and key not in snp2_lookup:
+            snp2_lookup[key] = val
+
+    return snp1_lookup, snp2_lookup
+
+
+def build_previously_known_lookup(df: pd.DataFrame) -> dict:
+    """
+    Build {rsid -> previously_known} from single-SNP rows in the research file.
+    Used to fill missing previously_known for epi pairs and unmatched features.
     """
     single = df[df['feature'].str.match(r'^rs\d+$', case=False, na=False)]
     lookup = {}
@@ -65,10 +98,23 @@ def build_snp_lookup(df: pd.DataFrame) -> dict:
     return lookup
 
 
+def fill_gene_names(merged: pd.DataFrame, snp1_lookup: dict, snp2_lookup: dict) -> pd.DataFrame:
+    """Fill NaN gene_names_SNP1 and gene_names_SNP2 separately from per-SNP lookups."""
+    merged = merged.copy()
+
+    mask1 = merged['gene_names_SNP1'].isna()
+    merged.loc[mask1, 'gene_names_SNP1'] = merged.loc[mask1, 'SNP1'].map(snp1_lookup)
+
+    mask2 = merged['gene_names_SNP2'].isna()
+    merged.loc[mask2, 'gene_names_SNP2'] = merged.loc[mask2, 'SNP2'].map(snp2_lookup)
+
+    return merged
+
+
 def fill_previously_known(merged: pd.DataFrame, snp_lookup: dict) -> pd.DataFrame:
     """
-    For rows with missing previously_known, look up SNP1 and SNP2 individually
-    and combine as "snp1_result,snp2_result".
+    Fill missing previously_known from per-SNP lookups.
+    Epi pairs get "snp1_result,snp2_result"; single-SNP rows get the direct result.
     """
     merged = merged.copy()
     missing_mask = (
@@ -88,21 +134,19 @@ def fill_previously_known(merged: pd.DataFrame, snp_lookup: dict) -> pd.DataFram
         pk2 = snp_lookup.get(snp2_str, '')
 
         if snp2_str and (pk1 or pk2):
-            # epi pair — combine as "snp1_result,snp2_result"
             merged.at[idx, 'previously_known'] = f"{pk1},{pk2}"
         elif snp1_str and pk1:
-            # single SNP
             merged.at[idx, 'previously_known'] = pk1
 
     return merged
 
 
 def main(pheno_path: str) -> None:
-    feature_scores_path   = os.path.join(pheno_path, 'feature_scores_annotated.csv')
-    prev_research_path    = os.path.join(pheno_path, 'gene_annotation_previous_research.csv')
-    output_path           = os.path.join(pheno_path, 'merged_gene_annotation.csv')
+    feature_scores_path = os.path.join(pheno_path, 'feature_scores_annotated.csv')
+    prev_research_path  = os.path.join(pheno_path, 'gene_annotation_previous_research.csv')
+    output_path         = os.path.join(pheno_path, 'merged_gene_annotation.csv')
 
-    print(f"Loading feature scores  : {feature_scores_path}")
+    print(f"Loading feature scores   : {feature_scores_path}")
     feature_scores = pd.read_csv(feature_scores_path)
     print(f"  {len(feature_scores)} rows")
 
@@ -110,25 +154,36 @@ def main(pheno_path: str) -> None:
     prev_research = load_previous_research(prev_research_path)
     print(f"  {len(prev_research)} non-blank rows, {prev_research['feature'].nunique()} unique features")
 
+    # Merge on feature (left join)
     prev_dedup = deduplicate_by_feature(prev_research[MERGE_COLS])
     print(f"  {len(prev_dedup)} rows after deduplication")
-
-    # Task 2: left merge preserving all feature_scores rows
     merged = feature_scores.merge(prev_dedup, on='feature', how='left')
     print(f"  {merged['previously_known'].notna().sum()} rows with previously_known after merge")
 
-    # Task 3: fill missing previously_known from individual SNP lookups
-    snp_lookup = build_snp_lookup(prev_research)
-    print(f"  SNP lookup built: {len(snp_lookup)} entries")
-    merged = fill_previously_known(merged, snp_lookup)
-    filled = merged['previously_known'].notna().sum()
-    print(f"  {filled} rows with previously_known after SNP fill")
+    # Fill gene_names_SNP1 and gene_names_SNP2 separately
+    snp1_gene_lookup, snp2_gene_lookup = build_gene_name_lookups(prev_research)
+    print(f"  Gene name lookups: {len(snp1_gene_lookup)} SNP1 entries, {len(snp2_gene_lookup)} SNP2 entries")
+    merged = fill_gene_names(merged, snp1_gene_lookup, snp2_gene_lookup)
+    print(f"  gene_names_SNP1 filled: {merged['gene_names_SNP1'].notna().sum()} rows")
+    print(f"  gene_names_SNP2 filled: {merged['gene_names_SNP2'].notna().sum()} rows")
 
-    # Task 4: save
+    # Fill previously_known from per-SNP lookups
+    snp_pk_lookup = build_previously_known_lookup(prev_research)
+    print(f"  previously_known SNP lookup: {len(snp_pk_lookup)} entries")
+    merged = fill_previously_known(merged, snp_pk_lookup)
+    print(f"  {merged['previously_known'].notna().sum()} rows with previously_known after SNP fill")
+
+    # Drop covariate rows and entrez_matched
+    before = len(merged)
+    merged = merged[~merged['feature'].astype(str).str.match(COVARIATE_RE)]
+    print(f"\n  Dropped {before - len(merged)} covariate rows (Intercept, SEX, age, PC1-PC10)")
+
+    if 'entrez_matched' in merged.columns:
+        merged = merged.drop(columns=['entrez_matched'])
+
     merged.to_csv(output_path, index=False)
-    print(f"\nWrote {len(merged)} rows to {output_path}")
+    print(f"  Wrote {len(merged)} rows to {output_path}")
 
-    # Summary of previously_known distribution
     pk_counts = merged['previously_known'].value_counts(dropna=False).head(15)
     print("\npreviously_known distribution (top 15):")
     print(pk_counts.to_string())
