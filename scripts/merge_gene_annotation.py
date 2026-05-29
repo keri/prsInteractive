@@ -205,6 +205,15 @@ def main(pheno_path: str, combined_path: str) -> None:
     # Step 1: merge with combined final model to add coefs
     feature_scores = merge_with_combined_model(feature_scores, combined_path)
 
+    # Keep only features with a non-zero beta in the combined model
+    before = len(feature_scores)
+    has_coef = (
+        (feature_scores['model_coef'].notna()  & (feature_scores['model_coef']  != 0)) |
+        (feature_scores['cardio_coef'].notna() & (feature_scores['cardio_coef'] != 0))
+    )
+    feature_scores = feature_scores[has_coef]
+    print(f"  Kept {len(feature_scores)} / {before} rows with non-zero combined-model beta")
+
     print(f"Loading previous research: {prev_research_path}")
     prev_research = load_previous_research(prev_research_path)
     print(f"  {len(prev_research)} non-blank rows, {prev_research['feature'].nunique()} unique features")
