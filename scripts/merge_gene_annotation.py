@@ -2,8 +2,14 @@
 """
 merge_gene_annotation.py
 ------------------------
-Merge gene_annotation_previous_research.csv into feature_scores_annotated.csv,
-preserving all rows from feature_scores_annotated.csv (left join on feature).
+Step 1: merge feature_scores_annotated.csv with
+        featureScoresReducedFinalModel.combined.filtered.csv to add model_coef
+        and cardio_coef columns (left join; non-cardio matched on
+        [feature, PRS_calculation], cardio matched on SNP-pair substring of
+        feature after stripping the leading clinical-variable token).
+
+Step 2: merge gene_annotation_previous_research.csv into the result,
+        preserving all feature_scores_annotated rows (left join on feature).
 
 previously_known NaN fill:
   For each rsID, check every row in the research file where that rsID appears
@@ -24,6 +30,14 @@ from collections import defaultdict
 
 import pandas as pd
 
+MODEL_TO_PRS_CALC = {
+    'main':            'G',
+    'epi_product':     'GxG',
+    'epi_summed':      'G+G',
+    'cardio_product':  'GxGxE',
+    'cardio_summed':   'G+GxE',
+}
+
 
 MERGE_COLS = [
     'feature',
@@ -38,6 +52,47 @@ MERGE_COLS = [
 ]
 
 COVARIATE_RE = re.compile(r'^\(?intercept\)?$|^(sex|age|pc\d+)$', re.IGNORECASE)
+
+
+def merge_with_combined_model(feature_scores: pd.DataFrame, combined_path: str) -> pd.DataFrame:
+    """
+    Add model_coef and cardio_coef columns from the combined final-model file.
+
+    Non-cardio (G / GxG / G+G): matched on [feature, PRS_calculation].
+    Cardio (GxGxE / G+GxE): feature prefix (clinical variable) is stripped
+      before matching on feature alone; stored as cardio_coef.
+    """
+    print(f"Loading combined model  : {combined_path}")
+    combined = pd.read_csv(combined_path)
+    print(f"  {len(combined)} rows")
+
+    combined['PRS_calculation'] = combined['model'].map(MODEL_TO_PRS_CALC).fillna(combined['model'])
+
+    is_cardio = combined['PRS_calculation'].isin(['GxGxE', 'G+GxE'])
+
+    # Non-cardio merge: [feature, PRS_calculation]
+    non_cardio = (
+        combined[~is_cardio][['feature', 'PRS_calculation', 'coefs']]
+        .rename(columns={'coefs': 'model_coef'})
+    )
+    merged = feature_scores.merge(non_cardio, on=['feature', 'PRS_calculation'], how='left')
+    print(f"  model_coef filled for {merged['model_coef'].notna().sum()} rows after non-cardio merge")
+
+    # Cardio merge: strip clinical-variable prefix, deduplicate, merge on feature
+    cardio = combined[is_cardio].copy()
+    cardio['feature'] = cardio['feature'].apply(
+        lambda f: ','.join(str(f).split(',')[1:])
+    )
+    cardio = (
+        cardio.sort_values('coefs', key=lambda s: s.abs(), ascending=False)
+        .drop_duplicates(subset='feature', keep='first')
+        [['feature', 'coefs']]
+        .rename(columns={'coefs': 'cardio_coef'})
+    )
+    merged = merged.merge(cardio, on='feature', how='left')
+    print(f"  cardio_coef filled for {merged['cardio_coef'].notna().sum()} rows after cardio merge")
+
+    return merged
 
 
 def load_previous_research(path: str) -> pd.DataFrame:
@@ -138,7 +193,7 @@ def fill_previously_known(merged: pd.DataFrame, snp_lookup: dict) -> pd.DataFram
     return merged
 
 
-def main(pheno_path: str) -> None:
+def main(pheno_path: str, combined_path: str) -> None:
     feature_scores_path = os.path.join(pheno_path, 'feature_scores_annotated.csv')
     prev_research_path  = os.path.join(pheno_path, 'gene_annotation_previous_research.csv')
     output_path         = os.path.join(pheno_path, 'merged_gene_annotation.csv')
@@ -146,6 +201,9 @@ def main(pheno_path: str) -> None:
     print(f"Loading feature scores   : {feature_scores_path}")
     feature_scores = pd.read_csv(feature_scores_path)
     print(f"  {len(feature_scores)} rows")
+
+    # Step 1: merge with combined final model to add coefs
+    feature_scores = merge_with_combined_model(feature_scores, combined_path)
 
     print(f"Loading previous research: {prev_research_path}")
     prev_research = load_previous_research(prev_research_path)
@@ -187,5 +245,10 @@ if __name__ == '__main__':
         default='/Users/kerimulterer/prsInteractive/results/type2Diabetes',
         help='Path to the phenotype results directory',
     )
+    parser.add_argument(
+        '--combined_path',
+        default='/Users/kerimulterer/prsInteractive/results/type2Diabetes/combinedAnalysis/scores/featureScoresReducedFinalModel.combined.filtered.csv',
+        help='Path to featureScoresReducedFinalModel.combined.filtered.csv',
+    )
     args = parser.parse_args()
-    main(args.pheno_path)
+    main(args.pheno_path, args.combined_path)
