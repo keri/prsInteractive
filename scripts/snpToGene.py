@@ -380,17 +380,23 @@ def _search_gene_db_for_hla(orig_feat: str, hla_query: str) -> list[dict]:
     """
     Search the gene database for an HLA allele feature.
 
-    Tries three progressively broader queries:
+    Tries three progressively broader queries, returning the first batch that
+    contains at least one HLA-region gene (NAME starts with 'HLA').  This
+    prevents allele-number components (e.g. '202' in 'HLA-A*202') from
+    matching unrelated LOC/non-HLA genes in Entrez.
+
+    Query order:
       1. ``'HLA-DRB*5301[gene name]'`` – field-tagged gene name search
       2. ``'HLA-DRB*5301'``            – free-text
       3. ``'HLA-DRB'``                 – gene symbol prefix (fallback)
     """
     gene_prefix = hla_query.split('*')[0]   # e.g. 'HLA-DRB'
-    return _search_gene_db(
-        queries=[f"{hla_query}[gene name]", hla_query, gene_prefix],
-        feature_id=orig_feat,
-        source="hla_gene_db",
-    )
+    for term in [f"{hla_query}[gene name]", hla_query, gene_prefix]:
+        rows = _search_gene_db([term], feature_id=orig_feat, source="hla_gene_db")
+        hla_rows = [r for r in rows if str(r.get("NAME", "")).upper().startswith("HLA")]
+        if hla_rows:
+            return hla_rows
+    return []
 
 
 def query_hla_genes(hla_map: dict[str, str]) -> pd.DataFrame:
