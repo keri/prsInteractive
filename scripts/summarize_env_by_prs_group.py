@@ -149,6 +149,18 @@ def summarise(df: pd.DataFrame, env_cols: list) -> pd.DataFrame:
             rec['age_E11_diagnosis_mean']    = _mean(grp.get('age_E11_diagnosis', pd.Series(dtype=float)))
             rec['age_K90_diagnosis_mean']    = _mean(grp.get('age_K90_diagnosis', pd.Series(dtype=float)))
 
+            # % with diagnosis AFTER baseline assessment (diagnosis age > recruitment age)
+            for code in ('E11', 'K90'):
+                diag_col  = f'age_{code}_diagnosis'
+                part_col  = 'age_at_participation'
+                if diag_col in grp.columns and part_col in grp.columns:
+                    both_known = grp[[diag_col, part_col]].dropna()
+                    if len(both_known) > 0:
+                        pct = round(
+                            (both_known[diag_col] > both_known[part_col]).mean() * 100, 1
+                        )
+                        rec[f'pct_{code}_diagnosis_after_assessment'] = pct
+
             for feat in env_cols:
                 if feat in grp.columns:
                     rec[f'{feat}_mean'] = _mean(grp[feat])
