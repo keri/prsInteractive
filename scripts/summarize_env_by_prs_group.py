@@ -128,14 +128,12 @@ def _pct_male(series: pd.Series) -> float | None:
     return round(float(v.mean() * 100), 1) if len(v) > 0 else None
 
 
-def summarise(df: pd.DataFrame, model_e_features: dict, env_cols: list) -> pd.DataFrame:
+def summarise(df: pd.DataFrame, env_cols: list) -> pd.DataFrame:
     records = []
 
     for bin_col, model in BIN_TO_MODEL.items():
         if bin_col not in df.columns:
             continue
-
-        e_features = [f for f in model_e_features.get(model, []) if f in env_cols]
 
         groups = {
             'controls':        df[df['PHENOTYPE'] == 1],
@@ -151,7 +149,7 @@ def summarise(df: pd.DataFrame, model_e_features: dict, env_cols: list) -> pd.Da
             rec['age_E11_diagnosis_mean']    = _mean(grp.get('age_E11_diagnosis', pd.Series(dtype=float)))
             rec['age_K90_diagnosis_mean']    = _mean(grp.get('age_K90_diagnosis', pd.Series(dtype=float)))
 
-            for feat in e_features:
+            for feat in env_cols:
                 if feat in grp.columns:
                     rec[f'{feat}_mean'] = _mean(grp[feat])
 
@@ -164,7 +162,6 @@ def process_file(
     groups_path: str,
     demog: pd.DataFrame,
     env: pd.DataFrame,
-    model_e_features: dict,
 ) -> pd.DataFrame:
     df = pd.read_csv(groups_path)
     df = add_bins_from_scaled(df)
@@ -174,10 +171,10 @@ def process_file(
     df = df.merge(env_renamed,  on='IID', how='left')
 
     env_cols = [c for c in env.columns if c != 'Participant ID']
-    return summarise(df, model_e_features, env_cols)
+    return summarise(df, env_cols)
 
 
-def main(pheno_path: str, data_path: str, combined_path: str) -> None:
+def main(pheno_path: str, data_path: str) -> None:
     print(f"Loading demographics : {data_path}/participant.csv")
     demog = load_demographics(data_path)
     print(f"  {len(demog)} participants")
@@ -186,12 +183,6 @@ def main(pheno_path: str, data_path: str, combined_path: str) -> None:
     print(f"Loading environment  : {env_path}")
     env = pd.read_csv(env_path)
     print(f"  {len(env)} participants, {len(env.columns) - 1} E features")
-
-    print(f"Loading combined model: {combined_path}")
-    model_e_features = get_model_e_features(combined_path)
-    for m, feats in sorted(model_e_features.items()):
-        if feats:
-            print(f"  {m}: {len(feats)} E features")
 
     scores_dir = os.path.join(pheno_path, 'combinedAnalysis', 'scores')
 
@@ -205,7 +196,7 @@ def main(pheno_path: str, data_path: str, combined_path: str) -> None:
             continue
 
         print(f"\nProcessing {label}: {fpath}")
-        summary = process_file(fpath, demog, env, model_e_features)
+        summary = process_file(fpath, demog, env)
 
         out_path = os.path.join(pheno_path, out_name)
         summary.to_csv(out_path, index=False)
@@ -239,8 +230,4 @@ if __name__ == '__main__':
     )
     args = parser.parse_args()
 
-    combined_path = args.combined_path or os.path.join(
-        args.pheno_path, 'combinedAnalysis', 'scores',
-        'featureScoresReducedFinalModel.combined.filtered.csv',
-    )
-    main(args.pheno_path, args.data_path, combined_path)
+    main(args.pheno_path, args.data_path)
