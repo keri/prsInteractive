@@ -55,6 +55,7 @@ BIN_TO_MODEL = {
     'bin_main':           'main',
     'bin_epi_summed':     'epi_summed',
     'bin_cardio_summed':  'cardio_summed',
+    'bin_combined':       'combined',
 }
 
 SCALED_TO_BIN = {
@@ -63,6 +64,7 @@ SCALED_TO_BIN = {
     'scaled_prs_main':           'bin_main',
     'scaled_prs_epi_summed':     'bin_epi_summed',
     'scaled_prs_cardio_summed':  'bin_cardio_summed',
+    'scaled_prs_combined':       'bin_combined',
 }
 
 
@@ -134,18 +136,30 @@ def _pct_male(series: pd.Series) -> float | None:
     return round(float(v.mean() * 100), 1) if len(v) > 0 else None
 
 
-def summarise(df: pd.DataFrame, env_cols: list) -> pd.DataFrame:
+def summarise(df: pd.DataFrame, env_cols: list, diagnosis_code: str = '') -> pd.DataFrame:
+    """
+    diagnosis_code: 'E11' for T2D, 'K90' for celiac.  Only that code's
+    pct_after_assessment column is written; pass '' to compute both.
+    The pct is per-person: fraction of individuals (among those with a
+    known diagnosis date) whose age-at-diagnosis > age-at-participation.
+    """
     records = []
 
     for bin_col, model in BIN_TO_MODEL.items():
         if bin_col not in df.columns:
             continue
 
+        # Top-two-decile threshold: works for both 1-10 and 1-1000 bin scales
+        bin_max = df[bin_col].max()
+        high_risk_threshold = bin_max * 0.8
+
         groups = {
             'controls':        df[df['PHENOTYPE'] == 1],
             'all_cases':       df[df['PHENOTYPE'] == 2],
-            'high_risk_cases': df[(df['PHENOTYPE'] == 2) & (df[bin_col].isin([9, 10]))],
+            'high_risk_cases': df[(df['PHENOTYPE'] == 2) & (df[bin_col] > high_risk_threshold)],
         }
+
+        codes_to_report = (diagnosis_code,) if diagnosis_code else ('E11', 'K90')
 
         for group_name, grp in groups.items():
             rec: dict = {'model': model, 'group': group_name, 'n': len(grp)}
@@ -155,10 +169,11 @@ def summarise(df: pd.DataFrame, env_cols: list) -> pd.DataFrame:
             rec['age_E11_diagnosis_mean']    = _mean(grp.get('age_E11_diagnosis', pd.Series(dtype=float)))
             rec['age_K90_diagnosis_mean']    = _mean(grp.get('age_K90_diagnosis', pd.Series(dtype=float)))
 
-            # % with diagnosis AFTER baseline assessment (diagnosis age > recruitment age)
-            for code in ('E11', 'K90'):
-                diag_col  = f'age_{code}_diagnosis'
-                part_col  = 'age_at_participation'
+            # Per-person: fraction of individuals (with known diagnosis date)
+            # whose age-at-diagnosis > age-at-recruitment.
+            part_col = 'age_at_participation'
+            for code in codes_to_report:
+                diag_col = f'age_{code}_diagnosis'
                 if diag_col in grp.columns and part_col in grp.columns:
                     both_known = grp[[diag_col, part_col]].dropna()
                     if len(both_known) > 0:
@@ -180,6 +195,7 @@ def process_file(
     groups_path: str,
     demog: pd.DataFrame,
     env: pd.DataFrame,
+    diagnosis_code: str = '',
 ) -> pd.DataFrame:
     df = pd.read_csv(groups_path)
     df = add_bins_from_scaled(df)
@@ -189,7 +205,7 @@ def process_file(
     df = df.merge(env_renamed,  on='IID', how='left')
 
     env_cols = [c for c in env.columns if c != 'Participant ID']
-    return summarise(df, env_cols)
+    return summarise(df, env_cols, diagnosis_code=diagnosis_code)
 
 
 SKIP_PREFIXES = (
@@ -294,18 +310,34 @@ def make_clinical_comparison(
     return merged
 
 
-def get_cardio_e_features(combined_path: str) -> list[str]:
-    """Return sorted list of E feature names used in any cardio (GxGxE / G+GxE) model."""
-    model_e = get_model_e_features(combined_path)
-    cardio_models = {'cardio_product', 'cardio_summed'}
+def get_cardio_e_features(combined_path: str, env_cols: set[str]) -> list[str]:
+    """Return sorted list of E feature names with non-zero betas in cardio
+    (GxGxE / G+GxE) models that are present in participant_environment.csv."""
+    combined = pd.read_csv(combined_path)
+    cardio = combined[
+        combined['model'].isin({'cardio_product', 'cardio_summed'}) &
+        (combined['coefs'] != 0)
+    ]
     features: set[str] = set()
-    for model, feats in model_e.items():
-        if model in cardio_models:
-            features.update(feats)
+    for f in cardio['feature'].astype(str):
+        if ',' in f:
+            tok = f.split(',')[0]
+            if tok not in SKIP_TERMS and not _RS_RE.match(tok) and tok in env_cols:
+                features.add(tok)
     return sorted(features)
 
 
 def main(pheno_path: str, data_path: str, combined_path: str) -> None:
+    # Detect which diagnosis code is the primary outcome for this phenotype
+    path_lower = pheno_path.lower()
+    if 'type2' in path_lower or 't2d' in path_lower:
+        diagnosis_code = 'E11'
+    elif 'celiac' in path_lower or 'coeliac' in path_lower:
+        diagnosis_code = 'K90'
+    else:
+        diagnosis_code = ''
+    print(f"Primary diagnosis code: {diagnosis_code or '(both E11 and K90)'}")
+
     print(f"Loading demographics : {data_path}/participant.csv")
     demog = load_demographics(data_path)
     print(f"  {len(demog)} participants")
@@ -315,9 +347,10 @@ def main(pheno_path: str, data_path: str, combined_path: str) -> None:
     env = pd.read_csv(env_path)
     print(f"  {len(env)} participants, {len(env.columns) - 1} E features")
 
+    env_cols = set(env.columns) - {'Participant ID'}
     print(f"Loading cardio E terms: {combined_path}")
-    cardio_features = get_cardio_e_features(combined_path)
-    print(f"  {len(cardio_features)} unique E features across cardio models: {cardio_features}")
+    cardio_features = get_cardio_e_features(combined_path, env_cols)
+    print(f"  {len(cardio_features)} unique E features (non-zero beta, cardio models): {cardio_features}")
 
     # Load clinical measures file (holdout only)
     clinical_path = os.path.join(
@@ -338,10 +371,10 @@ def main(pheno_path: str, data_path: str, combined_path: str) -> None:
     summaries: dict[str, pd.DataFrame] = {}
 
     for fname, label, out_name, cardio_out_name in [
-        ('combinedPRSGroups.csv',         'discovery',
+        ('combinedPRSGroups.filtered.csv',         'discovery',
          'env_summary_by_prs_group.csv',
          'env_summary_cardio_features.csv'),
-        ('combinedPRSGroups.holdout.csv', 'holdout',
+        ('combinedPRSGroups.holdout.filtered.csv', 'holdout',
          'env_summary_by_prs_group.holdout.csv',
          'env_summary_cardio_features.holdout.csv'),
     ]:
@@ -351,7 +384,7 @@ def main(pheno_path: str, data_path: str, combined_path: str) -> None:
             continue
 
         print(f"\nProcessing {label}: {fpath}")
-        summary = process_file(fpath, demog, env)
+        summary = process_file(fpath, demog, env, diagnosis_code=diagnosis_code)
         summaries[label] = summary
 
         # Full E-feature output
@@ -359,11 +392,19 @@ def main(pheno_path: str, data_path: str, combined_path: str) -> None:
         summary.to_csv(out_path, index=False)
         print(f"  Wrote {len(summary)} rows (all E features) → {out_path}")
 
-        # Cardio-features-only table output
+        # Cardio-features-only table output — include only the primary diagnosis pct column
+        diag_pct_col = f'pct_{diagnosis_code}_diagnosis_after_assessment' if diagnosis_code else None
         meta_cols = ['model', 'group', 'n', 'pct_male',
                      'age_at_participation_mean',
-                     'age_E11_diagnosis_mean', 'pct_E11_diagnosis_after_assessment',
-                     'age_K90_diagnosis_mean', 'pct_K90_diagnosis_after_assessment']
+                     'age_E11_diagnosis_mean', 'age_K90_diagnosis_mean']
+        if diag_pct_col:
+            # Insert pct column immediately after the relevant diagnosis age column
+            age_col = f'age_{diagnosis_code}_diagnosis_mean'
+            idx = meta_cols.index(age_col) + 1 if age_col in meta_cols else len(meta_cols)
+            meta_cols.insert(idx, diag_pct_col)
+        else:
+            meta_cols += ['pct_E11_diagnosis_after_assessment',
+                          'pct_K90_diagnosis_after_assessment']
         cardio_mean_cols = [f'{f}_mean' for f in cardio_features if f'{f}_mean' in summary.columns]
         keep_cols = [c for c in meta_cols if c in summary.columns] + cardio_mean_cols
         cardio_out_path = os.path.join(pheno_path, cardio_out_name)
@@ -398,6 +439,7 @@ if __name__ == '__main__':
     )
     parser.add_argument(
         '--pheno_path', required=True,
+        default='/Users/kerimulterer/prsInteractive/results/type2Diabetes',
         help='Path to phenotype results directory (e.g. results/type2Diabetes)',
     )
     parser.add_argument(
