@@ -142,51 +142,45 @@ def summarise(df: pd.DataFrame, env_cols: list, diagnosis_code: str = '') -> pd.
     pct_after_assessment column is written; pass '' to compute both.
     The pct is per-person: fraction of individuals (among those with a
     known diagnosis date) whose age-at-diagnosis > age-at-participation.
+
+    controls and all_cases are model-independent and computed once (model='all').
+    high_risk_cases are computed per model since they depend on each bin column.
     """
     records = []
+    codes_to_report = (diagnosis_code,) if diagnosis_code else ('E11', 'K90')
 
+    def _build_rec(model: str, group_name: str, grp: pd.DataFrame) -> dict:
+        rec: dict = {'model': model, 'group': group_name, 'n': len(grp)}
+        rec['pct_male']                  = _pct_male(grp.get('is_male', pd.Series(dtype=float)))
+        rec['age_at_participation_mean'] = _mean(grp.get('age_at_participation', pd.Series(dtype=float)))
+        rec['age_E11_diagnosis_mean']    = _mean(grp.get('age_E11_diagnosis', pd.Series(dtype=float)))
+        rec['age_K90_diagnosis_mean']    = _mean(grp.get('age_K90_diagnosis', pd.Series(dtype=float)))
+        part_col = 'age_at_participation'
+        for code in codes_to_report:
+            diag_col = f'age_{code}_diagnosis'
+            if diag_col in grp.columns and part_col in grp.columns:
+                both_known = grp[[diag_col, part_col]].dropna()
+                if len(both_known) > 0:
+                    pct = round(
+                        (both_known[diag_col] > both_known[part_col]).mean() * 100, 1
+                    )
+                    rec[f'pct_{code}_diagnosis_after_assessment'] = pct
+        for feat in env_cols:
+            if feat in grp.columns:
+                rec[f'{feat}_mean'] = _mean(grp[feat])
+        return rec
+
+    # controls and all_cases are identical across models — compute once
+    records.append(_build_rec('all', 'controls',  df[df['PHENOTYPE'] == 1]))
+    records.append(_build_rec('all', 'all_cases', df[df['PHENOTYPE'] == 2]))
+
+    # high_risk_cases depend on each model's bin column
     for bin_col, model in BIN_TO_MODEL.items():
         if bin_col not in df.columns:
             continue
-
-        # Top-two-decile threshold: works for both 1-10 and 1-1000 bin scales
         bin_max = df[bin_col].max()
-        high_risk_threshold = bin_max * 0.8
-
-        groups = {
-            'controls':        df[df['PHENOTYPE'] == 1],
-            'all_cases':       df[df['PHENOTYPE'] == 2],
-            'high_risk_cases': df[(df['PHENOTYPE'] == 2) & (df[bin_col] > high_risk_threshold)],
-        }
-
-        codes_to_report = (diagnosis_code,) if diagnosis_code else ('E11', 'K90')
-
-        for group_name, grp in groups.items():
-            rec: dict = {'model': model, 'group': group_name, 'n': len(grp)}
-
-            rec['pct_male']                  = _pct_male(grp.get('is_male', pd.Series(dtype=float)))
-            rec['age_at_participation_mean'] = _mean(grp.get('age_at_participation', pd.Series(dtype=float)))
-            rec['age_E11_diagnosis_mean']    = _mean(grp.get('age_E11_diagnosis', pd.Series(dtype=float)))
-            rec['age_K90_diagnosis_mean']    = _mean(grp.get('age_K90_diagnosis', pd.Series(dtype=float)))
-
-            # Per-person: fraction of individuals (with known diagnosis date)
-            # whose age-at-diagnosis > age-at-recruitment.
-            part_col = 'age_at_participation'
-            for code in codes_to_report:
-                diag_col = f'age_{code}_diagnosis'
-                if diag_col in grp.columns and part_col in grp.columns:
-                    both_known = grp[[diag_col, part_col]].dropna()
-                    if len(both_known) > 0:
-                        pct = round(
-                            (both_known[diag_col] > both_known[part_col]).mean() * 100, 1
-                        )
-                        rec[f'pct_{code}_diagnosis_after_assessment'] = pct
-
-            for feat in env_cols:
-                if feat in grp.columns:
-                    rec[f'{feat}_mean'] = _mean(grp[feat])
-
-            records.append(rec)
+        high_risk = df[(df['PHENOTYPE'] == 2) & (df[bin_col] > bin_max * 0.8)]
+        records.append(_build_rec(model, 'high_risk_cases', high_risk))
 
     return pd.DataFrame(records)
 
@@ -454,7 +448,6 @@ if __name__ == '__main__':
              '(default: <pheno_path>/combinedAnalysis/scores/...)',
     )
     args = parser.parse_args()
-
     combined_path = args.combined_path or os.path.join(
         args.pheno_path, 'combinedAnalysis', 'scores',
         'featureScoresReducedFinalModel.combined.filtered.csv',
