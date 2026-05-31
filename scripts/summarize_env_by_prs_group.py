@@ -11,7 +11,7 @@ For each PRS model in combinedPRSGroups.csv (and .holdout.csv separately):
   ------
   controls:        PHENOTYPE == 1
   all_cases:       PHENOTYPE == 2
-  high_risk_cases: PHENOTYPE == 2  AND  top-decile PRS bin (bin == 10)
+  high_risk_cases: PHENOTYPE == 2  AND  top-two-decile PRS bin (bin == 9 or 10)
 
   Metrics per group
   -----------------
@@ -144,7 +144,7 @@ def summarise(df: pd.DataFrame, env_cols: list) -> pd.DataFrame:
         groups = {
             'controls':        df[df['PHENOTYPE'] == 1],
             'all_cases':       df[df['PHENOTYPE'] == 2],
-            'high_risk_cases': df[(df['PHENOTYPE'] == 2) & (df[bin_col] == 10)],
+            'high_risk_cases': df[(df['PHENOTYPE'] == 2) & (df[bin_col].isin([9, 10]))],
         }
 
         for group_name, grp in groups.items():
