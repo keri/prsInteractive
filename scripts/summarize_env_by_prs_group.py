@@ -239,33 +239,34 @@ def summarise_clinical_binary(
 ) -> pd.DataFrame:
     """
     Compute binary prevalence (% positive) by model / group from the
-    ClinicalMeasures file.  High-risk defined by {model}_high_risk == 1
-    (this threshold differs from the top-decile bin==10 used in the
-    main env summary).
+    ClinicalMeasures file.
+
+    controls and all_cases are model-independent (model='all'), computed once.
+    high_risk_cases are per-model using each {model}_high_risk == 1 flag.
     """
     records = []
     hr_cols = [c for c in clinical_df.columns if c.endswith('_high_risk')]
 
+    def _binary_rec(model: str, group_name: str, grp: pd.DataFrame) -> dict:
+        rec: dict = {'model': model, 'group': group_name, 'n_clinical': len(grp)}
+        for feat in features:
+            bin_col = f'{feat}_binary'
+            if bin_col in grp.columns:
+                v = grp[bin_col].dropna()
+                rec[f'{feat}_pct_binary'] = (
+                    round(float(v.mean() * 100), 1) if len(v) > 0 else None
+                )
+        return rec
+
+    # controls and all_cases are identical across models — compute once
+    records.append(_binary_rec('all', 'controls',  clinical_df[clinical_df['PHENOTYPE'] == 1]))
+    records.append(_binary_rec('all', 'all_cases', clinical_df[clinical_df['PHENOTYPE'] == 2]))
+
+    # high_risk_cases depend on each model's flag
     for hr_col in hr_cols:
         model = hr_col.replace('_high_risk', '')
-        groups = {
-            'controls':        clinical_df[clinical_df['PHENOTYPE'] == 1],
-            'all_cases':       clinical_df[clinical_df['PHENOTYPE'] == 2],
-            'high_risk_cases': clinical_df[
-                (clinical_df['PHENOTYPE'] == 2) & (clinical_df[hr_col] == 1)
-            ],
-        }
-        for group_name, grp in groups.items():
-            rec: dict = {'model': model, 'group': group_name,
-                         'n_clinical': len(grp)}
-            for feat in features:
-                bin_col = f'{feat}_binary'
-                if bin_col in grp.columns:
-                    v = grp[bin_col].dropna()
-                    rec[f'{feat}_pct_binary'] = (
-                        round(float(v.mean() * 100), 1) if len(v) > 0 else None
-                    )
-            records.append(rec)
+        high_risk = clinical_df[(clinical_df['PHENOTYPE'] == 2) & (clinical_df[hr_col] == 1)]
+        records.append(_binary_rec(model, 'high_risk_cases', high_risk))
 
     return pd.DataFrame(records)
 
