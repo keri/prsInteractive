@@ -727,7 +727,13 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
         if run_exclusive:
             print('\n########################  EXCLUSIVE HIGH-CASES BOOTSTRAP'
                   '  ########################')
-            exclusive_groups = identify_exclusive_high_cases(groupedDf, models_bins_to_use)
+            # Only use one bin col per loaded model — excludes combined, case_bin,
+            # n_case_bins, prop_case_bins, and any column matching 'bin' via substring
+            # (e.g. prs_comBINed). bin_combined is also excluded because it aggregates
+            # all models and would make is_high_other True for nearly everyone.
+            core_bin_cols = [f'bin_{m}' for m in dfDict.keys()
+                             if f'bin_{m}' in groupedDf.columns]
+            exclusive_groups = identify_exclusive_high_cases(groupedDf, core_bin_cols)
 
             for cohort, group_data in exclusive_groups.items():
                 print(f'\n  --- Cohort: {cohort} ---')
