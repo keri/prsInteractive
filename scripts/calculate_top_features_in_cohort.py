@@ -530,7 +530,7 @@ def assign_groups(dfDict, featuresDf, trainingDataHigh, trainingDataLow):
 def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
          majority_threshold=0.6, delta_threshold=0.5, use_all=False,
          run_exclusive=False, n_exclusive_iterations=1000,
-         exclusive_z_threshold=1.0, filter_only=False):
+         exclusive_z_threshold=1.0, filter_only=False, use_set='holdout'):
 
     scoresPath = f'{phenoData}/scores'
     figPath = f'{phenoData}/figures/importantCohortFeatures'
@@ -549,18 +549,26 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
             )
         # Jump directly to filtering section below
     else:
-        combinedDf = pd.read_csv(f'{scoresPath}/combinedPRSGroups.filtered.csv')
+        if use_set == 'holdout':
+            combined_csv = f'{scoresPath}/combinedPRSGroups.holdout.filtered.csv'
+        else:
+            combined_csv = f'{scoresPath}/combinedPRSGroups.filtered.csv'
+        print(f'[use_set={use_set}] Reading combined PRS from: {combined_csv}')
+        combinedDf = pd.read_csv(combined_csv)
         models_bins_to_use = [m for m in combinedDf.columns if 'bin' in m]
         print('models to use ...', models_bins_to_use)
-  
+
         models_to_use = [m.replace('bin_', '') for m in models_bins_to_use]
         print('models to use are : ', models_to_use)
-  
+
         pattern = os.path.join(f'{scoresPath}/prsScores', "*mixed*")
         print('pattern to look for files is ..', pattern)
-  
+
         tempFiles = glob.glob(pattern)
-        prsFiles = [f for f in tempFiles if 'holdout' not in f]
+        if use_set == 'holdout':
+            prsFiles = [f for f in tempFiles if 'holdout' in f]
+        else:
+            prsFiles = [f for f in tempFiles if 'holdout' not in f]
         prsFilesFiltered = [f for f in prsFiles if 'FromAll' not in f]
   
         models_sorted = sorted(models_to_use, key=len, reverse=True)

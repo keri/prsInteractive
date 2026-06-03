@@ -525,7 +525,9 @@ def run_pipeline(pheno_data, feature_scores_file, raw_features_file,
                 threshold=threshold,
                 filter_strategy=filter_strategy,
                 majority_threshold=majority_threshold,
-                delta_threshold=delta_threshold
+                delta_threshold=delta_threshold,
+                use_all=use_all,
+                use_set=use_set,
             )
             step_status['genomic'] = 'success'
             print("  Step 1 completed successfully")
