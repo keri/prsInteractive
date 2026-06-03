@@ -502,7 +502,9 @@ def run_pipeline(pheno_data, feature_scores_file, raw_features_file,
                  use_set='holdout', threshold=1.99,
                  filter_strategy='tiered', majority_threshold=0.6,
                  delta_threshold=0.5, alpha=0.05, min_effect_size=0.1,
-                 skip_genomic=False, skip_clinical=False,use_all=False):
+                 skip_genomic=False, skip_clinical=False, use_all=False,
+                 run_exclusive=False, n_exclusive_iterations=1000,
+                 exclusive_z_threshold=1.0):
 
     output_path = os.path.join(pheno_data, 'scores', 'cohortSummary')
     fig_path = os.path.join(pheno_data, 'figures', 'cohortSummary')
@@ -528,6 +530,9 @@ def run_pipeline(pheno_data, feature_scores_file, raw_features_file,
                 delta_threshold=delta_threshold,
                 use_all=use_all,
                 use_set=use_set,
+                run_exclusive=run_exclusive,
+                n_exclusive_iterations=n_exclusive_iterations,
+                exclusive_z_threshold=exclusive_z_threshold,
             )
             step_status['genomic'] = 'success'
             print("  Step 1 completed successfully")
@@ -639,6 +644,12 @@ if __name__ == '__main__':
                         help="Skip step 1 and use existing genomic results (e.g. recompile only)")
     parser.add_argument("--skip_clinical", action='store_true', default=False,
                         help="Skip step 2 and use existing clinical results (e.g. recompile only)")
+    parser.add_argument("--run_exclusive", action='store_true', default=False,
+                        help="Run exclusive high-cases bootstrap GBM-SHAP analysis (default: False)")
+    parser.add_argument("--n_exclusive_iterations", type=int, default=1000,
+                        help="Bootstrap iterations for exclusive high-cases analysis (default: 1000)")
+    parser.add_argument("--exclusive_z_threshold", type=float, default=1.0,
+                        help="SHAP z-score threshold for exclusive high-cases (default: 1.0)")
       
 
     args = parser.parse_args()
@@ -686,6 +697,9 @@ if __name__ == '__main__':
         min_effect_size=args.min_effect_size,
         skip_genomic=args.skip_genomic,
         skip_clinical=args.skip_clinical,
-        use_all=args.use_all
+        use_all=args.use_all,
+        run_exclusive=args.run_exclusive,
+        n_exclusive_iterations=args.n_exclusive_iterations,
+        exclusive_z_threshold=args.exclusive_z_threshold,
     )
   

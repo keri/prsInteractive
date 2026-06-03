@@ -568,7 +568,7 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
             prsFiles = [f for f in tempFiles if 'holdout' in f]
         else:
             prsFiles = [f for f in tempFiles if 'holdout' not in f]
-        prsFilesFiltered = [f for f in prsFiles if 'FromAll' not in f]
+        prsFilesFiltered = [f for f in prsFiles if 'FromAll' not in f and not f.endswith('filtered.prs.csv')]
   
         models_sorted = sorted(models_to_use, key=len, reverse=True)
         filtered_files = []
@@ -647,10 +647,12 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
             report_df = pd.DataFrame(report_dict).transpose().reset_index()
   
             for i, cl in enumerate(groups):
-              probDfClass = pd.DataFrame(data=model.predict_proba(X_test)[i][:, 1])
+              proba_i = model.predict_proba(X_test)[i]
+              proba_pos = proba_i[:, 1] if proba_i.shape[1] > 1 else proba_i[:, 0]
+              probDfClass = pd.DataFrame(data=proba_pos)
               probDfClass.columns = [f'yHat.{cl}.features.{feature_str}']
-  
-              fpr, tpr, _ = roc_curve(y_test[cl], model.predict_proba(X_test)[i][:, 1])
+
+              fpr, tpr, _ = roc_curve(y_test[cl], proba_pos)
               roc_auc = auc(fpr, tpr)
               report_df.loc[report_df['index'] == cl, 'auc'] = roc_auc
               print(f'AUC for {cl}: {roc_auc}')
