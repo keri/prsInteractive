@@ -1,18 +1,24 @@
 """
 snpToGene.py
 ------------
-Two-stage pipeline driven entirely by the feature scores file — no
-separate pre-filtered G/GxG file is required.
+Two-stage pipeline driven by a penalized-model filter file.
 
   STAGE 1 – Build feature→gene lookup
   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  Read the feature scores CSV and extract three classes of queryable features:
+  Features are sourced from filter_file
+  (featureScoresReducedFinalModel.combined.filtered.csv).
+  Only rows with non-zero 'coefs' are queried.
+
+  Three classes of queryable features are extracted:
 
     rsID features   (G / GxG)   : 'rs12345' or 'rs12345,rs67890'
     HLA allele features          : 'DRB_5301' → queried as 'HLA-DRB*5301'
     Covariate features           : rows where model == 'covariate' — skipped
     Clinical / other features    : len(feature.split(',')) > 2, or no rsID
                                    and not HLA pattern — skipped
+
+  Previously queried SNPs are loaded from the output directory and skipped,
+  allowing incremental re-runs without redundant Entrez calls.
 
   Queries NCBI Entrez via three tiers (rsID) or gene-db direct search (HLA):
 
@@ -22,7 +28,7 @@ separate pre-filtered G/GxG file is required.
 
   STAGE 2 – Annotate feature scores
   ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  Merge gene annotations back onto every row of the feature scores file.
+  Merge gene annotations back onto every row of filter_file.
   Non-queryable rows (clinical, covariate) receive NaN in gene columns.
 
   Output:
@@ -38,9 +44,9 @@ separate pre-filtered G/GxG file is required.
 Usage
 -----
 python snpToGene.py \\
-    --feature_scores_file path/to/feature_scores.csv \\
-    --email               you@institution.edu \\
-    --output_path         ./snpToGene_output
+    --filter_file  path/to/featureScoresReducedFinalModel.combined.filtered.csv \\
+    --email        you@institution.edu \\
+    --output_path  ./snpToGene_output
 """
 
 # ---------------------------------------------------------------------------
@@ -154,82 +160,96 @@ def _hla_feature_to_query(feature: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# STAGE 1A – Extract queryable features from the feature scores file
+# STAGE 1A – Extract queryable features from filter_file
 # ---------------------------------------------------------------------------
 
-def extract_features_from_scores(
-    feature_scores_file: str,
+def extract_features_from_filter(
+    filter_file: str,
 ) -> tuple[set[str], dict[str, str]]:
     """
-    Extract queryable features from the full feature scores CSV.
+    Extract queryable rsIDs and HLA features from filter_file.
+
+    Only rows with non-zero 'coefs' are considered.
+    Covariate rows (model contains 'covariate') and intercept rows
+    (feature == '(Intercept)') are always excluded.
 
     Classification rules (applied in order)
     ----------------------------------------
-    1. Skip rows where ``model == 'covariate'``.  Covariate features
-       (age, sex, etc.) appear in every model and should not be queried.
-    2. Skip features where ``len(feature.split(',')) > 2``.  More than two
-       comma-separated tokens signals a clinical feature encoding where
-       index-0 is the trait name, not an rsID.
-    3. Try to parse rsIDs via ``_rsids_from_feature``.  Valid hits → snps.
-    4. If no rsIDs found and the feature matches the HLA allele pattern
-       (exactly one ``_``, both parts alphanumeric, no commas) →
-       convert to ``'HLA-<gene>*<allele>'`` and add to hla_map.
-    5. All remaining features are clinical / non-genomic — skipped.
+    1. Skip features where model contains 'covariate' (case-insensitive).
+    2. Skip features where feature == '(Intercept)'.
+    3. Skip features where ``coefs == 0``.
+    4. Skip features where ``len(feature.split(',')) > 2``.
+    5. Try to parse rsIDs via ``_rsids_from_feature``.  Valid hits → snps.
+    6. If no rsIDs found and the feature matches the HLA allele pattern → hla_map.
+    7. All remaining features are clinical / non-genomic — skipped.
 
     Returns
     -------
     snps    : set[str]         lower-cased rsIDs to query via SNP db tiers
     hla_map : dict[str, str]   {original_feature_lower: 'HLA-DRB*5301'}
     """
-    log.info("Loading feature scores file: %s", feature_scores_file)
-    df = pd.read_csv(feature_scores_file)
+    log.info("Loading filter file: %s", filter_file)
+    df = pd.read_csv(filter_file)
     log.info("  %d rows × %d columns loaded.", *df.shape)
 
     if "feature" not in df.columns:
         raise ValueError(
-            f"feature_scores_file must contain a 'feature' column. "
-            f"Found columns: {df.columns.tolist()}"
+            f"filter_file must contain a 'feature' column. "
+            f"Found: {df.columns.tolist()}"
+        )
+    if "coefs" not in df.columns:
+        raise ValueError(
+            f"filter_file must contain a 'coefs' column. "
+            f"Found: {df.columns.tolist()}"
         )
 
-    # Identify covariate features — present in every model, never genomic
-    covariate_features: set[str] = set()
+    # Identify covariate feature names from any covariate model row, then
+    # exclude those feature names across all models.
+    covariate_feature_names: set[str] = set()
     if "model" in df.columns:
-        covariate_features = set(
-            df.loc[df["model"] == "covariate", "feature"]
-            .dropna().str.strip().str.lower()
+        cov_model_mask = df["model"].str.contains("covariate", case=False, na=False)
+        covariate_feature_names = set(
+            df.loc[cov_model_mask, "feature"].dropna().str.strip().unique()
         )
-        if covariate_features:
-            log.info("  Excluding %d covariate features.", len(covariate_features))
+        log.info(
+            "  Identified %d covariate feature names (from %d covariate model rows).",
+            len(covariate_feature_names), int(cov_model_mask.sum()),
+        )
 
-    snps:    set[str]        = set()
-    hla_map: dict[str, str]  = {}
+    # Exclude: covariate features in any model + explicit intercept rows
+    exclude_mask = (
+        df["feature"].str.strip().isin(covariate_feature_names)
+        | (df["feature"].str.strip() == "(Intercept)")
+    )
+    log.info("  Excluding %d rows (covariate features or intercept, across all models).", int(exclude_mask.sum()))
+
+    nonzero_mask = (df["coefs"] != 0) & ~exclude_mask
+    log.info(
+        "  Keeping %d non-zero coef rows (dropping %d zero-coef rows).",
+        int(nonzero_mask.sum()), int((df["coefs"] == 0).sum()),
+    )
+    candidates = df.loc[nonzero_mask, "feature"].dropna().str.strip().unique()
+
+    snps:    set[str]       = set()
+    hla_map: dict[str, str] = {}
     n_clinical = 0
 
-    for feat in df["feature"].dropna().unique():
-        feat_str   = str(feat).strip()
-        feat_lower = feat_str.lower()
+    for feat in candidates:
+        feat_lower = feat.lower()
 
-        # Rule 1: skip covariates
-        if feat_lower in covariate_features:
-            continue
-
-        # Rule 2: skip multi-token clinical features
-        if len(feat_str.split(",")) > 2:
+        if len(feat.split(",")) > 2:
             n_clinical += 1
             continue
 
-        # Rule 3: rsID(s)
-        rsids = _rsids_from_feature(feat_str)
+        rsids = _rsids_from_feature(feat)
         if rsids:
             snps.update(rsids)
             continue
 
-        # Rule 4: HLA allele notation
         if _is_hla_feature(feat_lower):
             hla_map[feat_lower] = _hla_feature_to_query(feat_lower)
             continue
 
-        # Rule 5: everything else is clinical / non-genomic
         n_clinical += 1
 
     log.info(
@@ -240,26 +260,80 @@ def extract_features_from_scores(
 
 
 # ---------------------------------------------------------------------------
+# STAGE 1A (cache) – load previously queried results
+# ---------------------------------------------------------------------------
+
+def load_cache(
+    output_path: Path,
+) -> tuple[pd.DataFrame, pd.DataFrame, set[str]]:
+    """
+    Load existing Entrez results written by a prior run.
+
+    Reads gene_records.csv, g_features_snp_map.csv, and unmatched_snps.csv
+    from *output_path*.  Missing files are silently ignored.
+
+    Returns
+    -------
+    cached_gene_records : pd.DataFrame   (may be empty)
+    cached_snp_records  : pd.DataFrame   (may be empty)
+    already_queried     : set[str]       lower-cased rsIDs + HLA keys already done
+    """
+    already_queried: set[str] = set()
+
+    def _add_to_queried(values: "pd.Series") -> None:
+        """Extract individual rsIDs from cache values; keep non-rsID tokens as-is."""
+        for val in values.dropna().str.lower().unique():
+            rsids = _rsids_from_feature(val)
+            if rsids:
+                already_queried.update(rsids)
+            else:
+                already_queried.add(val)   # HLA feature keys, etc.
+
+    # gene_records: snpId column holds the queried rsID / HLA feature key
+    gene_p = output_path / "gene_records.csv"
+    cached_gene_records = pd.DataFrame()
+    if gene_p.exists():
+        cached_gene_records = pd.read_csv(gene_p)
+        if "snpId" in cached_gene_records.columns:
+            _add_to_queried(cached_gene_records["snpId"])
+        log.info(
+            "Cache: loaded %d gene records from %s",
+            len(cached_gene_records), gene_p,
+        )
+
+    # unmatched_snps: rsIDs that were queried but returned no gene
+    unmatched_p = output_path / "unmatched_snps.csv"
+    if unmatched_p.exists():
+        df_unmatched = pd.read_csv(unmatched_p)
+        if "rsid" in df_unmatched.columns:
+            _add_to_queried(df_unmatched["rsid"])
+        log.info(
+            "Cache: loaded %d unmatched rsIDs from %s",
+            len(df_unmatched), unmatched_p,
+        )
+
+    # g_features_snp_map: full SNP db summaries
+    snp_p = output_path / "g_features_snp_map.csv"
+    cached_snp_records = pd.DataFrame()
+    if snp_p.exists():
+        cached_snp_records = pd.read_csv(snp_p)
+        log.info(
+            "Cache: loaded %d SNP summary records from %s",
+            len(cached_snp_records), snp_p,
+        )
+
+    log.info("Cache: %d rsIDs / HLA keys already queried — will skip these.",
+             len(already_queried))
+    return cached_gene_records, cached_snp_records, already_queried
+
+
+# ---------------------------------------------------------------------------
 # STAGE 1B – Query Entrez  (three-tier gene lookup)
 # ---------------------------------------------------------------------------
 #
 # Tier 1 – SNP db GENES field  (most authoritative; gene_source = 'snp_db')
-#   esearch(db="snp") → esummary → DocumentSummary.GENES
-#   The SNP database directly annotates which genes a variant falls in or near.
-#
-# Tier 2 – elink SNP→gene  (gene_source = 'elink')
-#   The SNP record exists but GENES is empty (common for intergenic / older
-#   entries).  elink(dbfrom="snp", db="gene") traverses NCBI's cross-db
-#   link table and usually recovers the neighbouring gene(s).
-#
-# Tier 3 – gene db direct search  (gene_source = 'gene_db')
-#   The rsID is not in the SNP db at all (e.g. removed / merged rsIDs, or
-#   variants only deposited in the gene db).  esearch(db="gene", term=rsid)
-#   uses the gene db's full-text index which indexes associated rsIDs.
-#   Results are returned in NCBI relevance order (most relevant gene first).
-#
-# gene_rank records the 1-based position of each gene within its tier's
-# returned list, providing a lightweight proxy for relevance ordering.
+# Tier 2 – elink SNP→gene      (gene_source = 'elink')
+# Tier 3 – gene db direct search (gene_source = 'gene_db')
 # ---------------------------------------------------------------------------
 
 def _get_snp_uid(snp_id: str) -> list[str]:
@@ -340,17 +414,6 @@ def _search_gene_db(queries: list[str], feature_id: str,
     """
     Try each query string against the gene database in order; return results
     from the first query that yields hits.
-
-    Parameters
-    ----------
-    queries    : ordered list of search terms to try
-    feature_id : value to store in the snpId column of returned rows
-    source     : gene_source label ('gene_db' or 'hla_gene_db')
-    max_hits   : maximum number of gene UIDs to fetch
-
-    Returns
-    -------
-    list of gene-row dicts (may be empty)
     """
     for term in queries:
         try:
@@ -381,9 +444,7 @@ def _search_gene_db_for_hla(orig_feat: str, hla_query: str) -> list[dict]:
     Search the gene database for an HLA allele feature.
 
     Tries three progressively broader queries, returning the first batch that
-    contains at least one HLA-region gene (NAME starts with 'HLA').  This
-    prevents allele-number components (e.g. '202' in 'HLA-A*202') from
-    matching unrelated LOC/non-HLA genes in Entrez.
+    contains at least one HLA-region gene (NAME starts with 'HLA').
 
     Query order:
       1. ``'HLA-DRB*5301[gene name]'`` – field-tagged gene name search
@@ -399,26 +460,34 @@ def _search_gene_db_for_hla(orig_feat: str, hla_query: str) -> list[dict]:
     return []
 
 
-def query_hla_genes(hla_map: dict[str, str]) -> pd.DataFrame:
+def query_hla_genes(
+    hla_map: dict[str, str],
+    skip_keys: set[str] | None = None,
+) -> pd.DataFrame:
     """
     Query the NCBI gene database for each HLA allele feature.
 
     Parameters
     ----------
-    hla_map : {original_feature_lower: 'HLA-DRB*5301', ...}
-              Produced by extract_features_from_scores().
+    hla_map   : {original_feature_lower: 'HLA-DRB*5301', ...}
+    skip_keys : lower-cased feature keys already in the cache — skipped
 
     Returns
     -------
-    pd.DataFrame with columns: GENE_ID, NAME, snpId (=original feature key),
-                                gene_source='hla_gene_db', gene_rank
+    pd.DataFrame with columns: GENE_ID, NAME, snpId, gene_source, gene_rank
     """
     if not hla_map:
         return pd.DataFrame()
 
+    skip = {k.lower() for k in (skip_keys or set())}
+    to_query = {k: v for k, v in hla_map.items() if k not in skip}
+    skipped  = len(hla_map) - len(to_query)
+    if skipped:
+        log.info("Cache: skipping %d already-queried HLA feature(s).", skipped)
+
     rows: list[dict] = []
-    total = len(hla_map)
-    for i, (orig_feat, hla_query) in enumerate(sorted(hla_map.items()), 1):
+    total = len(to_query)
+    for i, (orig_feat, hla_query) in enumerate(sorted(to_query.items()), 1):
         log.info("[%d/%d] HLA query: %s → %s", i, total, orig_feat, hla_query)
         try:
             gene_rows = _search_gene_db_for_hla(orig_feat, hla_query)
@@ -435,6 +504,7 @@ def query_hla_genes(hla_map: dict[str, str]) -> pd.DataFrame:
 
 def query_entrez_for_genes(
     snps: set[str],
+    skip_snps: set[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame, set[str]]:
     """
     Query NCBI Entrez for gene associations for each rsID using a three-tier
@@ -444,23 +514,29 @@ def query_entrez_for_genes(
     Tier 2 – elink SNP→gene      (gene_source = 'elink')
     Tier 3 – gene db search      (gene_source = 'gene_db')
 
+    Parameters
+    ----------
+    snps      : set of lower-cased rsIDs to query
+    skip_snps : rsIDs already in the cache — skipped entirely
+
     Returns
     -------
-    snp_records : pd.DataFrame
-        Full SNP db DocumentSummary per rsID found in the SNP db
-        ('snpId' and 'IDList' columns added).
-    gene_records : pd.DataFrame
-        One row per (rsID × gene).  Columns: GENE_ID, NAME, snpId,
-        gene_source ('snp_db' | 'elink' | 'gene_db'), gene_rank.
-    unmatched : set[str]
-        rsIDs for which no gene was found via any tier.
+    snp_records : pd.DataFrame   Full SNP db DocumentSummary per rsID found
+    gene_records : pd.DataFrame  One row per (rsID × gene)
+    unmatched : set[str]         rsIDs for which no gene was found via any tier
     """
+    skip = {s.lower() for s in (skip_snps or set())}
+    to_query = sorted(s for s in snps if s not in skip)
+    skipped  = len(snps) - len(to_query)
+    if skipped:
+        log.info("Cache: skipping %d already-queried SNP(s).", skipped)
+
     snp_rows:  list[dict] = []
     gene_rows: list[dict] = []
     unmatched: set[str]   = set()
 
-    total = len(snps)
-    for i, snp in enumerate(sorted(snps), 1):
+    total = len(to_query)
+    for i, snp in enumerate(to_query, 1):
         log.info("[%d/%d] %s …", i, total, snp)
         found_genes = False
 
@@ -523,8 +599,7 @@ def query_entrez_for_genes(
                     log.warning("  elink gene fetch failed: %s", exc)
 
         # ------------------------------------------------------------------
-        # Tier 3: gene database direct search  (SNP not in SNP db at all,
-        #         or elink also returned nothing)
+        # Tier 3: gene database direct search
         # ------------------------------------------------------------------
         if not found_genes:
             try:
@@ -600,8 +675,6 @@ def build_snp_gene_map(gene_records: pd.DataFrame) -> dict[str, dict]:
 
     result: dict[str, dict] = {}
     for snp_id, grp in gr.groupby("SNPID"):
-        # Sort by tier rank then gene_rank so most relevant gene is first in
-        # the joined string; fall back to original order when cols are absent.
         if source_col and rank_col:
             grp = grp.copy()
             grp["_tier"] = grp[source_col].map(GENE_SOURCE_RANK).fillna(99)
@@ -615,7 +688,6 @@ def build_snp_gene_map(gene_records: pd.DataFrame) -> dict[str, dict]:
             ";".join(grp[id_col].dropna().astype(str).unique())
             if id_col else ""
         )
-        # Record the best (lowest-rank) source tier present for this SNP
         best_source = ""
         if source_col and not grp[source_col].isna().all():
             tier_vals = grp[source_col].dropna().map(GENE_SOURCE_RANK)
@@ -657,23 +729,8 @@ def merge_genes_into_feature_scores(
     snp2_gene_ids       : gene ID(s) for SNP2
     snp2_gene_source    : gene lookup tier for SNP2
     entrez_matched      : True if at least one rsID in this row had any gene hit
-
-    Note: ``feature_type`` (G / GxG / other) is used internally to drive
-    annotation logic but is not written to the output because it is
-    redundant with the existing ``model`` column.
-
-    Parameters
-    ----------
-    feature_scores_file : str
-        Full feature scores CSV (must have a 'feature' column).
-    snp_gene_map : dict
-        Lookup produced by build_snp_gene_map().
-
-    Returns
-    -------
-    pd.DataFrame  –  annotated feature scores
     """
-    log.info("Loading feature scores file: %s", feature_scores_file)
+    log.info("Loading feature scores file for annotation: %s", feature_scores_file)
     df = pd.read_csv(feature_scores_file)
     log.info("  %d rows × %d columns loaded.", *df.shape)
 
@@ -682,7 +739,7 @@ def merge_genes_into_feature_scores(
 
     def _annotate(feature: str) -> dict:
         rsids = _rsids_from_feature(feature)
-        ftype = _feature_type(rsids)   # used internally; not written to output
+        ftype = _feature_type(rsids)
 
         out = {
             "snp1"            : None,
@@ -696,7 +753,6 @@ def merge_genes_into_feature_scores(
             "entrez_matched"  : False,
         }
 
-        # HLA allele features — looked up by original feature key (lowercased)
         feat_lower = str(feature).strip().lower()
         if ftype == "other" and _is_hla_feature(feat_lower):
             hla_info = snp_gene_map.get(feat_lower, {})
@@ -711,7 +767,6 @@ def merge_genes_into_feature_scores(
         if ftype == "other":
             return out
 
-        # snp1 (always present for G and GxG)
         snp1      = rsids[0]
         snp1_info = snp_gene_map.get(snp1, {})
         out["snp1"]             = snp1
@@ -721,7 +776,6 @@ def merge_genes_into_feature_scores(
         if snp1_info:
             out["entrez_matched"] = True
 
-        # snp2 (GxG only)
         if ftype == "GxG" and len(rsids) >= 2:
             snp2      = rsids[1]
             snp2_info = snp_gene_map.get(snp2, {})
@@ -741,7 +795,6 @@ def merge_genes_into_feature_scores(
     )
     annotated = pd.concat([df, annotation_df], axis=1)
 
-    # Rename to consistent output column names before any further references
     annotated = annotated.rename(columns={
         "snp1":             "SNP1",
         "snp1_gene_names":  "gene_names_SNP1",
@@ -750,13 +803,10 @@ def merge_genes_into_feature_scores(
     })
 
     matched   = int(annotated["entrez_matched"].sum())
-    # Infer SNP vs other rows from the presence of a parsed SNP1 value;
-    # feature_type is no longer written to the output.
     snp_rows  = annotated["SNP1"].notna().sum()
     unmatched = int(snp_rows - matched)
     other     = int(annotated["SNP1"].isna().sum())
 
-    # Source-tier breakdown (genomic rows only)
     source_counts = (
         annotated["snp1_gene_source"].value_counts().to_dict()
         if "snp1_gene_source" in annotated.columns else {}
@@ -780,7 +830,7 @@ def merge_genes_into_feature_scores(
 # ---------------------------------------------------------------------------
 
 def run(
-    feature_scores_file: str,
+    filter_file: str,
     email: str,
     output_path: str,
 ) -> tuple[pd.DataFrame, pd.DataFrame, set[str], pd.DataFrame]:
@@ -789,10 +839,13 @@ def run(
 
     Parameters
     ----------
-    feature_scores_file : Full feature scores CSV.  rsIDs, HLA allele features,
-                          and covariate exclusions are all derived from this file.
-    email               : NCBI Entrez email (required by NCBI policy).
-    output_path         : Directory for all outputs (created if absent).
+    filter_file  : featureScoresReducedFinalModel.combined.filtered.csv.
+                   Only features with non-zero 'coefs' are queried.
+                   This file is also annotated in Stage 2.
+    email        : NCBI Entrez email (required by NCBI policy).
+    output_path  : Directory for all outputs (created if absent).
+                   Existing gene_records.csv / unmatched_snps.csv are
+                   loaded as a cache and extended with new results.
 
     Returns
     -------
@@ -802,34 +855,63 @@ def run(
     out = Path(output_path)
     out.mkdir(parents=True, exist_ok=True)
 
-    # ---- Stage 1A: extract queryable features ------------------------------
-    snps, hla_map = extract_features_from_scores(feature_scores_file)
+    # ---- Stage 1A: load cache + extract queryable features -----------------
+    cached_gene_records, cached_snp_records, already_queried = load_cache(out)
+
+    snps, hla_map = extract_features_from_filter(filter_file)
 
     if not snps and not hla_map:
         log.warning("No queryable features (rsIDs or HLA alleles) found. Aborting.")
         return pd.DataFrame(), pd.DataFrame(), set(), pd.DataFrame()
 
-    # ---- Stage 1B: query SNP db (three-tier) -------------------------------
-    snp_records   = pd.DataFrame()
-    gene_records_snp = pd.DataFrame()
-    unmatched: set[str] = set()
+    # ---- Stage 1B: query SNP db (three-tier) — skip cached SNPs -----------
+    new_snp_records   = pd.DataFrame()
+    new_gene_records_snp = pd.DataFrame()
+    new_unmatched: set[str] = set()
 
     if snps:
-        snp_records, gene_records_snp, unmatched = query_entrez_for_genes(snps)
+        new_snp_records, new_gene_records_snp, new_unmatched = query_entrez_for_genes(
+            snps, skip_snps=already_queried,
+        )
 
-    # ---- Stage 1B (HLA): query gene db for HLA allele features -------------
-    gene_records_hla = query_hla_genes(hla_map)
+    # ---- Stage 1B (HLA): query gene db for HLA allele features — skip cached
+    new_gene_records_hla = query_hla_genes(hla_map, skip_keys=already_queried)
 
-    # Combine all gene records
-    gene_records = pd.concat(
-        [df for df in (gene_records_snp, gene_records_hla) if not df.empty],
+    # Merge new results with cache
+    new_gene_records = pd.concat(
+        [df for df in (new_gene_records_snp, new_gene_records_hla) if not df.empty],
         ignore_index=True,
-    ) if (not gene_records_snp.empty or not gene_records_hla.empty) else pd.DataFrame()
+    ) if (not new_gene_records_snp.empty or not new_gene_records_hla.empty) else pd.DataFrame()
+
+    gene_records = pd.concat(
+        [df for df in (cached_gene_records, new_gene_records) if not df.empty],
+        ignore_index=True,
+    ) if (not cached_gene_records.empty or not new_gene_records.empty) else pd.DataFrame()
+
+    snp_records = pd.concat(
+        [df for df in (cached_snp_records, new_snp_records) if not df.empty],
+        ignore_index=True,
+    ) if (not cached_snp_records.empty or not new_snp_records.empty) else pd.DataFrame()
+
+    # Unmatched = previously unmatched (from cache) + newly unmatched,
+    # minus any that were matched in a previous or current run
+    cached_unmatched: set[str] = set()
+    unmatched_p = out / "unmatched_snps.csv"
+    if unmatched_p.exists():
+        df_um = pd.read_csv(unmatched_p)
+        if "rsid" in df_um.columns:
+            cached_unmatched = set(df_um["rsid"].dropna().str.lower().unique())
+
+    matched_rsids: set[str] = set()
+    if not gene_records.empty and "snpId" in gene_records.columns:
+        matched_rsids = set(gene_records["snpId"].dropna().str.lower().unique())
+
+    unmatched = (cached_unmatched | new_unmatched) - matched_rsids
 
     # ---- Stage 1C: build lookup dict ---------------------------------------
     snp_gene_map = build_snp_gene_map(gene_records)
 
-    # ---- Stage 1 outputs ---------------------------------------------------
+    # ---- Stage 1 outputs (write full merged files) -------------------------
     if not snp_records.empty:
         p = out / "g_features_snp_map.csv"
         snp_records.to_csv(p, index=False)
@@ -840,18 +922,16 @@ def run(
         gene_records.to_csv(p, index=False)
         log.info("Per-(feature × gene) records written to: %s", p)
 
-    # Write unmatched even when empty — downstream scripts can rely on its existence
     p = out / "unmatched_snps.csv"
     pd.DataFrame(sorted(unmatched), columns=["rsid"]).to_csv(p, index=False)
     log.info(
-        "Unmatched rsIDs (%d) written to: %s  "
-        "(ready for Ensembl / OpenTargets / dbSNP REST lookup)",
+        "Unmatched rsIDs (%d) written to: %s",
         len(unmatched), p,
     )
 
-    # ---- Stage 2 -----------------------------------------------------------
+    # ---- Stage 2: annotate filter_file -------------------------------------
     feature_scores_annotated = merge_genes_into_feature_scores(
-        feature_scores_file, snp_gene_map
+        filter_file, snp_gene_map
     )
 
     p = out / "feature_scores_annotated.csv"
@@ -870,18 +950,21 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=(
             "Annotate a feature scores CSV with NCBI gene information.  "
-            "rsIDs, HLA allele features, and covariate exclusions are all "
-            "derived automatically from the feature scores file."
+            "Features are sourced from a penalized-model filter file (non-zero "
+            "coefs only) and an optional supplementary SNP input file.  "
+            "Previously queried SNPs are loaded from the output directory and "
+            "skipped, enabling incremental re-runs."
         )
     )
     parser.add_argument(
-        "--feature_scores_file",
+        "--filter_file",
         type=str,
         required=True,
         help=(
-            "Full feature scores CSV.  Must have 'feature' and (optionally) "
-            "'model' columns.  Covariate rows (model == 'covariate') are "
-            "excluded from querying; all rows are preserved in the output."
+            "featureScoresReducedFinalModel.combined.filtered.csv.  "
+            "Must have 'coefs', 'feature', and (optionally) 'model' columns.  "
+            "Only features with non-zero coefs are queried.  "
+            "This file is annotated in Stage 2."
         ),
     )
     parser.add_argument(
@@ -894,16 +977,20 @@ if __name__ == "__main__":
         "--output_path",
         type=str,
         default="./snpToGene_output",
-        help="Output directory (created if absent). Default: ./snpToGene_output",
+        help=(
+            "Output directory (created if absent). Default: ./snpToGene_output.  "
+            "Existing gene_records.csv and unmatched_snps.csv are used as a "
+            "cache; new results are appended."
+        ),
     )
 
     args = parser.parse_args()
 
-    log.info("feature_scores_file : %s", args.feature_scores_file)
-    log.info("output_path         : %s", args.output_path)
+    log.info("filter_file  : %s", args.filter_file)
+    log.info("output_path  : %s", args.output_path)
 
     run(
-        feature_scores_file = args.feature_scores_file,
-        email               = args.email,
-        output_path         = args.output_path,
+        filter_file  = args.filter_file,
+        email        = args.email,
+        output_path  = args.output_path,
     )
