@@ -383,7 +383,7 @@ def compile_results(pheno_data, filter_strategy, use_set, output_path, fig_path)
         cohorts |= set(genomic_df['cohort'].unique())
     if not clinical_df.empty and 'cohort' in clinical_df.columns:
         cohorts |= set(clinical_df['cohort'].unique())
-    cohorts = sorted(cohorts)
+    cohorts = sorted(c for c in cohorts if isinstance(c, str))
     print(f"  Cohorts to summarise: {cohorts}")
 
     overview_rows = []

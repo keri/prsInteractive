@@ -510,18 +510,17 @@ def run_exclusive_high_bootstrap(
             featureImportance.to_csv(fh, index=False, header=False)
 
 
-def assign_groups(dfDict, featuresDf, trainingDataHigh, trainingDataLow):
+def assign_groups(dfDict, featuresDf, trainingDataHigh, trainingDataLow,
+                  high_thresh, low_thresh):
     groupDfList = []
     for g, df in dfDict.items():
-        try:
+        if 'IID' not in df.columns and 'Unnamed: 0' in df.columns:
             df.rename(columns={'Unnamed: 0': 'IID'}, inplace=True)
-        except KeyError:
-            pass
         df.set_index('IID', inplace=True)
         trainingDataHigh[g] = 0
-        trainingDataHigh.loc[trainingDataHigh[f'bin_{g}'] > 8, g] = 1
+        trainingDataHigh.loc[trainingDataHigh[f'bin_{g}'] > high_thresh, g] = 1
         trainingDataLow[g] = 0
-        trainingDataLow.loc[trainingDataLow[f'bin_{g}'] < 3, g] = 1
+        trainingDataLow.loc[trainingDataLow[f'bin_{g}'] < low_thresh, g] = 1
         df = df[featuresDf[featuresDf['model'] == g]['feature'].tolist()]
         groupDfList.append(df)
     return groupDfList
@@ -605,18 +604,21 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
         featuresDf = featuresDf[featuresDf['model'].isin(models_to_use)]
   
         groupedDf = combinedDf[models_bins_to_use + ['IID', 'PHENOTYPE']].set_index('IID')
-  
+
+        high_thresh, low_thresh = detect_bin_thresholds(groupedDf, models_bins_to_use)
+
         high_risk_mask = pd.Series(False, index=groupedDf.index)
         low_risk_mask = pd.Series(False, index=groupedDf.index)
         for col in models_bins_to_use:
-          high_risk_mask |= (groupedDf[col] > 8)
-          low_risk_mask |= (groupedDf[col] < 3)
-  
+            high_risk_mask |= (groupedDf[col] > high_thresh)
+            low_risk_mask |= (groupedDf[col] < low_thresh)
+
         trainingDataHigh = groupedDf[high_risk_mask & (groupedDf['PHENOTYPE'] == 2)]
         trainingDataLow = groupedDf[low_risk_mask & (groupedDf['PHENOTYPE'] == 1)]
-  
+
         groups = dfDict.keys()
-        groupDfList = assign_groups(dfDict, featuresDf, trainingDataHigh, trainingDataLow)
+        groupDfList = assign_groups(dfDict, featuresDf, trainingDataHigh, trainingDataLow,
+                                    high_thresh, low_thresh)
         featuresDf.rename(columns={'model': 'features_used'}, inplace=True)
   
         for trainingDataTuple in [(trainingDataHigh, 'HighCases'), (trainingDataLow, 'LowControls')]:
