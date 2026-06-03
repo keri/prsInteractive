@@ -90,7 +90,7 @@ def load_auc_results(scores_path):
     )
     if not os.path.exists(path):
         return pd.DataFrame()
-    return pd.read_csv(path)
+    return pd.read_csv(path, on_bad_lines='skip')
 
 
 def build_cohort_summary(cohort, genomic_df, clinical_df, auc_df):
@@ -635,9 +635,9 @@ if __name__ == '__main__':
                         help="include model with all features in analysis, default to False")
 
     # Pipeline control
-    parser.add_argument("--skip_genomic", action='store_true',
+    parser.add_argument("--skip_genomic", action='store_true', default=False,
                         help="Skip step 1 and use existing genomic results (e.g. recompile only)")
-    parser.add_argument("--skip_clinical", action='store_true',
+    parser.add_argument("--skip_clinical", action='store_true', default=False,
                         help="Skip step 2 and use existing clinical results (e.g. recompile only)")
       
 

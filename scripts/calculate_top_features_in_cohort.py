@@ -667,13 +667,15 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
               explainer = fasttreeshap.TreeExplainer(model.estimators_[i], algorithm='auto', n_jobs=-1)
               shap_explainer = explainer(X_test, check_additivity=False)
               shap_values = shap_explainer.values
-  
-              shap_df = pd.DataFrame(data=shap_values[:, :, 1], columns=features)
-              create_summary_plots(figPath, shap_values[:, :, 1], X_test, i, f'{cl}.{feature_str}.{trainingData_str}.')
+              # Binary RF: shape (n_samples, n_features, 2); single-class edge case: shape (..., 1)
+              shap_class = shap_values[:, :, 1] if shap_values.shape[2] > 1 else shap_values[:, :, 0]
+
+              shap_df = pd.DataFrame(data=shap_class, columns=features)
+              create_summary_plots(figPath, shap_class, X_test, i, f'{cl}.{feature_str}.{trainingData_str}.')
   
               topFeatures, mean_shap_values, shap_z_scores = get_top_shap_features(shap_df, data_type, threshold)
               plot_and_save_top_features(shap_z_scores, i, figPath, data_type)
-  
+
               featureImportance = pd.concat([shap_z_scores, mean_shap_values], axis=1)
               featureImportance.columns = ['z_score', 'mean_shap']
               featureImportance.dropna(inplace=True)
