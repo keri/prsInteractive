@@ -147,6 +147,53 @@ def build_previously_known_lookup(df: pd.DataFrame) -> dict:
             for snp, vals in snp_pk_values.items()}
 
 
+OR_COLS = {
+    1: ('previous_OR_SNP1', 'JOURNAL_SNP1', '95% CI (TEXT)_SNP1'),
+    2: ('previous_OR_SNP2', 'JOURNAL_SNP2', '95% CI (TEXT)_SNP2'),
+}
+
+
+def build_snp_or_lookup(df: pd.DataFrame) -> dict:
+    """
+    Build {rsid_lower: (or_val, journal, ci)} from all rows in the research file.
+
+    A SNP's OR/journal/CI are taken from any row where it appears as SNP1 or
+    SNP2 and has at least one of those values populated.  SNP1-position values
+    take priority over SNP2-position values.
+    """
+    lookup: dict = {}
+    for pos in (2, 1):  # SNP1 wins over SNP2 (processed last)
+        snp_col, or_col, j_col, ci_col = (
+            f'SNP{pos}', *OR_COLS[pos]
+        )
+        sub = df[[snp_col, or_col, j_col, ci_col]].dropna(subset=[snp_col])
+        sub = sub[sub[snp_col].astype(str).str.strip().str.lower() != 'nan']
+        has_value = sub[or_col].notna() | sub[j_col].notna() | sub[ci_col].notna()
+        for _, row in sub[has_value].iterrows():
+            key = str(row[snp_col]).strip().lower()
+            lookup[key] = (row[or_col], row[j_col], row[ci_col])
+    return lookup
+
+
+def fill_or_journal_ci(merged: pd.DataFrame, snp_or_lookup: dict) -> pd.DataFrame:
+    """
+    Fill missing previous_OR/JOURNAL/CI columns using per-SNP lookup.
+    Only fills where the value is currently missing.
+    """
+    merged = merged.copy()
+    for pos, (or_col, j_col, ci_col) in OR_COLS.items():
+        snp_col = f'SNP{pos}'
+        missing_mask = merged[or_col].isna() & merged[snp_col].notna()
+        for idx in merged.index[missing_mask]:
+            key = str(merged.at[idx, snp_col]).strip().lower()
+            if key and key != 'nan' and key in snp_or_lookup:
+                or_v, j_v, ci_v = snp_or_lookup[key]
+                merged.at[idx, or_col] = or_v
+                merged.at[idx, j_col]  = j_v
+                merged.at[idx, ci_col] = ci_v
+    return merged
+
+
 def fill_previously_known(merged: pd.DataFrame, snp_lookup: dict) -> pd.DataFrame:
     """
     Fill missing previously_known using per-SNP lookups.
@@ -213,6 +260,13 @@ def main(pheno_path: str) -> None:
     print(f"  Per-SNP lookup built: {len(snp_pk_lookup)} unique rsIDs")
     merged = fill_previously_known(merged, snp_pk_lookup)
     print(f"  {merged['previously_known'].notna().sum()} rows with previously_known after SNP fill")
+
+    # Fill missing OR/JOURNAL/CI from per-SNP lookup
+    snp_or_lookup = build_snp_or_lookup(prev_research)
+    print(f"  OR/journal lookup built: {len(snp_or_lookup)} unique rsIDs")
+    merged = fill_or_journal_ci(merged, snp_or_lookup)
+    print(f"  previous_OR_SNP1 filled for {merged['previous_OR_SNP1'].notna().sum()} rows after SNP fill")
+    print(f"  previous_OR_SNP2 filled for {merged['previous_OR_SNP2'].notna().sum()} rows after SNP fill")
 
     # Drop covariate rows
     before = len(merged)
