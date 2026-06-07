@@ -548,6 +548,11 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
             )
         # Jump directly to filtering section below
     else:
+        # Reset output files so each full run starts clean rather than
+        # appending to stale results from a previous run with a different schema.
+        for _f in (featureImportanceFile, aucTableFile):
+            if os.path.exists(_f):
+                os.remove(_f)
         if use_set == 'holdout':
             combined_csv = f'{scoresPath}/combinedPRSGroups.holdout.filtered.csv'
         else:
