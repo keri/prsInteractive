@@ -5,13 +5,14 @@ cluster_subtype_dotmatrix.py
 Bubble (dot-matrix) chart: functional clusters × T2D subtypes,
 with bubble size ∝ % of cohort features and colour per PRS model.
 
-Reads from:
-  results/type2Diabetes/subtypeResearch/enrichment/cluster_subtype_cohort_weighted.csv
+Reads:
+  results/type2Diabetes/combinedAnalysis/scores/functionalEnrichment/
+      cluster_subtype_cohort_weighted.csv
 
 Usage
 -----
-python scripts/cluster_subtype_dotmatrix.py \
-    [--data   PATH_TO_CSV] \
+python scripts/cluster_subtype_dotmatrix.py \\
+    [--data   PATH_TO_CSV] \\
     [--out_dir OUTPUT_DIR]
 """
 import argparse
@@ -25,7 +26,7 @@ import matplotlib.patches as mpatches
 import matplotlib.lines as mlines
 import pandas as pd
 
-# ── Cohort → PRS model label ──────────────────────────────────────────────────
+# ── Cohort → PRS model key ────────────────────────────────────────────────────
 COHORT_MODEL = {
     'main':           'PRS_G',
     'epi_summed':     'PRS_G+G',
@@ -66,56 +67,62 @@ SUBTYPES = ['SAID', 'SIDD', 'MOD', 'MARD', 'SIRD']
 
 MODELS = ['PRS_G', 'PRS_G+G', 'PRS_GxG', 'PRS_G+GxE', 'PRS_GxGxE']
 MODEL_LABELS = {
-    'PRS_G':       'PRS\u2082G  (additive)',
-    'PRS_G+G':     'PRS\u2082G+G  (G burden)',
-    'PRS_GxG':     'PRS\u2082GxG  (epistasis)',
-    'PRS_G+GxE':   'PRS\u2082G+GxE',
-    'PRS_GxGxE':   'PRS\u2082GxGxE',
+    'PRS_G':     'PRS₂G  (additive)',
+    'PRS_G+G':   'PRS₂G+G (G burden)',
+    'PRS_GxG':   'PRS₂GxG (epistasis)',
+    'PRS_G+GxE': 'PRS₂G+GxE',
+    'PRS_GxGxE': 'PRS₂GxGxE',
 }
 MODEL_COLORS = {
-    'PRS_G':       '#E69F00',   # orange      (main)
-    'PRS_G+G':     '#0073A8',   # dark blue   (epi_summed)
-    'PRS_GxG':     '#56B4E9',   # sky blue    (epi_product)
-    'PRS_G+GxE':   '#006B52',   # dark green  (cardio_summed)
-    'PRS_GxGxE':   '#009E73',   # blue-green  (cardio_product)
+    'PRS_G':     '#E69F00',  # amber        (main)
+    'PRS_G+G':   '#0073A8',  # dark blue    (epi_summed)
+    'PRS_GxG':   '#56B4E9',  # sky blue     (epi_product)
+    'PRS_G+GxE': '#009E73',  # teal-green   (cardio_summed)
+    'PRS_GxGxE': '#006B52',  # forest green (cardio_product)
 }
 
+# Background colour per section
 CLUSTER_BG = {
-    'HLA autoimmune':        '#fff3f3',
-    'Beta-cell (1+2)':       '#f0f7ff',
-    'Proinsulin':            '#f0f7ff',
-    'Residual glycaemia':    '#f0f7ff',
-    'Hyper-ins. secretion':  '#f0f7ff',
-    'Liver / lipid metab.':  '#f6fff0',
-    'Obesity / body fat':    '#f6fff0',
-    'Metabolic syndrome':    '#f6fff0',
-    'Lipodystrophy':         '#f6fff0',
+    'HLA autoimmune':       '#fde8e8',  # soft pink   (immune)
+    'Beta-cell (1+2)':      '#e4eff9',  # soft blue
+    'Proinsulin':           '#e4eff9',
+    'Residual glycaemia':   '#e4eff9',
+    'Hyper-ins. secretion': '#e4eff9',
+    'Liver / lipid metab.': '#e8f5e3',  # soft green  (metabolic)
+    'Obesity / body fat':   '#e8f5e3',
+    'Metabolic syndrome':   '#e8f5e3',
+    'Lipodystrophy':        '#e8f5e3',
 }
+
+# Area (pt²) for 50 % weight — sets the overall bubble scale
+MAX_AREA = 4200
+
+
+def pct_to_area(pct: float) -> float:
+    return pct / 50.0 * MAX_AREA
 
 
 def load_data(csv_path: str) -> pd.DataFrame:
     raw = pd.read_csv(csv_path)
-
-    # Keep only mapped cohorts and cluster keys
     raw = raw[raw['cohort'].isin(COHORT_MODEL)]
-    raw = raw[raw['cluster_key'].isin(CLUSTER_MERGE)]
+    raw = raw[raw['cluster_key'].isin(CLUSTER_MERGE)].copy()
 
-    raw = raw.copy()
     raw['model']   = raw['cohort'].map(COHORT_MODEL)
     raw['cluster'] = raw['cluster_key'].map(CLUSTER_MERGE)
 
-    # Sum weighted_n across merged clusters (cohort_total_w is constant per cohort)
     grouped = (
         raw.groupby(['model', 'cluster', 'subtype'])
            .agg(weighted_n=('weighted_n', 'sum'),
                 cohort_total_w=('cohort_total_w', 'first'))
            .reset_index()
     )
-    grouped['weight'] = (grouped['weighted_n'] / grouped['cohort_total_w'] * 100).round(1)
+    grouped['weight'] = (
+        grouped['weighted_n'] / grouped['cohort_total_w'] * 100
+    ).round(1)
     return grouped[grouped['weight'] > 0].copy()
 
 
-def make_figure(df: pd.DataFrame, out_dir: str):
+def make_figure(df: pd.DataFrame, out_dir: str) -> None:
     n_clusters = len(CLUSTERS)
     n_subtypes = len(SUBTYPES)
 
@@ -123,113 +130,122 @@ def make_figure(df: pd.DataFrame, out_dir: str):
     subtype_idx = {s: i for i, s in enumerate(SUBTYPES)}
     model_idx   = {m: i for i, m in enumerate(MODELS)}
 
-    offsets = np.linspace(-0.28, 0.28, len(MODELS))
-    SCALE   = 9   # marker area = weight * SCALE
+    # Horizontal jitter within each subtype column (5 models side-by-side)
+    offsets = np.linspace(-0.22, 0.22, len(MODELS))
 
-    fig, ax = plt.subplots(figsize=(13, 7))
+    fig, ax = plt.subplots(figsize=(13.5, 7.5))
 
-    # Row background shading
+    # ── background row shading ────────────────────────────────────────────────
     for ci, cname in enumerate(CLUSTERS):
         y = n_clusters - 1 - ci
         ax.axhspan(y - 0.5, y + 0.5,
                    color=CLUSTER_BG[cname], zorder=0, linewidth=0)
 
-    # Light grid
-    for i in range(n_clusters):
-        ax.axhline(n_clusters - 1 - i, color='#cccccc', lw=0.4, zorder=1)
-    for i in range(n_subtypes):
-        ax.axvline(i, color='#cccccc', lw=0.4, zorder=1)
+    # ── subtle horizontal grid lines ──────────────────────────────────────────
+    for ci in range(n_clusters):
+        ax.axhline(n_clusters - 1 - ci, color='white', lw=1.2, zorder=1)
 
-    # Bubbles
+    # ── bubbles ───────────────────────────────────────────────────────────────
     for _, row in df.iterrows():
         if row['cluster'] not in cluster_idx or row['subtype'] not in subtype_idx:
             continue
-        ci = cluster_idx[row['cluster']]
-        si = subtype_idx[row['subtype']]
-        mi = model_idx[row['model']]
-
-        x = si + offsets[mi]
-        y = n_clusters - 1 - ci
-
+        x = subtype_idx[row['subtype']] + offsets[model_idx[row['model']]]
+        y = n_clusters - 1 - cluster_idx[row['cluster']]
         ax.scatter(x, y,
-                   s=row['weight'] * SCALE,
+                   s=pct_to_area(row['weight']),
                    color=MODEL_COLORS[row['model']],
-                   alpha=0.82,
-                   edgecolors='white',
-                   linewidths=0.6,
-                   zorder=3)
+                   alpha=0.85,
+                   edgecolors='none',
+                   zorder=4)
 
-    # Axes
+    # ── axes ──────────────────────────────────────────────────────────────────
     ax.set_xticks(range(n_subtypes))
-    ax.set_xticklabels(SUBTYPES, fontsize=12, fontweight='bold')
+    ax.set_xticklabels(SUBTYPES, fontsize=13, fontweight='bold')
     ax.xaxis.tick_top()
     ax.xaxis.set_label_position('top')
 
     ax.set_yticks(range(n_clusters))
-    ax.set_yticklabels(list(reversed(CLUSTERS)), fontsize=10)
+    ax.set_yticklabels(list(reversed(CLUSTERS)), fontsize=10.5)
 
     ax.set_xlim(-0.6, n_subtypes - 0.4)
-    ax.set_ylim(-0.6, n_clusters - 0.4)
+    ax.set_ylim(-0.55, n_clusters - 0.45)
     ax.tick_params(bottom=False, top=False, left=False)
 
     for spine in ax.spines.values():
         spine.set_visible(False)
 
-    # Biological pathway separators
-    immune_end    = n_clusters - 1 - 0   # HLA autoimmune row
-    betacell_end  = n_clusters - 1 - 4   # Hyper-ins. secretion row
+    # ── section dashed separators ─────────────────────────────────────────────
+    # Between HLA autoimmune (ci=0, y=8) and beta-cell block
+    immune_y    = n_clusters - 1 - 0   # y = 8
+    # Between Hyper-ins. secretion (ci=4, y=4) and metabolic block
+    betacell_y  = n_clusters - 1 - 4   # y = 4
 
-    ax.axhline(immune_end - 0.5,   color='#aaaaaa', lw=1.2, ls='--', zorder=2)
-    ax.axhline(betacell_end - 0.5, color='#aaaaaa', lw=1.2, ls='--', zorder=2)
+    for y_sep in (immune_y - 0.5, betacell_y - 0.5):
+        ax.axhline(y_sep, color='#aaaaaa', lw=1.0, ls='--', zorder=2)
 
-    ax.text(-0.62, immune_end,                            'Immune',
-            va='center', ha='right', fontsize=8.5, color='#c0392b', style='italic')
-    ax.text(-0.62, (immune_end - 1 + betacell_end) / 2,  '\u03b2-cell / glycaemia',
-            va='center', ha='right', fontsize=8.5, color='#2980b9', style='italic')
-    ax.text(-0.62, (betacell_end - 1) / 2,               'Metabolic',
-            va='center', ha='right', fontsize=8.5, color='#27ae60', style='italic')
+    # ── section italic labels (left margin, inside axes) ──────────────────────
+    ax.text(-0.64, (immune_y - 1 + betacell_y) / 2,
+            'β-cell / glycaemia',
+            va='center', ha='right', fontsize=9, color='#2477b5', style='italic',
+            clip_on=False)
+    ax.text(-0.64, (betacell_y - 1) / 2,
+            'Metabolic',
+            va='center', ha='right', fontsize=9, color='#2a7a2a', style='italic',
+            clip_on=False)
 
-    # Legends
-    model_handles = [
-        mpatches.Patch(color=MODEL_COLORS[m], label=MODEL_LABELS[m]) for m in MODELS
-    ]
-    leg1 = fig.legend(handles=model_handles,
-                      title='Model',
-                      title_fontsize=9,
-                      loc='upper right',
-                      bbox_to_anchor=(0.99, 0.97),
-                      frameon=True,
-                      fontsize=8.5,
-                      edgecolor='#cccccc',
-                      handlelength=1.2)
-
-    size_handles = [
-        mlines.Line2D([], [], marker='o', color='gray', alpha=0.75,
-                      markersize=np.sqrt(w * SCALE),
-                      linestyle='None', label=f'{w}%')
-        for w in [5, 15, 30, 50]
-    ]
-    fig.legend(handles=size_handles,
-               title='Weight (%)',
-               title_fontsize=9,
-               loc='lower right',
-               bbox_to_anchor=(0.99, 0.08),
-               frameon=True,
-               fontsize=9,
-               edgecolor='#cccccc',
-               handletextpad=1.4)
-
+    # ── title ─────────────────────────────────────────────────────────────────
     ax.set_title(
-        'Functional cluster \u2192 T2D subtype: weighted contributions by PRS model',
-        fontsize=11, pad=18, loc='left'
+        'Functional cluster → T2D subtype: weighted contributions by PRS model',
+        fontsize=12, pad=18,
     )
-    fig.text(0.01, -0.02,
-             'Bubble area \u221d weighted % of model features attributed to that cluster\u2013subtype pair.\n'
-             'PRS\u2082G+GxE distributes evenly across all subtypes; '
-             'PRS\u2082GxGxE is maximally polarised (HLA\u2192SAID, lipodystrophy\u2192SIRD).',
-             fontsize=7.5, color='#555555', va='top')
 
-    fig.subplots_adjust(left=0.18, right=0.65, top=0.88, bottom=0.08)
+    # ── model legend (upper right, outside axes) ──────────────────────────────
+    model_handles = [
+        mpatches.Patch(color=MODEL_COLORS[m], label=MODEL_LABELS[m])
+        for m in MODELS
+    ]
+    leg_model = fig.legend(
+        handles=model_handles,
+        title='Model',
+        title_fontsize=9.5,
+        loc='upper right',
+        bbox_to_anchor=(1.00, 0.97),
+        frameon=True,
+        fontsize=9,
+        edgecolor='#cccccc',
+        handlelength=1.2,
+    )
+
+    # ── weight size legend (lower right, outside axes) ────────────────────────
+    size_weights = [5, 15, 30, 50]
+    size_handles = [
+        mlines.Line2D([], [], marker='o', color='#888888', alpha=0.80,
+                      markersize=np.sqrt(pct_to_area(w) / np.pi),
+                      linestyle='None', label=f'{w}%')
+        for w in size_weights
+    ]
+    fig.legend(
+        handles=size_handles,
+        title='Weight (%)',
+        title_fontsize=9.5,
+        loc='lower right',
+        bbox_to_anchor=(1.00, 0.08),
+        frameon=True,
+        fontsize=9,
+        edgecolor='#cccccc',
+        handletextpad=1.5,
+    )
+
+    # ── caption ───────────────────────────────────────────────────────────────
+    fig.text(
+        0.01, -0.03,
+        ('Bubble area ∝ weighted % of model features attributed to that cluster–subtype pair.\n'
+         'PRS₂G+GxE distributes evenly across all subtypes; '
+         'PRS₂GxGxE is maximally polarised (HLA→SAID, lipodystrophy→SIRD).'),
+        fontsize=7.5, color='#555555', va='top',
+    )
+
+    fig.subplots_adjust(left=0.18, right=0.68, top=0.88, bottom=0.06)
 
     os.makedirs(out_dir, exist_ok=True)
     for ext in ('png', 'pdf'):
@@ -239,11 +255,14 @@ def make_figure(df: pd.DataFrame, out_dir: str):
     plt.close(fig)
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         '--data',
-        default='results/type2Diabetes/subtypeResearch/enrichment/cluster_subtype_cohort_weighted.csv',
+        default=(
+            'results/type2Diabetes/combinedAnalysis/scores'
+            '/functionalEnrichment/cluster_subtype_cohort_weighted.csv'
+        ),
         help='Path to cluster_subtype_cohort_weighted.csv',
     )
     parser.add_argument(
@@ -252,7 +271,6 @@ def main():
         help='Output directory for PNG and PDF',
     )
     args = parser.parse_args()
-
     df = load_data(args.data)
     make_figure(df, args.out_dir)
 
