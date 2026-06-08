@@ -478,15 +478,11 @@ def run_exclusive_high_bootstrap(
     featureImportance['feature_importance'] = (
         featureImportance['z_score'].abs() > z_threshold
     ).astype(int)
-    featureImportance['cohort']                  = cohort
-    featureImportance['features_used']           = feature_str
-    featureImportance['training_data_used']      = 'ExclusiveHighCases'
-    featureImportance['n_bootstrap_iterations']  = n_successful
-    # GBM has no linear coefficients — coefs/odds_ratio are not meaningful
-    featureImportance['coefs']                   = np.nan
-    featureImportance['odds_ratio']              = np.nan
+    featureImportance['cohort']             = cohort
+    featureImportance['features_used']      = feature_str
+    featureImportance['training_data_used'] = 'ExclusiveHighCases'
 
-    # Merge in any annotation already in featuresDf (e.g. model metadata)
+    # Merge to bring in coefs/odds_ratio from featuresDf (same as HighCases path)
     featureImportance = featureImportance.merge(
         featuresDf, on=['feature', 'features_used'], how='left'
     )
@@ -502,10 +498,14 @@ def run_exclusive_high_bootstrap(
     )
 
     # ---- Append to shared featureImportance CSV -----------------------------
+    # Reindex to match the existing file's column order to prevent schema drift
+    # when HighCases and ExclusiveHighCases have columns in different positions.
     if not os.path.exists(featureImportanceFile):
         with open(featureImportanceFile, mode='w', newline='') as fh:
             featureImportance.to_csv(fh, index=False)
     else:
+        existing_cols = pd.read_csv(featureImportanceFile, nrows=0).columns.tolist()
+        featureImportance = featureImportance.reindex(columns=existing_cols)
         with open(featureImportanceFile, mode='a', newline='') as fh:
             featureImportance.to_csv(fh, index=False, header=False)
 
