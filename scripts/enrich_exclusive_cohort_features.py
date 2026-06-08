@@ -666,19 +666,17 @@ def load_genomic_features(scores_path, filter_strategy):
 
     # Normalise cohort column.
     # HighCases/LowControls rows come from find_tiered_features which writes
-    # 'feature_set' (= the matching cohort name) but no 'cohort' column.
-    # ExclusiveHighCases rows come from run_exclusive_high_bootstrap which writes
-    # 'cohort' but no 'feature_set'.
-    # When both training categories are concatenated in the CSV, both columns
-    # exist but each set of rows has NaN in the column belonging to the other.
-    # Fill 'cohort' from 'feature_set' wherever cohort is missing, then drop
-    # the now-redundant 'feature_set' column.
-    if 'feature_set' in df.columns:
-        if 'cohort' not in df.columns:
-            df.rename(columns={'feature_set': 'cohort'}, inplace=True)
-        else:
-            df['cohort'] = df['cohort'].fillna(df['feature_set'])
-            df.drop(columns=['feature_set'], inplace=True)
+    # 'features_used' (formerly 'feature_set') but no 'cohort' column.
+    # ExclusiveHighCases rows also use 'features_used'.
+    # Fill 'cohort' from whichever source column is present, then drop it.
+    # Both old ('feature_set') and new ('features_used') names are accepted.
+    for src_col in ('feature_set', 'features_used'):
+        if src_col in df.columns:
+            if 'cohort' not in df.columns:
+                df.rename(columns={src_col: 'cohort'}, inplace=True)
+            else:
+                df['cohort'] = df['cohort'].fillna(df[src_col])
+                df.drop(columns=[src_col], inplace=True)
 
     # Include HighCases, LowControls, and ExclusiveHighCases
     if 'training_data_used' in df.columns:
@@ -716,14 +714,16 @@ def load_genomic_features(scores_path, filter_strategy):
                       f"{need_or.sum()} ExclusiveHighCases rows")
 
         # Filter 1: keep only truly cohort-exclusive features (n_exclusive_cohorts == 1)
-        if 'n_exclusive_cohorts' in df.columns:
-            multi_mask = is_exc & (df['n_exclusive_cohorts'].fillna(1) > 1)
+        # Accept both old name ('n_exclusive_cohorts') and new name ('n_other_cohorts')
+        excl_col = next((c for c in ('n_exclusive_cohorts', 'n_other_cohorts') if c in df.columns), None)
+        if excl_col is not None:
+            multi_mask = is_exc & (df[excl_col].fillna(1) > 1)
             n_multi = multi_mask.sum()
             if n_multi:
                 df = df[~multi_mask].copy()
                 is_exc = df.get('training_data_used', pd.Series(dtype=str)) == 'ExclusiveHighCases'
                 print(f"  Removed {n_multi} ExclusiveHighCases rows with "
-                      f"n_exclusive_cohorts > 1 (not cohort-specific)")
+                      f"{excl_col} > 1 (not cohort-specific)")
 
         # Filter 2: keep only risk-elevating direction (coefs > 0 / OR > 1)
         risk_or  = df['odds_ratio'].notna() & (df['odds_ratio'] >= 1.0) if 'odds_ratio' in df.columns else pd.Series(True, index=df.index)
@@ -788,7 +788,7 @@ def load_genomic_features(scores_path, filter_strategy):
 #  STEP 3: MERGE WITH feature_scores_annotated.csv AND EXPAND SNPs
 # =============================================================================
 
-def load_feature_annotation(scores_path):
+def load_feature_annotation(pheno_path):
     """Load feature_scores_annotated.csv.
 
     Searches in order:
@@ -797,10 +797,10 @@ def load_feature_annotation(scores_path):
       3. {type2Diabetes}/feature_scores_annotated.csv (grandparent)
     """
     candidates = [
-        os.path.join(scores_path, 'feature_scores_annotated.csv'),
-        os.path.join(os.path.dirname(scores_path), 'feature_scores_annotated.csv'),
-        os.path.join(os.path.dirname(os.path.dirname(scores_path)),
-                     'feature_scores_annotated.csv'),
+        os.path.join(pheno_path, 'snpToGene_output/feature_scores_annotated.csv'),
+        os.path.join(os.path.dirname(pheno_path), 'snpToGene_output/feature_scores_annotated.csv'),
+        os.path.join(os.path.dirname(os.path.dirname(pheno_path)),
+                     'snpToGene_output/feature_scores_annotated.csv'),
     ]
     for path in candidates:
         if os.path.exists(path):
@@ -859,10 +859,10 @@ def expand_to_snp_rows(feature_df, annotation_df):
         base = row.to_dict()
         ann = ann_lookup.get(raw.strip().lower())
 
-        snp1 = ann.get('snp1') if ann is not None and pd.notna(ann.get('snp1')) else None
-        snp2 = ann.get('snp2') if ann is not None and pd.notna(ann.get('snp2')) else None
-        snp1_genes = ann.get('snp1_gene_names') if ann is not None else None
-        snp2_genes = ann.get('snp2_gene_names') if ann is not None else None
+        snp1 = ann.get('SNP1') if ann is not None and pd.notna(ann.get('SNP1')) else None
+        snp2 = ann.get('SNP2') if ann is not None and pd.notna(ann.get('SNP2')) else None
+        snp1_genes = ann.get('gene_names_SNP1') if ann is not None else None
+        snp2_genes = ann.get('gene_names_SNP2') if ann is not None else None
 
         if ann is not None:
             n_annotated += 1
@@ -874,10 +874,10 @@ def expand_to_snp_rows(feature_df, annotation_df):
         expanded.append({
             **base,
             'feature': resolved_feature,
-            'snp1': snp1,
-            'snp1_gene_names': snp1_genes,
-            'snp2': None,            # snp2 context kept only in its own row (see below)
-            'snp2_gene_names': None,
+            'SNP1': snp1,
+            'gene_names_SNP1': snp1_genes,
+            'SNP2': None,            # snp2 context kept only in its own row (see below)
+            'gene_names_SNP2': None,
         })
 
         # Additional row for snp2 in GxG features.
@@ -888,10 +888,10 @@ def expand_to_snp_rows(feature_df, annotation_df):
             expanded.append({
                 **base,
                 'feature': snp2,
-                'snp1': snp2,            # snp2 is the primary SNP for this row
-                'snp1_gene_names': snp2_genes,
-                'snp2': None,            # no secondary SNP context
-                'snp2_gene_names': None,
+                'SNP1': snp2,            # snp2 is the primary SNP for this row
+                'gene_names_SNP1': snp2_genes,
+                'SNP2': None,            # no secondary SNP context
+                'gene_names_SNP2': None,
             })
 
         # Clinical-prefix row for GxG interaction features.
@@ -912,10 +912,10 @@ def expand_to_snp_rows(feature_df, annotation_df):
                     **clin_base,
                     'feature': first,
                     'feature_source': 'clinical',
-                    'snp1': None,
-                    'snp1_gene_names': None,
-                    'snp2': None,
-                    'snp2_gene_names': None,
+                    'SNP1': None,
+                    'gene_names_SNP1': None,
+                    'SNP2': None,
+                    'gene_names_SNP2': None,
                 })
                 # Subsequent tokens that look like legacy HLA alleles (GENE_ALLELE)
                 # need their own row so the HLA cluster regex can match them.
@@ -926,10 +926,10 @@ def expand_to_snp_rows(feature_df, annotation_df):
                                 **base,
                                 'feature': tok,
                                 'feature_source': 'genomic_shap',
-                                'snp1': tok,
-                                'snp1_gene_names': None,
-                                'snp2': None,
-                                'snp2_gene_names': None,
+                                'SNP1': tok,
+                                'gene_names_SNP1': None,
+                                'SNP2': None,
+                                'gene_names_SNP2': None,
                             })
 
     print(f"  Annotation lookup: {n_annotated}/{len(feature_df)} features matched in "
@@ -973,12 +973,11 @@ def load_cluster_file(filepath):
 
     # 'feature' / 'Feature' covers both SNP rsID columns and Trait columns that
     # have already been renamed to 'feature' on the cluster-file side.
-    feat_col  = _first_col(df, ['feature', 'Feature', 'SNP', 'snp', 'snp1'])
+    feat_col  = _first_col(df, ['feature', 'Feature', 'SNP', 'snp', 'snp1', 'SNP2'])
     # 'loci' / 'Loci' also covers snp1_gene_names / snp2_gene_names columns that
     # carry gene-name annotations equivalent to our snp1_gene_names field.
     loci_col  = _first_col(df, ['loci', 'Loci', 'Locus', 'locus',
-                                 'snp1_gene_names', 'snp2_gene_names',
-                                 'snp1_gene_name',  'snp2_gene_name'])
+                                 'gene_names_SNP1', 'gene_name_SNP1', 'gene_nameS_SNP2' , 'gene_name_SNP2'])
     trait_col = _first_col(df, ['Trait', 'trait'])
     ca_col    = _first_col(df, ['cluster assignment', 'cluster_assignment'])
     eff_col   = _first_col(df, ['beta', 'effect'])
@@ -1015,8 +1014,8 @@ def load_cluster_file(filepath):
         # No cluster assignment column — remaining non-identifier columns ARE
         # the cluster columns (e.g. already-wide count columns from prior pipeline)
         meta = {'feature', 'Feature', 'Trait', 'trait', 'Loci', 'loci',
-                'Locus', 'locus', 'SNP', 'snp', 'snp1',
-                'snp1_gene_names', 'snp2_gene_names',
+                'Locus', 'locus', 'SNP', 'snp', 'snp1','SNP1','SNP2',
+                'snp1_gene_names', 'snp2_gene_names', 'gene_names_SNP1', 'gene_names_SNP2',
                 'snp1_gene_name',  'snp2_gene_name'}
         cluster_cols = [c for c in df.columns if c not in meta]
         if not cluster_cols:
@@ -1433,7 +1432,8 @@ def main(pheno_data, filter_strategy='tiered',
     # Load feature annotation (for SNP expansion)
     # -------------------------------------------------------------------------
     print("\n--- Step 2: Loading feature annotation ---")
-    annotation_df = load_feature_annotation(scores_path)
+    pheno_path='/'.joint(pheno_data.split('/')[:-1])
+    annotation_df = load_feature_annotation(pheno_path)
 
     # -------------------------------------------------------------------------
     # Clinical feature analysis (optional — only when raw_feature_scores given)
@@ -1450,7 +1450,7 @@ def main(pheno_data, filter_strategy='tiered',
             if not os.path.exists(prs_file):
                 prs_file = os.path.join(scores_path, 'combinedPRSGroups.filtered.csv')
         else:
-            prs_file = os.path.join(scores_path, 'combinedPRSGroups.filtered.csv')
+            prs_file = os.path.join(scores_path, 'combinedPRSGroups.holdout.filtered.csv')
         combined_prs = pd.read_csv(prs_file)
         bin_cols = [c for c in combined_prs.columns
                     if c.startswith('bin_') and 'combined' not in c]
@@ -1708,8 +1708,8 @@ def main(pheno_data, filter_strategy='tiered',
             'specificity_tier':          row.get('specificity_tier'),
             'n_exclusive_cohorts':       row.get('n_exclusive_cohorts', np.nan),
             'exclusive_cohorts':         row.get('exclusive_cohorts', np.nan),
-            'snp1_gene_names':           row.get('snp1_gene_names'),
-            'snp2_gene_names':           row.get('snp2_gene_names'),
+            'gene_names_SNP1':           row.get('snp1_gene_names'),
+            'gene_names_SNP2':           row.get('snp2_gene_names'),
             'mahajan_clinical_feature':  row.get('mahajan_clinical_feature', ''),
             'mahajan_source':            row.get('mahajan_source', ''),
             'match_method':              match_method,
@@ -1788,7 +1788,7 @@ def main(pheno_data, filter_strategy='tiered',
         'specificity_tier',
         # ExclusiveHighCases cross-cohort prevalence annotations
         'n_exclusive_cohorts', 'exclusive_cohorts',
-        'snp1_gene_names', 'snp2_gene_names',
+        'gene_names_SNP1', 'gene_names_SNP2',
         # Mahajan clinical linkage (populated for genomic features only)
         'mahajan_clinical_feature', 'mahajan_source',
         'match_method', 'n_clusters_matched',
