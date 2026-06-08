@@ -95,7 +95,7 @@ CLUSTER_BG = {
 }
 
 # Area (pt²) for 50 % weight — sets the overall bubble scale
-MAX_AREA = 900
+MAX_AREA = 420
 
 
 def pct_to_area(pct: float) -> float:
@@ -131,7 +131,7 @@ def make_figure(df: pd.DataFrame, out_dir: str) -> None:
     model_idx   = {m: i for i, m in enumerate(MODELS)}
 
     # Horizontal jitter within each subtype column (5 models side-by-side)
-    offsets = np.linspace(-0.22, 0.22, len(MODELS))
+    offsets = np.linspace(-0.28, 0.28, len(MODELS))
 
     fig, ax = plt.subplots(figsize=(13.5, 7.5))
 
