@@ -95,7 +95,7 @@ CLUSTER_BG = {
 }
 
 # Area (pt²) for 50 % weight — sets the overall bubble scale
-MAX_AREA = 4200
+MAX_AREA = 900
 
 
 def pct_to_area(pct: float) -> float:
