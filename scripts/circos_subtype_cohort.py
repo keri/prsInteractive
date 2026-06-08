@@ -407,9 +407,13 @@ def draw_circos(bars: list, subtype_map: dict, cohort: str, out_path: str,
         cluster_bars = [b for b in bars if b['cluster_key'] == ck]
 
         # Accumulate concordance-weighted score per subtype.
-        # concordance ∈ {+1, 0, -1}; neutral (0) features contribute a small
-        # positive weight (0.1) so they are not silenced but can be overridden
-        # by explicitly discordant evidence.
+        # Consistent with subtype_cohort_pies.py and cluster_subtype_dotmatrix.py:
+        #   +1 concordant  → 1.0  (genomic loci, direction confirmed)
+        #    0 neutral     → 0.5  (clinical features without directional map)
+        #   -1 discordant  → 0.0  (suppressed — direction opposes cluster expectation)
+        # Discordant features are kept in the assignments file as a record but do
+        # not influence subtype dot placement.
+        _CONC_W = {1.0: 1.0, 0.0: 0.5, -1.0: 0.0}
         subtype_scores: dict = {}
         for b in cluster_bars:
             info = subtype_map.get((b['feature'], ck), {})
@@ -419,15 +423,12 @@ def draw_circos(bars: list, subtype_map: dict, cohort: str, out_path: str,
             else:
                 subtypes = info          # legacy list fallback
                 conc     = 0.0
-            weight = conc if conc != 0.0 else 0.1
+            weight = _CONC_W.get(float(conc), 0.5)
             for st in subtypes:
                 subtype_scores[st] = subtype_scores.get(st, 0.0) + weight
 
-        # Only show subtypes with net positive concordance score
+        # Only show subtypes with positive concordance score (discordant → 0, never negative)
         positive_subtypes = {st: sc for st, sc in subtype_scores.items() if sc > 0}
-        if not positive_subtypes and subtype_scores:
-            # All evidence discordant — show with low alpha as a warning marker
-            positive_subtypes = subtype_scores
 
         max_sc = max(positive_subtypes.values()) if positive_subtypes else 1.0
         sorted_subtypes = sorted(positive_subtypes, key=lambda s: positive_subtypes[s],
