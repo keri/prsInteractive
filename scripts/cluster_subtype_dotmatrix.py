@@ -97,25 +97,54 @@ CLUSTER_BG = {
 # Area (pt²) for 50 % weight — sets the overall bubble scale
 MAX_AREA = 420
 
+# Concordance → weight mapping (identical to subtype_cohort_pies.py so both
+# figures use the same denominator and clinical features are counted at 0.5)
+CONC_WEIGHT = {1.0: 1.0, 0.0: 0.5, -1.0: 0.0}
+
 
 def pct_to_area(pct: float) -> float:
     return pct / 50.0 * MAX_AREA
 
 
 def load_data(csv_path: str) -> pd.DataFrame:
-    raw = pd.read_csv(csv_path)
-    raw = raw[raw['cohort'].isin(COHORT_MODEL)]
-    raw = raw[raw['cluster_key'].isin(CLUSTER_MERGE)].copy()
+    """
+    Load from subtype_feature_assignments.csv and compute concordance-weighted
+    cluster × subtype × cohort contributions.
 
-    raw['model']   = raw['cohort'].map(COHORT_MODEL)
-    raw['cluster'] = raw['cluster_key'].map(CLUSTER_MERGE)
+    Concordance weighting matches subtype_cohort_pies.py:
+      +1 concordant  → 1.0  (genomic SHAP features, direction confirmed)
+       0 neutral     → 0.5  (clinical features or unconfirmed direction)
+      -1 discordant  → 0.0  (direction opposes cluster expectation)
+
+    Cohort total (denominator) is computed across ALL cluster keys so the
+    proportions are consistent with the pie chart denominators.
+    """
+    raw = pd.read_csv(csv_path)
+    raw = raw[raw['cohort'].isin(COHORT_MODEL)].copy()
+
+    # Apply concordance weight
+    if 'concordance' in raw.columns:
+        raw['_w'] = raw['concordance'].map(CONC_WEIGHT).fillna(0.5)
+    else:
+        raw['_w'] = 0.5
+
+    # Deduplicate per unique assignment before aggregating
+    dedup = raw.drop_duplicates(subset=['feature', 'cohort', 'cluster_key', 'subtype'])
+
+    # Cohort total across ALL cluster keys (matching pie chart denominator)
+    cohort_totals = dedup.groupby('cohort')['_w'].sum()
+
+    # Filter to displayed cluster keys, then merge display names
+    dedup = dedup[dedup['cluster_key'].isin(CLUSTER_MERGE)].copy()
+    dedup['model']   = dedup['cohort'].map(COHORT_MODEL)
+    dedup['cluster'] = dedup['cluster_key'].map(CLUSTER_MERGE)
 
     grouped = (
-        raw.groupby(['model', 'cluster', 'subtype'])
-           .agg(weighted_n=('weighted_n', 'sum'),
-                cohort_total_w=('cohort_total_w', 'first'))
-           .reset_index()
+        dedup.groupby(['cohort', 'model', 'cluster', 'subtype'])
+             .agg(weighted_n=('_w', 'sum'))
+             .reset_index()
     )
+    grouped['cohort_total_w'] = grouped['cohort'].map(cohort_totals)
     grouped['weight'] = (
         grouped['weighted_n'] / grouped['cohort_total_w'] * 100
     ).round(1)
@@ -261,9 +290,9 @@ def main() -> None:
         '--data',
         default=(
             'results/type2Diabetes/combinedAnalysis/scores'
-            '/functionalEnrichment/cluster_subtype_cohort_weighted.csv'
+            '/functionalEnrichment/subtype_feature_assignments.csv'
         ),
-        help='Path to cluster_subtype_cohort_weighted.csv',
+        help='Path to subtype_feature_assignments.csv',
     )
     parser.add_argument(
         '--out_dir',

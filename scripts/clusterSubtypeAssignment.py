@@ -3175,11 +3175,15 @@ if __name__ == "__main__":
         print("=" * 80)
 
         has_conc = 'concordance' in assigned_df.columns
-        # Concordance weight: +1 concordant, 0 neutral, -1 discordant → clamp [0,1]
+        # Concordance weight (matches subtype_cohort_pies.py):
+        #   +1 concordant  → 1.0
+        #    0 neutral      → 0.5  (clinical features or unconfirmed direction)
+        #   -1 discordant   → 0.0
+        _CONC_W = {1.0: 1.0, 0.0: 0.5, -1.0: 0.0}
         if has_conc:
-            assigned_df['_weight'] = assigned_df['concordance'].clip(lower=0)
+            assigned_df['_weight'] = assigned_df['concordance'].map(_CONC_W).fillna(0.5)
         else:
-            assigned_df['_weight'] = 1.0
+            assigned_df['_weight'] = 0.5
 
         dedup_w = assigned_df.drop_duplicates(
             subset=['feature', 'cohort', 'cluster_key', 'subtype']
