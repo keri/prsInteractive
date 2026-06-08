@@ -64,7 +64,7 @@ def find_opposite_sign_features(df, feature_sets, threshold):
 
             if matching_z > 0 and all(z < 0 for z in other_z):
                 rows.append({
-                    'feature_set': f,
+                    'features_used': f,
                     'feature': feature,
                     'matching_z_score': matching_z,
                     'n_other_cohorts': len(other_z),
@@ -116,7 +116,7 @@ def find_majority_sign_features(df, feature_sets, threshold, majority_threshold=
 
             if matching_z > 0 and frac_negative >= majority_threshold:
                 rows.append({
-                    'feature_set': f,
+                    'features_used': f,
                     'feature': feature,
                     'matching_z_score': matching_z,
                     'n_other_cohorts': len(other_z),
@@ -171,7 +171,7 @@ def find_differential_features(df, feature_sets, threshold, delta_threshold=0.5)
 
             if is_highest and delta >= delta_threshold:
                 rows.append({
-                    'feature_set': f,
+                    'features_used': f,
                     'feature': feature,
                     'matching_z_score': matching_z,
                     'mean_other_z': mean_other_z,
@@ -205,31 +205,31 @@ def find_tiered_features(df, feature_sets, threshold,
 
     all_features = set()
     if not differential_df.empty:
-        all_features |= set(zip(differential_df['feature_set'], differential_df['feature']))
+        all_features |= set(zip(differential_df['features_used'], differential_df['feature']))
     if not majority_df.empty:
-        all_features |= set(zip(majority_df['feature_set'], majority_df['feature']))
+        all_features |= set(zip(majority_df['features_used'], majority_df['feature']))
     if not strict_df.empty:
-        all_features |= set(zip(strict_df['feature_set'], strict_df['feature']))
+        all_features |= set(zip(strict_df['features_used'], strict_df['feature']))
 
     for (fset, feat) in all_features:
         # Find the source row — prefer strict > majority > differential
         source_df = None
         tier = None
 
-        if not strict_df.empty and len(strict_df[(strict_df['feature_set'] == fset) & (strict_df['feature'] == feat)]) > 0:
+        if not strict_df.empty and len(strict_df[(strict_df['features_used'] == fset) & (strict_df['feature'] == feat)]) > 0:
             source_df = strict_df
             tier = 1
-        elif not majority_df.empty and len(majority_df[(majority_df['feature_set'] == fset) & (majority_df['feature'] == feat)]) > 0:
+        elif not majority_df.empty and len(majority_df[(majority_df['features_used'] == fset) & (majority_df['feature'] == feat)]) > 0:
             source_df = majority_df
             tier = 2
-        elif not differential_df.empty and len(differential_df[(differential_df['feature_set'] == fset) & (differential_df['feature'] == feat)]) > 0:
+        elif not differential_df.empty and len(differential_df[(differential_df['features_used'] == fset) & (differential_df['feature'] == feat)]) > 0:
             source_df = differential_df
             tier = 3
 
         if source_df is None:
             continue
 
-        row = source_df[(source_df['feature_set'] == fset) & (source_df['feature'] == feat)].iloc[0].to_dict()
+        row = source_df[(source_df['features_used'] == fset) & (source_df['feature'] == feat)].iloc[0].to_dict()
         row['specificity_tier'] = tier
         tier_rows.append(row)
 
@@ -802,8 +802,9 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
             best_idx = matched.groupby('feature')['z_score'].idxmax()
             results_df = matched.loc[best_idx].copy()
 
-            # Attach cross-cohort annotations
-            results_df['n_exclusive_cohorts'] = results_df['feature'].map(n_cohorts_map)
+            # Attach cross-cohort annotations; drop cohort (== features_used after filter)
+            results_df = results_df.drop(columns=['cohort'], errors='ignore')
+            results_df['n_other_cohorts'] = results_df['feature'].map(n_cohorts_map)
             results_df['exclusive_cohorts'] = results_df['feature'].map(cohort_list)
             results_df['training_data_used'] = trainingData_str
 
@@ -850,6 +851,11 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
             results_df = results_df.sort_values('odds_ratio', ascending=False)
 
         filteredResults = pd.concat([filteredResults, results_df], ignore_index=True)
+
+    # Fill odds_ratio from coefs for rows (e.g. ExclusiveHighCases) where it is NaN
+    if 'odds_ratio' in filteredResults.columns and 'coefs' in filteredResults.columns:
+        mask = filteredResults['odds_ratio'].isna() & filteredResults['coefs'].notna()
+        filteredResults.loc[mask, 'odds_ratio'] = np.exp(filteredResults.loc[mask, 'coefs'])
 
     filteredResults.to_csv(filteredImportantFeaturesFile, index=False)
     print(f"\nSaved filtered results → {filteredImportantFeaturesFile}")
