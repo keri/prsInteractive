@@ -808,11 +808,12 @@ def main(phenoData, feature_scores_file, threshold, filter_strategy='tiered',
             results_df['exclusive_cohorts'] = results_df['feature'].map(cohort_list)
             results_df['training_data_used'] = trainingData_str
 
-            multi = (results_df['n_exclusive_cohorts'] > 1).sum()
+            multi = (results_df['n_other_cohorts'] > 1).sum()
+            results_df = results_df[results_df['n_other_cohorts'] == 1]
             print(f"\n  ExclusiveHighCases: {len(important)} feature_importance=1 rows "
                   f"→ {len(matched)} after features_used==cohort "
-                  f"→ {len(results_df)} after max-z assignment "
-                  f"({multi} features important in >1 exclusive cohort).")
+                  f"→ {len(results_df)} after n_other_cohorts==1 filter "
+                  f"({multi} features dropped — important in >1 cohort).")
             filteredResults = pd.concat([filteredResults, results_df], ignore_index=True)
             continue
 
