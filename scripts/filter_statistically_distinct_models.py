@@ -76,6 +76,10 @@ def filter_statistically_distinct_models(pheno_data, use_all=None):
         combined_prs       = filtered_data,
         models_to_keep     = models_to_keep,
         output_path        = fig_path,
+        # NB: the plotting helpers compare with strict bin > threshold, so 8
+        # selects bins 9-10, i.e. the top 20%. The McNemar helpers compare with
+        # bin >= threshold and therefore need 9 for the same 20%. Do not
+        # assume the two take the same value.
         threshold          = 8,
         priority_order     = ['cardio', 'epi', 'epi+main', 'main'],
         create_pairwise    = False,

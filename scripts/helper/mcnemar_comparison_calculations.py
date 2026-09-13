@@ -635,11 +635,12 @@ def run_prs_comparison(cases: pd.DataFrame, prs1_name: str, prs2_name: str,
         return pd.DataFrame(results)
 
 
-def calculate_stat_tests(validation_prs_file: str, scores_path: str, 
-                          models_to_compare: List[str] = None):
+def calculate_stat_tests(validation_prs_file: str, scores_path: str,
+                          models_to_compare: List[str] = None,
+                          test_threshold: int = 9):
         """
         Main function to run all PRS comparisons with dynamic model discovery.
-        
+
         Parameters:
         -----------
         validation_prs_file : str
@@ -649,15 +650,23 @@ def calculate_stat_tests(validation_prs_file: str, scores_path: str,
         models_to_compare : List[str], optional
                 Explicit list of models to compare. If None, discovers all bin_* columns.
                 Model names should be the suffix after 'bin_' (e.g., 'main', 'epi_product').
+        test_threshold : int, default 9
+                Minimum decile bin counted as high risk. Bins run 1-10 and the
+                comparison is bin >= test_threshold, so 9 selects bins 9 and 10,
+                i.e. the top 20% used to define high-risk groups everywhere else
+                in the pipeline. This previously defaulted to 8, which selects
+                bins 8-10 and therefore the top 30%, inflating the overlap
+                statistics (kappa and Jaccard) relative to the high-risk
+                definition used in the reported case counts.
         """
         # Load data
         validation_prs = pd.read_csv(validation_prs_file)
         case_val, _ = detect_phenotype_coding(validation_prs)
         cases = validation_prs[validation_prs['PHENOTYPE'] == case_val]
-        
-        # Define test parameters
-        test_threshold = 8
-        
+
+        print(f"High-risk threshold: bin >= {test_threshold} "
+              f"(top {(10 - test_threshold + 1) * 10}% of each score distribution)")
+
         # ── Dynamically discover available PRS models ──────────────────────────
         if models_to_compare is None:
                 # Find all bin_{model} columns, extract model names
