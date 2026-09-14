@@ -158,15 +158,14 @@ def main():
     ap.add_argument('--n_perm', type=int, default=10000)
     ap.add_argument('--seed', type=int, default=42)
     ap.add_argument('--q_threshold', type=float, default=0.05)
-    ap.add_argument('--weighting', choices=['figure', 'signed'], default='figure',
-                    help="'figure' reproduces the weighting used to build Figure 4 "
-                         "(clusterSubtypeAssignment.py _CONC_W: concordant 1, "
-                         "neutral 0.5, discordant 0), so the test applies to the "
-                         "quantity the figure plots. 'signed' uses the raw "
-                         "concordance values (+1/0/-1), which lets discordant "
-                         "features subtract and tests net directional agreement "
-                         "instead. Default 'figure' for consistency with the "
-                         "published figure.")
+    ap.add_argument('--weighting', choices=['signed', 'figure'], default='signed',
+                    help="'signed' (default) uses the raw concordance values "
+                         "(+1/0/-1) so discordant features subtract, matching "
+                         "clusterSubtypeAssignment.py and the figures. 'figure' "
+                         "reproduces the retired weighting (concordant 1, neutral "
+                         "0.5, discordant 0), which zeroed discordant features; "
+                         "kept only for comparison with earlier results and "
+                         "written to a _figure suffix.")
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -183,14 +182,14 @@ def main():
     print('features per model:')
     print(n_feat.to_string())
     print(f"\nweighting: {args.weighting}"
-          + (" (concordant 1, neutral 0.5, discordant 0 -- as plotted in Figure 4)"
+          + (" (retired: concordant 1, neutral 0.5, discordant 0)"
              if args.weighting == 'figure' else
              " (raw +1/0/-1; discordant features subtract)"))
     print(f'running {args.n_perm} permutations (seed {args.seed}) ...\n')
 
     for group_col, label in [('cluster_key', 'functional cluster'), ('subtype', 'T2D subtype')]:
         res = run_permutation(assign, group_col, args.n_perm, args.seed, args.weighting)
-        suffix = '' if args.weighting == 'figure' else f'_{args.weighting}'
+        suffix = '' if args.weighting == 'signed' else f'_{args.weighting}'
         out = os.path.join(args.out_dir,
                            f'permutation_enrichment_{group_col}{suffix}.csv')
         res.to_csv(out, index=False)

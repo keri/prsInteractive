@@ -57,8 +57,10 @@ def compare_two_groups(series_a, series_b, feature_name, label_a, label_b):
 
     try:
         stat, pval = stats.mannwhitneyu(a, b, alternative='two-sided')
-        # Rank-biserial correlation as effect size (r = 1 - 2U / n_a*n_b)
-        effect_size = 1 - (2 * stat) / (n_a * n_b)
+        # Rank-biserial correlation as effect size.  scipy returns U1, the
+        # statistic for the first sample, so r = 2*U1/(n_a*n_b) - 1 and r > 0
+        # means group a has the larger values, as documented below.
+        effect_size = (2 * stat) / (n_a * n_b) - 1
     except Exception:
         return None
 

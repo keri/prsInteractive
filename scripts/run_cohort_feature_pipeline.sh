@@ -8,8 +8,11 @@
 #   Step 2  enrich_exclusive_cohort_features.py
 #   Step 3  compare_clinical_features_across_cohorts.py
 #   Step 4  clusterSubtypeAssignment.py
-#   Step 5  circos_subtype_cohort.py
-#   Step 6  subtype_cohort_pies.py
+#   Step 5  permutation_test_cluster_enrichment.py
+#   Step 6  cluster_subtype_dotmatrix.py          (Figure 8)
+#   Step 7  subtype_cohort_stackedbars.py         (companion figure)
+#
+#   The circos and donut-pie steps are retired; see the block at the end.
 #
 # Usage
 # -----
@@ -30,7 +33,9 @@
 #   --run-exclusive             Run ExclusiveHighCases bootstrap in Step 1 (slow; adds --run_exclusive flag)
 #   --exclusive-iterations INT  Bootstrap iterations for ExclusiveHighCases (default: 1000)
 #   --skip-calculate            Skip Step 1 (use existing importantFeaturesAcrossCohortsAndTrainingData.Filtered.*.csv)
-#   --only-plots                Skip Steps 1-4, regenerate circos + pie charts only
+#   --n-perm             INT    Permutations for Step 5 (default: 10000)
+#   --perm-seed          INT    Seed for Step 5 (default: 42)
+#   --only-plots                Skip Steps 1-4, regenerate the test and figures only
 #   --help
 #
 # Environment variables (override defaults)
@@ -50,6 +55,8 @@ RAW_FEATURE_SCORES="${RAW_FEATURE_SCORES:-${REPO_ROOT}/results/participant_envir
 USE_SET="${USE_SET:-holdout}"
 FILTER_STRATEGY="${FILTER_STRATEGY:-tiered}"
 BALANCE_STRATEGY="${BALANCE_STRATEGY:-unbalanced}"
+N_PERM="${N_PERM:-10000}"
+PERM_SEED="${PERM_SEED:-42}"
 
 SKIP_CALCULATE=0
 ONLY_PLOTS=0
@@ -66,6 +73,8 @@ while [[ $# -gt 0 ]]; do
         --use-set)           USE_SET="$2";              shift 2 ;;
         --filter-strategy)   FILTER_STRATEGY="$2";     shift 2 ;;
         --balance-strategy)  BALANCE_STRATEGY="$2";    shift 2 ;;
+        --n-perm)            N_PERM="$2";              shift 2 ;;
+        --perm-seed)         PERM_SEED="$2";           shift 2 ;;
         --run-exclusive)     RUN_EXCLUSIVE=1;            shift ;;
         --exclusive-iterations) EXCLUSIVE_ITERATIONS="$2"; shift 2 ;;
         --skip-calculate)    SKIP_CALCULATE=1;          shift ;;
@@ -92,6 +101,7 @@ ASSIGNMENTS_CSV="${SUBTYPE_DIR}/enrichment/subtype_feature_assignments.csv"
 CLUSTER_SUBTYPE_MAP="${SUBTYPE_DIR}/cluster_subtype_map.csv"
 ENRICHMENT_OUT="${SUBTYPE_DIR}/enrichment"
 PLOTS_OUT="${ENRICHMENT_OUT}/plots"
+PERM_CLUSTER_CSV="${ENRICHMENT_OUT}/permutation_enrichment_cluster_key.csv"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 STEP=0
@@ -124,6 +134,8 @@ echo "  skip_calculate   : ${SKIP_CALCULATE}"
 echo "  only_plots       : ${ONLY_PLOTS}"
 echo "  run_exclusive    : ${RUN_EXCLUSIVE}"
 echo "  excl_iterations  : ${EXCLUSIVE_ITERATIONS}"
+echo "  n_perm           : ${N_PERM}"
+echo "  perm_seed        : ${PERM_SEED}"
 echo ""
 
 if [[ ${ONLY_PLOTS} -eq 0 ]]; then
@@ -207,28 +219,62 @@ if [[ ${ONLY_PLOTS} -eq 0 ]]; then
 fi
 
 # =============================================================================
-#  STEP 5 — Circos plots (4 variants per cohort)
+#  STEP 5 — Permutation test for differential cluster/subtype correspondence
 # =============================================================================
-step_header "Circos plots (circos_subtype_cohort.py)"
+step_header "Permutation enrichment test (permutation_test_cluster_enrichment.py)"
+
+python "${SCRIPT_DIR}/permutation_test_cluster_enrichment.py" \
+    --assignments_file "${ASSIGNMENTS_CSV}" \
+    --out_dir          "${ENRICHMENT_OUT}" \
+    --n_perm           "${N_PERM}" \
+    --seed             "${PERM_SEED}"
+
+echo "  Output: ${PERM_CLUSTER_CSV}"
+
+# =============================================================================
+#  STEP 6 — Figure 8: cluster x subtype dot matrix
+# =============================================================================
+step_header "Cluster-subtype dot matrix (cluster_subtype_dotmatrix.py)"
 
 mkdir -p "${PLOTS_OUT}"
 
-python "${SCRIPT_DIR}/circos_subtype_cohort.py" \
+python "${SCRIPT_DIR}/cluster_subtype_dotmatrix.py" \
+    --data            "${ASSIGNMENTS_CSV}" \
+    --permutation_csv "${PERM_CLUSTER_CSV}" \
+    --out_dir         "${PLOTS_OUT}"
+
+echo "  Output: ${PLOTS_OUT}/cluster_subtype_dotmatrix.{png,pdf}"
+
+# =============================================================================
+#  STEP 7 — Companion stacked-bar figure
+# =============================================================================
+step_header "Subtype cohort stacked bars (subtype_cohort_stackedbars.py)"
+
+python "${SCRIPT_DIR}/subtype_cohort_stackedbars.py" \
     --assignments "${ASSIGNMENTS_CSV}" \
     --out_dir     "${PLOTS_OUT}"
 
-echo "  Output: ${PLOTS_OUT}/circos_*.png"
+echo "  Output: ${PLOTS_OUT}/subtype_cohort_bars_*.png"
 
 # =============================================================================
-#  STEP 6 — Subtype donut pie charts
+#  RETIRED PLOT STEPS — circos + donut pies
 # =============================================================================
-step_header "Subtype cohort pie charts (subtype_cohort_pies.py)"
-
-python "${SCRIPT_DIR}/subtype_cohort_pies.py" \
-    --assignments "${ASSIGNMENTS_CSV}" \
-    --out_dir     "${PLOTS_OUT}"
-
-echo "  Output: ${PLOTS_OUT}/subtype_cohort_pies_*.png"
+# Neither figure is used in the manuscript.  Both also predate the move to
+# signed concordance and would need reworking before they could be trusted:
+# circos_subtype_cohort.py reads the sign of effect_size_r directly (bar
+# outward/inward) and subtype_cohort_pies.py applies the old
+# {+1: 1.0, 0: 0.5, -1: 0.0} weighting, which drops discordant features.
+# Re-enable only after updating them for the signed convention.
+#
+# step_header "Circos plots (circos_subtype_cohort.py)"
+# python "${SCRIPT_DIR}/circos_subtype_cohort.py" \
+#     --assignments "${ASSIGNMENTS_CSV}" \
+#     --out_dir     "${PLOTS_OUT}"
+#
+# step_header "Subtype cohort pie charts (subtype_cohort_pies.py)"
+# python "${SCRIPT_DIR}/subtype_cohort_pies.py" \
+#     --assignments "${ASSIGNMENTS_CSV}" \
+#     --out_dir     "${PLOTS_OUT}"
 
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""

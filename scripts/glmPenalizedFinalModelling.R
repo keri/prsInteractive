@@ -1302,18 +1302,18 @@ env_clinical_features = setdiff(names(clinicalEnvTraining), "IID")
 all_env_features = setdiff(names(allEnvironmentTraining), "IID")
 
 dataset_list = list(
-# list('clinical_main',c(env_clinical_features,covariate_columns)),
-# list('main',c(main_features,covariate_columns,hla_columns)),
-# list('epi',c(epi_features,covariate_columns,hla_columns)),
-# list('epi+main',c(main_features,epi_features,covariate_columns,hla_columns)),
-# list('cardio',c(env_genetic_features,covariate_columns)),
-# list('all',c(env_genetic_features,main_features,epi_features,hla_columns,covariate_columns)),
-# list('env_main',c(env_main_features,covariate_columns)),
-# list('all+env_main',c(env_genetic_features,main_features,epi_features,env_main_features,hla_columns,covariate_columns)),
-# list('all+env_main+clinical_main',c(env_genetic_features,main_features,epi_features,hla_columns,env_main_features,env_clinical_features,covariate_columns)),
-# list('env_combined',c(all_env_features,covariate_columns)),
-  list('all+env_combined',c(env_genetic_features,epi_main_features,all_env_features,hla_columns,covariate_columns))
-# list('covariate',c(covariate_columns))
+  list('clinical_main',c(env_clinical_features,covariate_columns)),
+  list('main',c(main_features,covariate_columns,hla_columns)),
+  list('epi',c(epi_features,covariate_columns,hla_columns)),
+  list('epi+main',c(main_features,epi_features,covariate_columns,hla_columns)),
+  list('cardio',c(env_genetic_features,covariate_columns)),
+  list('all',c(env_genetic_features,main_features,epi_features,hla_columns,covariate_columns)),
+  list('env_main',c(env_main_features,covariate_columns)),
+  list('all+env_main',c(env_genetic_features,main_features,epi_features,env_main_features,hla_columns,covariate_columns)),
+  list('all+env_main+clinical_main',c(env_genetic_features,main_features,epi_features,hla_columns,env_main_features,env_clinical_features,covariate_columns)),
+  list('env_combined',c(all_env_features,covariate_columns)),
+  list('all+env_combined',c(env_genetic_features,epi_main_features,all_env_features,hla_columns,covariate_columns)),
+  list('covariate',c(covariate_columns))
   
 )
 

@@ -3164,63 +3164,80 @@ if __name__ == "__main__":
     # ------------------------------------------------------------------
     # Weighted cluster → subtype contribution summary
     # ------------------------------------------------------------------
-    # Shows, for each cohort, what fraction of its features each functional
-    # cluster contributes to each subtype.  Uses concordance-weighted counts
-    # (same denominator as the pie charts) so the table directly explains the
-    # relative slice sizes visible in subtype_cohort_pies.
+    # Shows, for each cohort, how many features each functional cluster
+    # contributes to each subtype and whether they agree with that subtype's
+    # expected direction of association.
+    #
+    # SIGNED CONCORDANCE.  Concordance records direction, not confidence: +1
+    # where the feature's observed direction matches the cluster's expected
+    # direction, -1 where it opposes it, 0 where no direction is available.
+    # A feature can therefore support one subtype and oppose another, which is
+    # the whole point of carrying it -- BMI is positively associated with MOD
+    # and MARD but negatively with others.  The weight is the concordance value
+    # itself, so discordant features subtract rather than being silently
+    # dropped.
+    #
+    # Earlier versions mapped {+1: 1.0, 0: 0.5, -1: 0.0}, which zeroed
+    # discordant features and so made the totals non-negative but also made
+    # them uninterpretable: a cluster with equal support and opposition looked
+    # identical to one with half as many features, all supporting.
+    #
+    # Counts and signed sums are reported side by side because they answer
+    # different questions -- n_features is how much a model has to say about a
+    # subtype, weighted_n is whether what it says agrees.  The percentage uses
+    # the feature count as its denominator; a signed sum divided by a signed
+    # total is meaningless, since the two can carry opposite signs.
     if len(assigned_df):
         print("\n" + "=" * 80)
-        print("WEIGHTED CLUSTER → SUBTYPE CONTRIBUTION PER COHORT")
-        print("(concordance-weighted; fraction of cohort total features)")
+        print("CLUSTER → SUBTYPE CONTRIBUTION PER COHORT")
+        print("(signed concordance; % of cohort features by count)")
         print("=" * 80)
 
         has_conc = 'concordance' in assigned_df.columns
-        # Concordance weight (matches subtype_cohort_pies.py):
-        #   +1 concordant  → 1.0
-        #    0 neutral      → 0.5  (clinical features or unconfirmed direction)
-        #   -1 discordant   → 0.0
-        _CONC_W = {1.0: 1.0, 0.0: 0.5, -1.0: 0.0}
         if has_conc:
-            assigned_df['_weight'] = assigned_df['concordance'].map(_CONC_W).fillna(0.5)
+            assigned_df['_weight'] = assigned_df['concordance'].fillna(0.0)
         else:
-            assigned_df['_weight'] = 0.5
+            assigned_df['_weight'] = 0.0
 
         dedup_w = assigned_df.drop_duplicates(
             subset=['feature', 'cohort', 'cluster_key', 'subtype']
         )
-        # Cohort total weighted features (denominator for pie slices)
-        cohort_weighted_totals = (
-            dedup_w.groupby('cohort')['_weight'].sum().rename('cohort_total_w')
+        # Cohort feature total (denominator for the percentage column)
+        cohort_totals = (
+            dedup_w.groupby('cohort')['feature'].nunique().rename('cohort_total_n')
         )
 
-        # Cluster × subtype × cohort weighted counts
+        # Cluster × subtype × cohort signed sums and counts
         summary = (
-            dedup_w.groupby(['cohort', 'cluster_key', 'subtype'])['_weight']
-            .sum()
-            .reset_index(name='weighted_n')
+            dedup_w.groupby(['cohort', 'cluster_key', 'subtype'])
+            .agg(weighted_n=('_weight', 'sum'),
+                 n_features=('feature', 'nunique'))
+            .reset_index()
         )
-        summary = summary.merge(cohort_weighted_totals, on='cohort')
+        summary = summary.merge(cohort_totals, on='cohort')
         summary['pct_of_cohort'] = (
-            summary['weighted_n'] / summary['cohort_total_w'].replace(0, np.nan) * 100
+            summary['n_features'] / summary['cohort_total_n'].replace(0, np.nan) * 100
         ).round(1)
         summary = summary.sort_values(
-            ['cohort', 'subtype', 'pct_of_cohort'], ascending=[True, True, False]
+            ['cohort', 'subtype', 'n_features'], ascending=[True, True, False]
         )
 
         for cohort, grp in summary.groupby('cohort'):
-            print(f"\n  {cohort}  (total weighted features: "
-                  f"{cohort_weighted_totals.get(cohort, 0):.1f})")
-            print(f"  {'cluster_key':<52}  {'subtype':<6}  {'weighted_n':>10}  {'% cohort':>9}")
-            print(f"  {'-'*52}  {'-'*6}  {'-'*10}  {'-'*9}")
+            print(f"\n  {cohort}  (total features: "
+                  f"{cohort_totals.get(cohort, 0):.0f})")
+            print(f"  {'cluster_key':<52}  {'subtype':<6}  {'n_feat':>6}  "
+                  f"{'weighted_n':>10}  {'% cohort':>9}")
+            print(f"  {'-'*52}  {'-'*6}  {'-'*6}  {'-'*10}  {'-'*9}")
             for _, r in grp.iterrows():
                 print(f"  {r['cluster_key']:<52}  {r['subtype']:<6}  "
-                      f"{r['weighted_n']:>10.1f}  {r['pct_of_cohort']:>8.1f}%")
+                      f"{r['n_features']:>6.0f}  {r['weighted_n']:>10.1f}  "
+                      f"{r['pct_of_cohort']:>8.1f}%")
 
         # Save the summary table
         summary_path = os.path.join(args.out_dir, 'cluster_subtype_cohort_weighted.csv')
-        summary[['cohort', 'cluster_key', 'subtype', 'weighted_n',
-                 'cohort_total_w', 'pct_of_cohort']].to_csv(summary_path, index=False)
-        print(f"\n  Saved weighted cluster→subtype summary → {summary_path}")
+        summary[['cohort', 'cluster_key', 'subtype', 'weighted_n', 'n_features',
+                 'cohort_total_n', 'pct_of_cohort']].to_csv(summary_path, index=False)
+        print(f"\n  Saved cluster→subtype summary → {summary_path}")
 
         assigned_df.drop(columns=['_weight'], inplace=True, errors='ignore')
 
