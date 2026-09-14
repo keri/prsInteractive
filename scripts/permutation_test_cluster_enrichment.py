@@ -64,6 +64,24 @@ def benjamini_hochberg(p):
     return q
 
 
+# Concordance-to-weight map used by clusterSubtypeAssignment.py (_CONC_W) to
+# build the weighted counts plotted in Figure 4. Discordant features are given
+# zero weight rather than negative weight, so the figure's totals are
+# non-negative.
+FIGURE_WEIGHTS = {1.0: 1.0, 0.0: 0.5, -1.0: 0.0}
+
+
+def apply_weighting(assign, weighting):
+    a = assign.copy()
+    if weighting == 'figure':
+        a['weight'] = a.concordance.map(FIGURE_WEIGHTS).fillna(0.5)
+    elif weighting == 'signed':
+        a['weight'] = a.concordance
+    else:
+        raise ValueError(f'unknown weighting: {weighting}')
+    return a
+
+
 def weighted_shares(assign, group_col):
     """Net concordance of each model's features within each group.
 
@@ -81,17 +99,19 @@ def weighted_shares(assign, group_col):
     Feature counts are retained as a descriptive column.
     """
     g = (assign.groupby(['cohort', group_col])
-         .agg(net_concordance=('concordance', 'sum'),
+         .agg(weighted_n=('weight', 'sum'),
+              net_concordance=('concordance', 'sum'),
               n_features=('feature', 'nunique'))
          .reset_index())
     tot = (assign.groupby('cohort').feature.nunique()
            .rename('cohort_total').reset_index())
     g = g.merge(tot, on='cohort')
-    g['statistic'] = g.net_concordance
+    g['statistic'] = g.weighted_n
     return g
 
 
-def run_permutation(assign, group_col, n_perm, seed):
+def run_permutation(assign, group_col, n_perm, seed, weighting):
+    assign = apply_weighting(assign, weighting)
     obs = weighted_shares(assign, group_col)
     key = ['cohort', group_col]
 
@@ -138,6 +158,15 @@ def main():
     ap.add_argument('--n_perm', type=int, default=10000)
     ap.add_argument('--seed', type=int, default=42)
     ap.add_argument('--q_threshold', type=float, default=0.05)
+    ap.add_argument('--weighting', choices=['figure', 'signed'], default='figure',
+                    help="'figure' reproduces the weighting used to build Figure 4 "
+                         "(clusterSubtypeAssignment.py _CONC_W: concordant 1, "
+                         "neutral 0.5, discordant 0), so the test applies to the "
+                         "quantity the figure plots. 'signed' uses the raw "
+                         "concordance values (+1/0/-1), which lets discordant "
+                         "features subtract and tests net directional agreement "
+                         "instead. Default 'figure' for consistency with the "
+                         "published figure.")
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -153,18 +182,24 @@ def main():
           f'{assign.cohort.nunique()} models')
     print('features per model:')
     print(n_feat.to_string())
-    print(f'\nrunning {args.n_perm} permutations (seed {args.seed}) ...\n')
+    print(f"\nweighting: {args.weighting}"
+          + (" (concordant 1, neutral 0.5, discordant 0 -- as plotted in Figure 4)"
+             if args.weighting == 'figure' else
+             " (raw +1/0/-1; discordant features subtract)"))
+    print(f'running {args.n_perm} permutations (seed {args.seed}) ...\n')
 
     for group_col, label in [('cluster_key', 'functional cluster'), ('subtype', 'T2D subtype')]:
-        res = run_permutation(assign, group_col, args.n_perm, args.seed)
-        out = os.path.join(args.out_dir, f'permutation_enrichment_{group_col}.csv')
+        res = run_permutation(assign, group_col, args.n_perm, args.seed, args.weighting)
+        suffix = '' if args.weighting == 'figure' else f'_{args.weighting}'
+        out = os.path.join(args.out_dir,
+                           f'permutation_enrichment_{group_col}{suffix}.csv')
         res.to_csv(out, index=False)
         sig = res[res.q_value < args.q_threshold]
         print(f'=== {label}: {len(res)} model-by-{group_col} cells tested, '
               f'{len(sig)} with q < {args.q_threshold} ===')
         show = sig if len(sig) else res.head(5)
-        cols = ['cohort', group_col, 'n_features', 'cohort_total',
-                'net_concordance', 'expected_null', 'p_two_sided', 'q_value', 'direction']
+        cols = ['cohort', group_col, 'n_features', 'weighted_n', 'expected_null',
+                'net_concordance', 'p_two_sided', 'q_value', 'direction']
         print(show[cols].to_string(index=False, float_format=lambda v: f'{v:.4f}'))
         if not len(sig):
             print(f'(none significant; showing the five smallest p-values. '
