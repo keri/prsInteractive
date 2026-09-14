@@ -47,8 +47,8 @@ Output:
       p_value            – Mann-Whitney p (clinical) or None (genomic SHAP)
       p_value_fdr        – BH-corrected p
       effect_size_r      – rank-biserial r (clinical) or odds_ratio (genomic)
-      snp1_gene_names    – semicolon-joined gene names for snp1 (if annotated)
-      snp2_gene_names    – semicolon-joined gene names for snp2 (if annotated)
+      gene_names_SNP1    – semicolon-joined gene names for snp1 (if annotated)
+      gene_names_SNP2    – semicolon-joined gene names for snp2 (if annotated)
       feature_source     – 'genomic_shap' or 'clinical'
       match_method       – 'feature_feature' | 'loci_loci' | 'feature_loci' | 'none'
       n_clusters_matched – count of functional cluster columns with value 1
@@ -385,14 +385,19 @@ def identify_exclusive_groups(combined_prs, bin_cols):
 # =============================================================================
 
 def _mwu(a_series, b_series):
-    """Mann-Whitney U, return (p_value, rank_biserial_r) or (None, None)."""
+    """Mann-Whitney U, return (p_value, rank_biserial_r) or (None, None).
+
+    The returned r is the rank-biserial correlation for the FIRST sample, so
+    r > 0 means group `a` (cases) has the larger values. scipy returns U1, the
+    statistic for `a`, hence r = 2*U1/(n1*n2) - 1.
+    """
     a = a_series.dropna().values
     b = b_series.dropna().values
     if len(a) < 5 or len(b) < 5:
         return None, None
     try:
         stat, pval = stats.mannwhitneyu(a, b, alternative='two-sided')
-        r = 1 - (2 * stat) / (len(a) * len(b))
+        r = (2 * stat) / (len(a) * len(b)) - 1
         return pval, r
     except Exception:
         return None, None
@@ -829,8 +834,8 @@ def expand_to_snp_rows(feature_df, annotation_df):
 
     Returns
     -------
-    DataFrame with additional columns: feature, snp1, snp1_gene_names,
-                                       snp2, snp2_gene_names
+    DataFrame with additional columns: feature, snp1, gene_names_SNP1,
+                                       snp2, gene_names_SNP2
     """
     # Build fast lookup: normalised feature string → annotation row
     # Keys are strip()+lower() so minor case/whitespace differences don't cause misses.
@@ -974,8 +979,8 @@ def load_cluster_file(filepath):
     # 'feature' / 'Feature' covers both SNP rsID columns and Trait columns that
     # have already been renamed to 'feature' on the cluster-file side.
     feat_col  = _first_col(df, ['feature', 'Feature', 'SNP', 'snp', 'snp1', 'SNP2'])
-    # 'loci' / 'Loci' also covers snp1_gene_names / snp2_gene_names columns that
-    # carry gene-name annotations equivalent to our snp1_gene_names field.
+    # 'loci' / 'Loci' also covers gene_names_SNP1 / gene_names_SNP2 columns that
+    # carry gene-name annotations equivalent to our gene_names_SNP1 field.
     loci_col  = _first_col(df, ['loci', 'Loci', 'Locus', 'locus',
                                  'gene_names_SNP1', 'gene_name_SNP1', 'gene_nameS_SNP2' , 'gene_name_SNP2'])
     trait_col = _first_col(df, ['Trait', 'trait'])
@@ -1015,8 +1020,7 @@ def load_cluster_file(filepath):
         # the cluster columns (e.g. already-wide count columns from prior pipeline)
         meta = {'feature', 'Feature', 'Trait', 'trait', 'Loci', 'loci',
                 'Locus', 'locus', 'SNP', 'snp', 'snp1','SNP1','SNP2',
-                'snp1_gene_names', 'snp2_gene_names', 'gene_names_SNP1', 'gene_names_SNP2',
-                'snp1_gene_name',  'snp2_gene_name'}
+                'gene_names_SNP1', 'gene_names_SNP2'}
         cluster_cols = [c for c in df.columns if c not in meta]
         if not cluster_cols:
             file_stem = os.path.splitext(os.path.basename(filepath))[0]
@@ -1209,7 +1213,7 @@ def apply_mahajan_clinical_features(expanded_df: pd.DataFrame,
                                      mahajan_map: dict) -> pd.DataFrame:
     """
     For each genomic row in *expanded_df*, look up snp1, snp2, and
-    snp1_gene_names / snp2_gene_names tokens against *mahajan_map* and
+    gene_names_SNP1 / gene_names_SNP2 tokens against *mahajan_map* and
     record the linked clinical feature.
 
     New columns added
@@ -1235,8 +1239,8 @@ def apply_mahajan_clinical_features(expanded_df: pd.DataFrame,
                 n = _norm(val)
                 if n:
                     candidates.append((label, n))
-            for gene_col, label in [('snp1_gene_names', 'gene'),
-                                     ('snp2_gene_names', 'gene')]:
+            for gene_col, label in [('gene_names_SNP1', 'gene'),
+                                     ('gene_names_SNP2', 'gene')]:
                 gene_str = row.get(gene_col, '')
                 if gene_str and pd.notna(gene_str):
                     for g in re.split(r'[;,\s]+', str(gene_str)):
@@ -1270,14 +1274,14 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
     snp1  (primary SNP / index SNP)  feature col  (rsID or clinical measure,
     snp2  (secondary SNP, GxG)       ──────────────  renamed from Trait where needed)
     feature (raw name, clinical      loci col     (gene names; equivalent to our
-             fallback only)          ──────────────  snp1_gene_names / snp2_gene_names)
+             fallback only)          ──────────────  gene_names_SNP1 / gene_names_SNP2)
 
     Match order — first hit wins per cluster column (most → least specific):
       1. feature → feature         : snp1/snp2 rsID (or clinical name for non-genomic
                                      rows) vs cluster 'feature' col.
       1b. feature → feature        : Mahajan-linked clinical trait for this SNP vs
            (mahajan)                 cluster 'feature' col.
-      2. loci    → loci            : snp1_gene_names / snp2_gene_names gene tokens
+      2. loci    → loci            : gene_names_SNP1 / gene_names_SNP2 gene tokens
                                      vs cluster 'loci' col.
       3. loci    → feature         : same gene tokens vs cluster 'feature' col
                                      (some cluster files use gene symbols as feature
@@ -1328,7 +1332,7 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
     feature_candidates = snp_candidates | clinical_candidates
 
     # --- Our "loci" candidates (step 2) -------------------------------------
-    # snp1_gene_names and snp2_gene_names are our loci — semicolon-separated
+    # gene_names_SNP1 and gene_names_SNP2 are our loci — semicolon-separated
     # gene names that map to the 'loci' column on the cluster-file side.
     loci_candidates = set()
     for gene_str in [snp1_genes, snp2_genes]:
@@ -1369,7 +1373,7 @@ def map_row_to_clusters(feature, snp1, snp2, snp1_genes, snp2_genes,
             method = 'feature_feature_mahajan'
 
         # 2. loci → loci
-        #    our gene-name tokens (snp1_gene_names / snp2_gene_names)
+        #    our gene-name tokens (gene_names_SNP1 / gene_names_SNP2)
         #    vs cluster loci col (gene-name loci on cluster-file side)
         elif loci_candidates & lookup['loci']:
             hit = 1
@@ -1432,7 +1436,7 @@ def main(pheno_data, filter_strategy='tiered',
     # Load feature annotation (for SNP expansion)
     # -------------------------------------------------------------------------
     print("\n--- Step 2: Loading feature annotation ---")
-    pheno_path='/'.joint(pheno_data.split('/')[:-1])
+    pheno_path='/'.join(pheno_data.split('/')[:-1])
     annotation_df = load_feature_annotation(pheno_path)
 
     # -------------------------------------------------------------------------
@@ -1603,7 +1607,7 @@ def main(pheno_data, filter_strategy='tiered',
 
     # Gene-name coverage diagnostic — loci matching only works when gene names are present
     genomic_rows = expanded_df[expanded_df['feature_source'] == 'genomic_shap']
-    has_genes = genomic_rows['snp1_gene_names'].notna() | genomic_rows['snp2_gene_names'].notna()
+    has_genes = genomic_rows['gene_names_SNP1'].notna() | genomic_rows['gene_names_SNP2'].notna()
     print(f"  Gene-name coverage: {has_genes.sum()}/{len(genomic_rows)} genomic rows "
           f"have ≥1 gene name from feature_scores_annotated.csv")
 
@@ -1686,8 +1690,8 @@ def main(pheno_data, filter_strategy='tiered',
             feature=feat_val,
             snp1=row.get('snp1'),
             snp2=row.get('snp2'),
-            snp1_genes=row.get('snp1_gene_names'),
-            snp2_genes=row.get('snp2_gene_names'),
+            snp1_genes=row.get('gene_names_SNP1'),
+            snp2_genes=row.get('gene_names_SNP2'),
             feature_source=row.get('feature_source'),
             all_lookups=flat_lookups,
             mahajan_clinical_feature=row.get('mahajan_clinical_feature', ''),
@@ -1708,8 +1712,8 @@ def main(pheno_data, filter_strategy='tiered',
             'specificity_tier':          row.get('specificity_tier'),
             'n_exclusive_cohorts':       row.get('n_exclusive_cohorts', np.nan),
             'exclusive_cohorts':         row.get('exclusive_cohorts', np.nan),
-            'gene_names_SNP1':           row.get('snp1_gene_names'),
-            'gene_names_SNP2':           row.get('snp2_gene_names'),
+            'gene_names_SNP1':           row.get('gene_names_SNP1'),
+            'gene_names_SNP2':           row.get('gene_names_SNP2'),
             'mahajan_clinical_feature':  row.get('mahajan_clinical_feature', ''),
             'mahajan_source':            row.get('mahajan_source', ''),
             'match_method':              match_method,
