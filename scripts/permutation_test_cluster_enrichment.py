@@ -10,27 +10,42 @@
 # expected if features were exchangeable between models.
 #
 # NULL MODEL
-# Each feature carries its own cluster/subtype annotations and concordance
-# values, which are properties of the feature rather than of the model that
-# selected it (verified: concordance never varies by cohort for a given
-# feature/cluster/subtype). The null therefore permutes the model label across
-# features, holding each feature's annotation profile intact and preserving the
-# number of features per model. This breaks only the model-feature association,
-# which is the thing being tested.
+# Each feature carries its own cluster and subtype annotations with their
+# concordance directions. These come from published cluster definitions and are
+# properties of the feature, not of the model that selected it. The null
+# therefore permutes the model label across features, holding each feature's
+# annotation profile intact and preserving the number of features per model.
+# This breaks only the model-feature association, which is the thing being
+# tested.
 #
 # STATISTIC
-# Share = the number of a model's distinct features assigned to that cluster
-# (or subtype), divided by the model's total assigned features. Shares rather
-# than raw counts, so models with more features are comparable. Counts rather
-# than summed concordance, because concordance is signed and one model's total
-# is negative, which makes concordance shares uninterpretable.
+# Net concordance: the signed sum of concordance values for that model within
+# that cluster or subtype. Concordance encodes the direction of a feature's
+# association, so one feature can count positively towards some subtypes and
+# negatively towards others (BMI is positively associated with MOD and MARD,
+# negatively with others). The signed sum is therefore the quantity of
+# interest.
+#
+# It is used unnormalised. No denominator is needed because the permutation
+# preserves the number of features per model, so each cell is compared with a
+# null generated at that model's own size. Dividing by a model's total would
+# also be meaningless, since a signed subtotal and a signed total can carry
+# opposite signs.
 #
 # Two-sided empirical p-values with a +1 correction, then Benjamini-Hochberg
 # across all tested cells.
 #
-# NOTE ON POWER: models carry 11-27 features each, so cells are small and the
-# minimum attainable p-value is bounded by --n_perm. Absence of significance
-# should be read as insufficient evidence, not as evidence of absence.
+# NOTE ON POWER: each model contributes a small number of annotated features,
+# so the minimum attainable p-value is bounded by --n_perm. Absence of
+# significance should be read as insufficient evidence, not as evidence of
+# absence.
+#
+# READING THE DIRECTION: a significant "under" result does not mean the model
+# contributes few features to that subtype. It means the features it does
+# contribute point predominantly against that subtype's expected direction of
+# association. Compare net_concordance with expected_null, and read n_features
+# alongside, since a model can supply many features to a subtype while being
+# net discordant with it.
 
 import argparse
 import os
@@ -50,26 +65,29 @@ def benjamini_hochberg(p):
 
 
 def weighted_shares(assign, group_col):
-    """Share of each model's features that fall in each group.
+    """Net concordance of each model's features within each group.
 
-    The statistic counts distinct features rather than summing concordance.
-    Concordance is signed (concordant 1, discordant -1, neutral 0), so a
-    model whose discordant features outweigh its concordant ones has a
-    negative total: cardio_product sums to -8. Dividing a signed subtotal by a
-    signed total produces uninterpretable shares, including positive shares
-    from negative counts. Feature counts are strictly non-negative and answer
-    the question directly -- does this model contribute a disproportionate
-    share of its features to this cluster. Net concordance is carried through
-    as a descriptive column.
+    Concordance encodes the direction of a feature's association with a given
+    cluster or subtype (concordant 1, discordant -1, neutral 0), so one feature
+    can contribute positively to some subtypes and negatively to others -- BMI
+    is positively associated with MOD and MARD but negatively with others. The
+    signed sum is therefore the quantity of interest, not a nuisance.
+
+    The statistic is that sum, used unnormalised. Dividing by a model's total
+    would be meaningless here, since a signed subtotal and a signed total can
+    carry opposite signs. No denominator is needed: the permutation preserves
+    the number of features per model, so each cell is compared against a null
+    built at that model's own size, which controls for model size directly.
+    Feature counts are retained as a descriptive column.
     """
     g = (assign.groupby(['cohort', group_col])
-         .agg(n_features=('feature', 'nunique'),
-              net_concordance=('concordance', 'sum'))
+         .agg(net_concordance=('concordance', 'sum'),
+              n_features=('feature', 'nunique'))
          .reset_index())
     tot = (assign.groupby('cohort').feature.nunique()
            .rename('cohort_total').reset_index())
     g = g.merge(tot, on='cohort')
-    g['share'] = g.n_features / g.cohort_total
+    g['statistic'] = g.net_concordance
     return g
 
 
@@ -83,7 +101,7 @@ def run_permutation(assign, group_col, n_perm, seed):
 
     rng = np.random.default_rng(seed)
     labels = pairs.cohort.to_numpy()
-    ge = np.zeros(len(obs)); le = np.zeros(len(obs))
+    ge = np.zeros(len(obs)); le = np.zeros(len(obs)); null_sum = np.zeros(len(obs))
     obs_idx = {tuple(r): i for i, r in enumerate(obs[key].to_numpy())}
 
     for _ in range(n_perm):
@@ -92,17 +110,19 @@ def run_permutation(assign, group_col, n_perm, seed):
         sim = permuted.merge(feature_rows, on='feature', how='left')
         s = weighted_shares(sim, group_col)
         vals = np.zeros(len(obs))
-        for r, v in zip(s[key].to_numpy(), s.share.to_numpy()):
+        for r, v in zip(s[key].to_numpy(), s.statistic.to_numpy()):
             i = obs_idx.get(tuple(r))
             if i is not None:
                 vals[i] = v
-        ge += vals >= obs.share.to_numpy()
-        le += vals <= obs.share.to_numpy()
+        ge += vals >= obs.statistic.to_numpy()
+        le += vals <= obs.statistic.to_numpy()
+        null_sum += vals
 
     obs['p_greater'] = (ge + 1) / (n_perm + 1)
     obs['p_less'] = (le + 1) / (n_perm + 1)
     obs['p_two_sided'] = np.minimum(1.0, 2 * np.minimum(obs.p_greater, obs.p_less))
     obs['q_value'] = benjamini_hochberg(obs.p_two_sided.to_numpy())
+    obs['expected_null'] = null_sum / n_perm
     obs['direction'] = np.where(obs.p_greater < obs.p_less, 'over', 'under')
     obs['n_perm'] = n_perm
     return obs.sort_values('p_two_sided')
@@ -143,8 +163,8 @@ def main():
         print(f'=== {label}: {len(res)} model-by-{group_col} cells tested, '
               f'{len(sig)} with q < {args.q_threshold} ===')
         show = sig if len(sig) else res.head(5)
-        cols = ['cohort', group_col, 'n_features', 'cohort_total', 'share',
-                'net_concordance', 'p_two_sided', 'q_value', 'direction']
+        cols = ['cohort', group_col, 'n_features', 'cohort_total',
+                'net_concordance', 'expected_null', 'p_two_sided', 'q_value', 'direction']
         print(show[cols].to_string(index=False, float_format=lambda v: f'{v:.4f}'))
         if not len(sig):
             print(f'(none significant; showing the five smallest p-values. '
