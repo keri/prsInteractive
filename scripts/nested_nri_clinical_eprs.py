@@ -31,11 +31,12 @@
 # non-clinical terms, so the only difference between them is ePRS.
 #
 # REPORTED QUANTITIES
-#   NRI at the clinical model's Youden threshold, with the event and non-event
-#       components separated. Both arms are binarised at the SAME threshold,
-#       derived from the reference model, so the classification budget is set
-#       once and ePRS has to earn reclassification rather than being handed a
-#       larger budget.
+#   NRI at a fixed 20% classification budget, with the event and non-event
+#       components separated. Both arms are binarised at the SAME threshold --
+#       the reference model's 80th percentile -- so the budget is set once and
+#       ePRS has to earn reclassification rather than being handed a larger
+#       one. 20% matches the risk stratum used throughout the paper. The value
+#       at the Youden point is reported alongside for reference.
 #   Category-free NRI, which needs no threshold at all: the net proportion of
 #       cases whose predicted risk rises, plus the net proportion of controls
 #       whose predicted risk falls. Reported because any threshold choice is
@@ -165,23 +166,41 @@ def pooled_probabilities(df, features, y, seed=42, n_splits=5):
     return out
 
 
-def compare(df, y, clinical_features, prs_col, label, seed):
-    """Clinical model versus the same model plus ePRS."""
+def compare(df, y, clinical_features, prs_col, label, seed, flag_rate=0.20):
+    """Clinical model versus the same model plus ePRS.
+
+    Both arms are binarised at the SAME threshold, taken from the reference
+    model, so the classification budget is set once and ePRS has to earn
+    reclassification rather than being handed a larger one.
+
+    The threshold is the reference model's `flag_rate` quantile -- the top 20%
+    by default, matching the risk stratum used throughout the paper -- rather
+    than its Youden point. Youden weights a missed case and a false alarm
+    equally, which is a different and unstated assumption, and it flags a
+    different fraction of the cohort for every clinical model, so the budget
+    would vary between rows of the results table. It is still reported
+    alongside for reference.
+    """
     ref_feats = COVARIATES + clinical_features
     new_feats = ref_feats + [prs_col]
 
     p_ref = pooled_probabilities(df, ref_feats, y, seed)
     p_new = pooled_probabilities(df, new_feats, y, seed)
 
-    thr = youden_threshold(y, p_ref)
+    thr = float(np.quantile(p_ref, 1 - flag_rate))
+    thr_youden = youden_threshold(y, p_ref)
     auc_ref = roc_auc_score(y, p_ref)
     auc_new = roc_auc_score(y, p_new)
 
     row = {'model': label,
            'clinical_terms': ' + '.join(clinical_features),
+           'flag_rate': flag_rate,
            'auc_clinical': auc_ref, 'auc_clinical_plus_eprs': auc_new,
            'delta_auc': auc_new - auc_ref}
     row.update(nri_categorical(y, p_ref, p_new, thr))
+    yd = nri_categorical(y, p_ref, p_new, thr_youden)
+    row['nri_at_youden'] = yd['nri']
+    row['youden_flag_rate'] = yd['n_flagged_ref'] / len(y)
     row.update(nri_category_free(y, p_ref, p_new))
     row.update(integrated_discrimination(y, p_ref, p_new))
 
@@ -213,6 +232,11 @@ def main():
     ap.add_argument('--covar_file', default=None,
                     help='Overrides the default holdout covariate PRS file.')
     ap.add_argument('--seed', type=int, default=42)
+    ap.add_argument('--flag_rate', type=float, default=0.20,
+                    help='Fraction of the cohort the reference model flags; '
+                         'both arms are binarised at that same threshold. '
+                         'Default 0.20 to match the risk stratum used '
+                         'throughout the paper.')
     args = ap.parse_args()
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -267,10 +291,11 @@ def main():
 
     rows = []
     rows.append(compare(df, y, list(CLINICAL), args.prs_col,
-                        'combined clinical model', args.seed))
+                        'combined clinical model', args.seed, args.flag_rate))
     for col in CLINICAL:
         rows.append(compare(df, y, [col], args.prs_col,
-                            f'per-measure: {CLINICAL[col]}', args.seed))
+                            f'per-measure: {CLINICAL[col]}', args.seed,
+                            args.flag_rate))
 
     res = pd.DataFrame(rows)
     out = os.path.join(args.out_dir, 'nested_nri_clinical_eprs.csv')
@@ -280,7 +305,8 @@ def main():
     print('NESTED RECLASSIFICATION: clinical model vs clinical model + ePRS_Comp')
     print('=' * 78)
     show = ['model', 'auc_clinical', 'auc_clinical_plus_eprs', 'delta_auc',
-            'delong_p', 'nri', 'nri_events', 'nri_non_events', 'cfnri', 'idi']
+            'delong_p', 'nri', 'nri_events', 'nri_non_events', 'cfnri', 'idi',
+            'nri_at_youden']
     print(res[show].to_string(index=False, float_format=lambda v: f'{v:.4f}'))
     print(f'\n-> {out}')
 
