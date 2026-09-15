@@ -140,11 +140,19 @@ def load_enrichment(perm_csv: str) -> pd.DataFrame:
     count fixed, so the observed-versus-expected comparison it produces is
     already size-corrected.
 
-    z_score = (observed - expected) / SD(null) is used as the bar height
-    because fold enrichment is unstable where the expectation is near zero.
-    Significance is taken from the empirical q-value, not from the z: the null
-    is discrete and skewed at these counts, so z is a descriptive effect size
-    only.
+    Fold enrichment (observed / expected) is used as the bar height, plotted on
+    a log2 axis so that doubling and halving are equal distances from the 1x
+    baseline. It is the interpretable magnitude: 1.7x means the model puts 70%
+    more features into that subtype than chance gives it, given its size.
+
+    Fold is unstable where the expectation approaches zero, which is why the
+    cluster-level results are not plotted this way -- their expectations reach
+    0.00. At subtype level the expectations run 4.8 to 16.2 with no empty
+    cells, so the ratio is well behaved.
+
+    Significance comes from the empirical q-value, marked with an asterisk.
+    The bar height is the effect size and carries no significance claim of its
+    own.
     """
     perm = pd.read_csv(perm_csv)
     perm['model'] = perm['cohort'].map(COHORT_MODEL)
@@ -453,34 +461,46 @@ def draw_combined(subtype_df: pd.DataFrame, cell_df: pd.DataFrame,
 
     ymax = 0.0
     for mi, model in enumerate(MODELS):
-        zs, qs = [], []
+        lf, qs = [], []
         for st in SUBTYPES:
             row = enrich_df[(enrich_df['subtype'] == st) &
                             (enrich_df['model'] == model)]
-            zs.append(float(row['z_score'].values[0]) if len(row) else np.nan)
+            fold = float(row['fold_enrichment'].values[0]) if len(row) else np.nan
+            lf.append(np.log2(fold) if fold and fold > 0 else np.nan)
             qs.append(float(row['q_value'].values[0]) if len(row) else np.nan)
-        zs = np.array(zs, dtype=float)
-        ax_top.bar(x + offsets[mi], np.nan_to_num(zs), bar_width * 0.88,
+        lf = np.array(lf, dtype=float)
+        ax_top.bar(x + offsets[mi], np.nan_to_num(lf), bar_width * 0.88,
                    color=MODEL_COLORS[model], label=MODEL_LABELS[model],
                    edgecolor='white', linewidth=0.4, zorder=2)
         # Significance marker above (or below) each bar
-        for xi, (z, q) in enumerate(zip(zs, qs)):
-            if np.isnan(z) or np.isnan(q) or q >= 0.05:
+        for xi, (v, q) in enumerate(zip(lf, qs)):
+            if np.isnan(v) or np.isnan(q) or q >= 0.05:
                 continue
-            va, pad = ('bottom', 0.12) if z >= 0 else ('top', -0.12)
-            ax_top.text(x[xi] + offsets[mi], z + pad, '*', ha='center', va=va,
+            va, pad = ('bottom', 0.04) if v >= 0 else ('top', -0.04)
+            ax_top.text(x[xi] + offsets[mi], v + pad, '*', ha='center', va=va,
                         fontsize=11, fontweight='bold', color='#222222')
-        if len(zs[~np.isnan(zs)]):
-            ymax = max(ymax, np.nanmax(np.abs(zs)))
+        if len(lf[~np.isnan(lf)]):
+            ymax = max(ymax, np.nanmax(np.abs(lf)))
 
     ax_top.axhline(0, color='#666666', lw=0.9, zorder=3)
     ax_top.set_ylim(-ymax * 1.30, ymax * 1.30)
+
+    # Label the log2 axis with the fold values themselves, so the reader sees
+    # "2x" rather than "1".
+    # Whole powers of two only, so the labels read 0.25x / 0.5x / 1x / 2x / 4x
+    # rather than the irrational half-steps.
+    lim = ymax * 1.30
+    ticks = [t for t in range(-4, 5) if abs(t) <= lim]
+    if len(ticks) < 3:
+        ticks = [-1, 0, 1]
+    ax_top.set_yticks(ticks)
+    ax_top.set_yticklabels([f'{2.0 ** t:g}\u00d7' for t in ticks], fontsize=8.5)
 
     ax_top.set_xticks(x)
     ax_top.set_xticklabels(
         [f'{s}\n{SUBTYPE_FULL[s]}' for s in SUBTYPES], fontsize=8.5
     )
-    ax_top.set_ylabel('Enrichment vs chance\n(SD from permutation null)', fontsize=9)
+    ax_top.set_ylabel('Features vs chance\n(observed / expected)', fontsize=9)
     ax_top.set_title(
         'B1  Enrichment of each PRS model per subtype, corrected for model size '
         '(* q < 0.05)',

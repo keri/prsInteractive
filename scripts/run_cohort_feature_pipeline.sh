@@ -9,8 +9,8 @@
 #   Step 3  compare_clinical_features_across_cohorts.py
 #   Step 4  clusterSubtypeAssignment.py
 #   Step 5  permutation_test_cluster_enrichment.py
-#   Step 6  cluster_subtype_dotmatrix.py          (Figure 8)
-#   Step 7  subtype_cohort_stackedbars.py         (companion figure)
+#   Step 6  cluster_subtype_dotmatrix.py          (alternative view)
+#   Step 7  subtype_cohort_stackedbars.py         (Figure 8)
 #
 #   The circos and donut-pie steps are retired; see the block at the end.
 #
@@ -232,7 +232,7 @@ python "${SCRIPT_DIR}/permutation_test_cluster_enrichment.py" \
 echo "  Output: ${PERM_CLUSTER_CSV}"
 
 # =============================================================================
-#  STEP 6 — Figure 8: cluster x subtype dot matrix
+#  STEP 6 — Alternative view: cluster x subtype dot matrix
 # =============================================================================
 step_header "Cluster-subtype dot matrix (cluster_subtype_dotmatrix.py)"
 
@@ -246,13 +246,14 @@ python "${SCRIPT_DIR}/cluster_subtype_dotmatrix.py" \
 echo "  Output: ${PLOTS_OUT}/cluster_subtype_dotmatrix.{png,pdf}"
 
 # =============================================================================
-#  STEP 7 — Companion stacked-bar figure
+#  STEP 7 — Figure 8: subtype enrichment + per-cluster feature counts
 # =============================================================================
 step_header "Subtype cohort stacked bars (subtype_cohort_stackedbars.py)"
 
 python "${SCRIPT_DIR}/subtype_cohort_stackedbars.py" \
-    --assignments "${ASSIGNMENTS_CSV}" \
-    --out_dir     "${PLOTS_OUT}"
+    --assignments     "${ASSIGNMENTS_CSV}" \
+    --permutation_csv "${ENRICHMENT_OUT}/permutation_enrichment_subtype.csv" \
+    --out_dir         "${PLOTS_OUT}"
 
 echo "  Output: ${PLOTS_OUT}/subtype_cohort_bars_*.png"
 
