@@ -121,7 +121,8 @@ def run_permutation(assign, group_col, n_perm, seed, weighting):
 
     rng = np.random.default_rng(seed)
     labels = pairs.cohort.to_numpy()
-    ge = np.zeros(len(obs)); le = np.zeros(len(obs)); null_sum = np.zeros(len(obs))
+    ge = np.zeros(len(obs)); le = np.zeros(len(obs))
+    null_sum = np.zeros(len(obs)); null_sq = np.zeros(len(obs))
     obs_idx = {tuple(r): i for i, r in enumerate(obs[key].to_numpy())}
 
     for _ in range(n_perm):
@@ -137,12 +138,36 @@ def run_permutation(assign, group_col, n_perm, seed, weighting):
         ge += vals >= obs.statistic.to_numpy()
         le += vals <= obs.statistic.to_numpy()
         null_sum += vals
+        null_sq += vals ** 2
 
     obs['p_greater'] = (ge + 1) / (n_perm + 1)
     obs['p_less'] = (le + 1) / (n_perm + 1)
     obs['p_two_sided'] = np.minimum(1.0, 2 * np.minimum(obs.p_greater, obs.p_less))
     obs['q_value'] = benjamini_hochberg(obs.p_two_sided.to_numpy())
-    obs['expected_null'] = null_sum / n_perm
+    exp = null_sum / n_perm
+    obs['expected_null'] = exp
+    # Population SD of the null draws, used for the standardised effect below.
+    obs['null_sd'] = np.sqrt(np.maximum(null_sq / n_perm - exp ** 2, 0.0))
+
+    # Two size-corrected effect measures.  The permutation holds each model's
+    # feature count fixed, so the null expectation already absorbs the fact
+    # that some models selected many more features than others; both measures
+    # are therefore comparable across models of different sizes.
+    #
+    # fold_enrichment  observed / expected.  Intuitive, but unstable when the
+    #                  expectation is near zero -- a cluster almost no model
+    #                  touches can show a large fold on two features.
+    # z_score          (observed - expected) / SD(null).  Better behaved at
+    #                  small expectations, and the natural bar height for a
+    #                  figure.  It is a descriptive effect size, not the test:
+    #                  significance comes from the empirical q-value, since the
+    #                  null is discrete and skewed at these counts.
+    with np.errstate(divide='ignore', invalid='ignore'):
+        obs['fold_enrichment'] = np.where(exp != 0,
+                                          obs.statistic.to_numpy() / exp, np.nan)
+        obs['z_score'] = np.where(obs.null_sd > 0,
+                                  (obs.statistic.to_numpy() - exp) / obs.null_sd,
+                                  np.nan)
     obs['direction'] = np.where(obs.p_greater < obs.p_less, 'over', 'under')
     obs['n_perm'] = n_perm
     return obs.sort_values('p_two_sided')
@@ -198,7 +223,7 @@ def main():
               f'{len(sig)} with q < {args.q_threshold} ===')
         show = sig if len(sig) else res.head(5)
         cols = ['cohort', group_col, 'n_features', 'weighted_n', 'expected_null',
-                'net_concordance', 'p_two_sided', 'q_value', 'direction']
+                'fold_enrichment', 'z_score', 'p_two_sided', 'q_value', 'direction']
         print(show[cols].to_string(index=False, float_format=lambda v: f'{v:.4f}'))
         if not len(sig):
             print(f'(none significant; showing the five smallest p-values. '

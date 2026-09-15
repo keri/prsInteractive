@@ -130,6 +130,27 @@ CLUSTER_BG = {
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
+def load_enrichment(perm_csv: str) -> pd.DataFrame:
+    """
+    Load the model x subtype permutation results for the B1 enrichment panel.
+
+    Raw feature counts are a poor comparison across models: a model that
+    selected 27 features will out-count one that selected 11 in every subtype,
+    regardless of biology.  The permutation null holds each model's feature
+    count fixed, so the observed-versus-expected comparison it produces is
+    already size-corrected.
+
+    z_score = (observed - expected) / SD(null) is used as the bar height
+    because fold enrichment is unstable where the expectation is near zero.
+    Significance is taken from the empirical q-value, not from the z: the null
+    is discrete and skewed at these counts, so z is a descriptive effect size
+    only.
+    """
+    perm = pd.read_csv(perm_csv)
+    perm['model'] = perm['cohort'].map(COHORT_MODEL)
+    return perm.dropna(subset=['model'])
+
+
 def load_data(csv_path: str):
     """
     Returns two DataFrames:
@@ -412,6 +433,7 @@ def draw_grid_bars(cell_df: pd.DataFrame, out_path: str):
 # ── Combined two-panel figure ─────────────────────────────────────────────────
 
 def draw_combined(subtype_df: pd.DataFrame, cell_df: pd.DataFrame,
+                  enrich_df: pd.DataFrame,
                   out_path: str):
     """
     Combined B1 (top) + B2 (bottom) in one figure for a direct Figure 4B
@@ -424,39 +446,45 @@ def draw_combined(subtype_df: pd.DataFrame, cell_df: pd.DataFrame,
     ax_top = fig.add_subplot(gs[0])
 
     x = np.arange(len(SUBTYPES))
-    bar_width = 0.55
-    bottoms = np.zeros(len(SUBTYPES))
+    n_models = len(MODELS)
+    group_w = 0.78
+    bar_width = group_w / n_models
+    offsets = (np.arange(n_models) - (n_models - 1) / 2) * bar_width
 
-    for model in MODELS:
-        vals = np.array([
-            subtype_df.loc[(subtype_df['subtype'] == st) &
-                           (subtype_df['model'] == model), 'weighted_n'].sum()
-            for st in SUBTYPES
-        ])
-        discs = np.array([
-            subtype_df.loc[(subtype_df['subtype'] == st) &
-                           (subtype_df['model'] == model), 'n_discordant'].sum()
-            for st in SUBTYPES
-        ], dtype=float)
-        ax_top.bar(x, vals, bar_width, bottom=bottoms,
+    ymax = 0.0
+    for mi, model in enumerate(MODELS):
+        zs, qs = [], []
+        for st in SUBTYPES:
+            row = enrich_df[(enrich_df['subtype'] == st) &
+                            (enrich_df['model'] == model)]
+            zs.append(float(row['z_score'].values[0]) if len(row) else np.nan)
+            qs.append(float(row['q_value'].values[0]) if len(row) else np.nan)
+        zs = np.array(zs, dtype=float)
+        ax_top.bar(x + offsets[mi], np.nan_to_num(zs), bar_width * 0.88,
                    color=MODEL_COLORS[model], label=MODEL_LABELS[model],
-                   edgecolor='white', linewidth=0.6)
-        ax_top.bar(x, discs, bar_width, bottom=bottoms + vals - discs,
-                   color='none', edgecolor='white', hatch='////',
-                   linewidth=0.0, zorder=3)
-        bottoms += vals
+                   edgecolor='white', linewidth=0.4, zorder=2)
+        # Significance marker above (or below) each bar
+        for xi, (z, q) in enumerate(zip(zs, qs)):
+            if np.isnan(z) or np.isnan(q) or q >= 0.05:
+                continue
+            va, pad = ('bottom', 0.12) if z >= 0 else ('top', -0.12)
+            ax_top.text(x[xi] + offsets[mi], z + pad, '*', ha='center', va=va,
+                        fontsize=11, fontweight='bold', color='#222222')
+        if len(zs[~np.isnan(zs)]):
+            ymax = max(ymax, np.nanmax(np.abs(zs)))
 
-    for xi, total in enumerate(bottoms):
-        ax_top.text(xi, total + 0.3, f'{total:.0f}',
-                    ha='center', va='bottom', fontsize=8.5, color='#333333')
+    ax_top.axhline(0, color='#666666', lw=0.9, zorder=3)
+    ax_top.set_ylim(-ymax * 1.30, ymax * 1.30)
 
     ax_top.set_xticks(x)
     ax_top.set_xticklabels(
         [f'{s}\n{SUBTYPE_FULL[s]}' for s in SUBTYPES], fontsize=8.5
     )
-    ax_top.set_ylabel('Feature count', fontsize=9.5)
-    ax_top.set_title(f'B1  Features per subtype, partitioned by PRS model{DISC_NOTE}',
-                     fontsize=10.5, fontweight='bold', loc='left', pad=6)
+    ax_top.set_ylabel('Enrichment vs chance\n(SD from permutation null)', fontsize=9)
+    ax_top.set_title(
+        'B1  Enrichment of each PRS model per subtype, corrected for model size '
+        '(* q < 0.05)',
+        fontsize=10.5, fontweight='bold', loc='left', pad=6)
     for spine in ['top', 'right']:
         ax_top.spines[spine].set_visible(False)
     ax_top.tick_params(bottom=False)
@@ -493,6 +521,12 @@ def main():
                 'functionalEnrichment/subtype_feature_assignments.csv',
     )
     p.add_argument(
+        '--permutation_csv',
+        default='results/type2Diabetes/subtypeResearch/enrichment/'
+                'permutation_enrichment_subtype.csv',
+        help='Model x subtype permutation results, used for the B1 panel.',
+    )
+    p.add_argument(
         '--out_dir',
         default='results/type2Diabetes/subtypeResearch/enrichment/plots',
     )
@@ -501,6 +535,7 @@ def main():
     os.makedirs(args.out_dir, exist_ok=True)
     print(f'Loading {args.assignments}')
     subtype_df, cell_df = load_data(args.assignments)
+    enrich_df = load_enrichment(args.permutation_csv)
     global DISC_NOTE
     if cell_df['n_discordant'].sum() > 0:
         DISC_NOTE = ' (hatched = discordant)'
@@ -514,7 +549,7 @@ def main():
         os.path.join(args.out_dir, 'subtype_cohort_bars_B2_grid.png'),
     )
     draw_combined(
-        subtype_df, cell_df,
+        subtype_df, cell_df, enrich_df,
         os.path.join(args.out_dir, 'subtype_cohort_bars_combined.png'),
     )
     print('\nDone.')
