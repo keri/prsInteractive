@@ -24,17 +24,29 @@
 # were set by the budget mismatch rather than by discrimination.
 #
 # HOW THE SUBGROUP IS DEFINED
-# Two definitions are reported because they answer slightly different
-# questions and neither is obviously right:
+# Five definitions are reported. Each measure is shown on its own because they
+# have very different blind spots, and two joint definitions bracket what
+# "clinically missed" can mean:
 #
-#   biomarker-negative   HbA1c < 48 mmol/mol AND glucose < 11.1 mmol/L, the
-#                        diagnostic cut-points. These are people whose routine
-#                        diabetes bloods would not have diagnosed them.
-#   model-negative       predicted risk below the operating threshold of a
-#                        fitted clinical model (age + sex + HbA1c + BMI +
-#                        glucose). Uses all the clinical information jointly
-#                        rather than two cut-points, so it is the stricter and
-#                        more realistic test.
+#   HbA1c-negative       HbA1c < 48 mmol/mol, the diagnostic cut-point.
+#   glucose-negative     glucose < 11.1 mmol/L. Barely a restriction here: the
+#                        UK Biobank measurement is non-fasting and rarely
+#                        reaches the diagnostic value, so this keeps 99% of
+#                        participants.
+#   BMI-negative         BMI < 25. Not a diagnostic criterion but a risk
+#                        factor, so this is the group where clinical suspicion
+#                        is lowest rather than where testing was negative.
+#   biomarker-negative   both diagnostic cut-points together: people whose
+#                        routine diabetes bloods would not have diagnosed them.
+#   model-negative       below the operating threshold of a fitted clinical
+#                        model (age + sex + HbA1c + BMI + glucose). Uses the
+#                        measures jointly and continuously, so someone with
+#                        sub-diagnostic bloods plus high BMI and older age is
+#                        excluded even though every cut-point calls them
+#                        negative. This is the stricter and more realistic
+#                        test, and it is close to a subset of
+#                        biomarker-negative; the overlap table prints how the
+#                        two differ and how many cases sit in the gap.
 #
 # WHAT IS MEASURED, AND AT A MATCHED BUDGET
 # Discrimination within the subgroup (AUC, with a DeLong test of ePRS_Comp
@@ -43,7 +55,10 @@
 # and top 20% -- the number of cases captured, the positive predictive value,
 # and the enrichment over the subgroup's own base rate. Fixing the flag rate is
 # the point: it is what stops a score from looking good merely by flagging more
-# people, which is what went wrong in the published analysis.
+# people, which is what went wrong in the published analysis. Note that the
+# comparison BETWEEN scores is insensitive to that rate, since both are held to
+# it; the subgroup boundary, by contrast, is a real assumption that changes who
+# is analysed, which is why several are reported rather than one.
 #
 # Ranking uses the CONTINUOUS composite score, not combined_high_risk. The
 # binary flag marks 64.4% of the holdout, so it cannot express a top decile.
@@ -70,6 +85,9 @@ GLUCOSE = 'Glucose'
 # the diagnostic value; HbA1c 48 mmol/mol (6.5%) is the diagnostic value.
 HBA1C_DIAGNOSTIC = 48
 GLUCOSE_DIAGNOSTIC = 11.1
+# BMI is a risk factor, not a diagnostic criterion; 25 is the overweight
+# boundary and is reported for contrast, not as a diagnostic rule.
+BMI_OVERWEIGHT = 25
 
 COVARIATES = ['age', 'SEX']
 FLAG_RATES = [0.10, 0.20]
@@ -168,17 +186,30 @@ def main():
           f'({int(y.sum())} cases, base rate {y.mean() * 100:.2f}%)\n')
 
     # --- subgroup definitions -------------------------------------------------
-    biomarker_neg = ((df[HBA1C] < HBA1C_DIAGNOSTIC) &
-                     (df[GLUCOSE] < GLUCOSE_DIAGNOSTIC)).to_numpy()
+    hba1c_neg   = (df[HBA1C] < HBA1C_DIAGNOSTIC).to_numpy()
+    glucose_neg = (df[GLUCOSE] < GLUCOSE_DIAGNOSTIC).to_numpy()
+    bmi_neg     = (df[BMI] < BMI_OVERWEIGHT).to_numpy()
+    biomarker_neg = hba1c_neg & glucose_neg
 
     clin_risk = clinical_model_risk(df, y, args.seed)
     fpr, tpr, thr = roc_curve(y, clin_risk)
     clin_thr = float(thr[np.argmax(tpr - fpr)])
     model_neg = clin_risk < clin_thr
 
+    # Each biomarker is reported on its own as well as jointly, because they
+    # have very different blind spots: HbA1c alone is the strongest single
+    # discriminator, glucose is non-fasting and so rarely diagnostic here, and
+    # BMI is a risk factor rather than a diagnostic criterion.
+    subgroups = [
+        ('HbA1c-negative',     hba1c_neg),
+        ('glucose-negative',   glucose_neg),
+        ('BMI-negative',       bmi_neg),
+        ('biomarker-negative', biomarker_neg),
+        ('model-negative',     model_neg),
+    ]
+
     print('Subgroups (individuals clinical measures would not flag)')
-    for lab, mask in [('biomarker-negative', biomarker_neg),
-                      ('model-negative', model_neg)]:
+    for lab, mask in subgroups:
         n, nc = int(mask.sum()), int(y[mask].sum())
         print(f'  {lab:<20} n={n:6d} ({mask.mean() * 100:4.1f}%)  '
               f'cases={nc:5d} ({nc / n * 100:5.2f}%)  '
@@ -189,8 +220,19 @@ def main():
     scores_all = {'ePRS_Comp': df[args.composite_col].to_numpy(),
                   'PRS_G': df[args.additive_col].to_numpy()}
     rows = evaluate(None, y, scores_all, 'whole holdout', rows)
-    for lab, mask in [('biomarker-negative', biomarker_neg),
-                      ('model-negative', model_neg)]:
+    print('\nOverlap of the two headline definitions:')
+    bn, mn = biomarker_neg, model_neg
+    print(f'  both negative           {int((bn & mn).sum()):6d}  '
+          f'cases {int(y[bn & mn].sum()):5d}')
+    print(f'  biomarker-neg only      {int((bn & ~mn).sum()):6d}  '
+          f'cases {int(y[bn & ~mn].sum()):5d}   '
+          f'(sub-diagnostic values plus age/BMI push model risk up)')
+    print(f'  model-neg only          {int((~bn & mn).sum()):6d}  '
+          f'cases {int(y[~bn & mn].sum()):5d}')
+    print(f'  both positive           {int((~bn & ~mn).sum()):6d}  '
+          f'cases {int(y[~bn & ~mn].sum()):5d}\n')
+
+    for lab, mask in subgroups:
         sc = {k: v[mask] for k, v in scores_all.items()}
         rows = evaluate(None, y[mask], sc, lab, rows)
 
