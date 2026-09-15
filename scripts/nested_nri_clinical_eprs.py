@@ -204,7 +204,12 @@ def main():
     ap.add_argument('--results_path', required=True,
                     help='directory holding participant_environment.csv')
     ap.add_argument('--out_dir', required=True)
-    ap.add_argument('--prs_col', default='bin_combined')
+    ap.add_argument('--prs_col', default='scaled_prs_ensemble',
+                    help='ePRS_Comp is the fitted ensemble, so its score lives '
+                         'in --extra_scores_file rather than in the holdout '
+                         'file. Pass bin_combined to use the rule instead.')
+    ap.add_argument('--extra_scores_file', default=None,
+                    help='fitted_ensemble_holdout_scores.csv, merged on IID.')
     ap.add_argument('--covar_file', default=None,
                     help='Overrides the default holdout covariate PRS file.')
     ap.add_argument('--seed', type=int, default=42)
@@ -215,6 +220,11 @@ def main():
     holdout = pd.read_csv(
         os.path.join(args.pheno_data, 'scores',
                      'combinedPRSGroups.holdout.filtered.csv'))
+    if args.extra_scores_file:
+        extra = pd.read_csv(args.extra_scores_file)
+        cols = ['IID'] + [c for c in extra.columns
+                          if c != 'IID' and c not in holdout.columns]
+        holdout = holdout.merge(extra[cols], on='IID', how='left')
     env = pd.read_csv(os.path.join(args.results_path, 'participant_environment.csv'),
                       usecols=['Participant ID'] + list(CLINICAL))
     env = env.rename(columns={'Participant ID': 'IID'})

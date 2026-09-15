@@ -154,7 +154,11 @@ def main():
     ap.add_argument('--pheno_data', required=True)
     ap.add_argument('--results_path', required=True)
     ap.add_argument('--out_dir', required=True)
-    ap.add_argument('--composite_col', default='scaled_prs_combined')
+    ap.add_argument('--composite_col', default='scaled_prs_ensemble',
+                    help='ePRS_Comp is the fitted ensemble; pass '
+                         'scaled_prs_combined to use the rule instead.')
+    ap.add_argument('--extra_scores_file', default=None,
+                    help='fitted_ensemble_holdout_scores.csv, merged on IID.')
     ap.add_argument('--additive_col', default='scaled_prs_main')
     ap.add_argument('--covar_file', default=None)
     ap.add_argument('--seed', type=int, default=42)
@@ -164,6 +168,11 @@ def main():
 
     h = pd.read_csv(os.path.join(args.pheno_data, 'scores',
                                  'combinedPRSGroups.holdout.filtered.csv'))
+    if args.extra_scores_file:
+        extra = pd.read_csv(args.extra_scores_file)
+        cols = ['IID'] + [c for c in extra.columns
+                          if c != 'IID' and c not in h.columns]
+        h = h.merge(extra[cols], on='IID', how='left')
     env = pd.read_csv(os.path.join(args.results_path, 'participant_environment.csv'),
                       usecols=['Participant ID', HBA1C, BMI, GLUCOSE])
     env = env.rename(columns={'Participant ID': 'IID'})
