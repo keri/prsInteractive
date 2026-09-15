@@ -82,6 +82,40 @@ def apply_weighting(assign, weighting):
     return a
 
 
+def deduplicate_annotations(assign, group_col):
+    """Collapse to one row per (cohort, feature, group).
+
+    A feature reaches a cluster through every source study that lists it, and
+    reaches a subtype through every cluster that annotates that subtype. Both
+    produce duplicate rows, so summing the raw rows counts a feature once per
+    annotation path rather than once. That inflates cells unevenly: a subtype
+    annotated by four clusters, or a cluster named by three studies, gets
+    several times the weight of an equally sized cell with one annotation
+    path. The inflation is annotation redundancy, not biology.
+
+    The permutation absorbs it (each feature keeps its whole annotation
+    profile, so the null inflates identically and the p-value stays valid),
+    but the statistic itself becomes uninterpretable -- 24 features summing to
+    52 -- and cells stop being comparable with each other. Deduplicating fixes
+    both, and bounds the statistic by the feature count.
+
+    Concordance is a property of (feature, cluster) and is identical across
+    cohorts in this dataset, so resolution needs no cohort term. Where a
+    feature reaches one subtype through clusters that disagree, a single
+    non-zero direction wins over clusters with no expectation; genuinely
+    opposed expectations resolve to 0.
+    """
+    def resolve(vals):
+        nz = pd.unique(vals[vals != 0])
+        return float(nz[0]) if len(nz) == 1 else 0.0
+
+    res = (assign.groupby(['feature', group_col])['concordance']
+           .apply(lambda v: resolve(v.to_numpy()))
+           .rename('concordance').reset_index())
+    pairs = assign[['cohort', 'feature', group_col]].drop_duplicates()
+    return pairs.merge(res, on=['feature', group_col], how='left')
+
+
 def weighted_shares(assign, group_col):
     """Net concordance of each model's features within each group.
 
@@ -100,7 +134,6 @@ def weighted_shares(assign, group_col):
     """
     g = (assign.groupby(['cohort', group_col])
          .agg(weighted_n=('weight', 'sum'),
-              net_concordance=('concordance', 'sum'),
               n_features=('feature', 'nunique'))
          .reset_index())
     tot = (assign.groupby('cohort').feature.nunique()
@@ -111,6 +144,7 @@ def weighted_shares(assign, group_col):
 
 
 def run_permutation(assign, group_col, n_perm, seed, weighting):
+    assign = deduplicate_annotations(assign, group_col)
     assign = apply_weighting(assign, weighting)
     obs = weighted_shares(assign, group_col)
     key = ['cohort', group_col]
