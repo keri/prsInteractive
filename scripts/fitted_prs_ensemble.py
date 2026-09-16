@@ -132,7 +132,7 @@ def main():
     # --- discrimination ----------------------------------------------------
     comparators = {
         'fitted ensemble': ens,
-        'ePRS_Comp (max-bin rule)': hold['scaled_prs_combined'].to_numpy(),
+        'rule-based composite (max-bin)': hold['scaled_prs_combined'].to_numpy(),
         'PRS_G': hold['scaled_prs_main'].to_numpy(),
     }
     print('\nDiscrimination on the untouched holdout')
@@ -140,7 +140,7 @@ def main():
         print(f'  {name:<28} AUC {roc_auc_score(y, s):.4f}')
 
     print()
-    for ref in ('ePRS_Comp (max-bin rule)', 'PRS_G'):
+    for ref in ('rule-based composite (max-bin)', 'PRS_G'):
         try:
             d = delong_test(y, comparators[ref], ens)
             print(f'  DeLong ensemble vs {ref}: p={d.get("pvalue", np.nan):.3g}')
@@ -155,12 +155,20 @@ def main():
             rows.append({'score': name, 'target_flag_rate': rate,
                          'auc': roc_auc_score(y, s),
                          **operating_characteristics(flag, y, base)})
-    # The deployed rule at its own, unchosen operating point.
-    rows.append({'score': 'ePRS_Comp binary flag (as deployed)',
+    # The rule-based composite at its own operating point, which is not chosen
+    # but falls out of the union of five top-20% flags. Labelled explicitly as
+    # the rule rather than as ePRS_Comp, which now denotes the fitted ensemble.
+    #
+    # The flag is recomputed as bin > 800 rather than read from the stored
+    # combined_high_risk column. Bins run 1-1000, so the top fifth is bins
+    # 801-1000; the stored column uses >= 800 and therefore also admits bin
+    # 800, which belongs to the eighth decile (65 individuals in the T2D
+    # holdout).
+    deployed = (hold['bin_combined'] > 800).astype(int).to_numpy()
+    rows.append({'score': 'rule-based composite, binary flag (as deployed)',
                  'target_flag_rate': np.nan,
-                 'auc': roc_auc_score(y, hold['combined_high_risk']),
-                 **operating_characteristics(
-                     hold['combined_high_risk'].to_numpy(), y, base)})
+                 'auc': roc_auc_score(y, deployed),
+                 **operating_characteristics(deployed, y, base)})
     # Reference: no model at all.
     rows.append({'score': 'flag everyone (no model)', 'target_flag_rate': 1.0,
                  'auc': 0.5,
