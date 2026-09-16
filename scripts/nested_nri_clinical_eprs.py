@@ -69,20 +69,92 @@ from sklearn.metrics import roc_auc_score, roc_curve
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from helper.mcnemar_comparison_calculations import delong_test  # noqa: E402
 
-CLINICAL = {
-    'Glycated haemoglobin (HbA1c)': 'hba1c',
-    'Body mass index (BMI)':        'bmi',
-    'Glucose':                      'glucose',
-}
+# ---------------------------------------------------------------------------
+# clinical measure discovery
+# ---------------------------------------------------------------------------
 
-# Published diagnostic thresholds, for the reference table only. Glucose is
-# the UK Biobank non-fasting measurement, so 11.1 mmol/L is the diagnostic
-# cut-point; 12 is the value the previous analysis used.
-THRESHOLDS = {
-    'Glycated haemoglobin (HbA1c)': [('prediabetes', 42)],
-    'Body mass index (BMI)':        [('overweight', 25)],
-    'Glucose':                      [('diabetic (random)', 11.1), ('previously used', 12)],
-}
+CLIN_DIR = 'clinicalMeasures'
+CLIN_CSV = 'combinedPRS.holdout.ClinicalMeasures.csv'
+CLIN_XLSX = 'clinicalMeasurePerformanceResultsholdout.bin.xlsx'
+
+
+def discover_clinical(pheno_data):
+    """Find this phenotype's clinical measures, thresholds and risk directions.
+
+    The measures differ by disease -- HbA1c, BMI and glucose for T2D; basal
+    metabolic rate, urea and haemoglobin for coeliac -- and the direction that
+    counts as high risk differs with them: T2D measures are elevated in cases,
+    the coeliac measures are reduced, consistent with malabsorption. Hard-coding
+    either set makes the analysis silently wrong for the other disease, so both
+    are read from the pipeline's own outputs.
+
+    Returns (measures, thresholds, directions) where directions[m] is True when
+    HIGH values indicate risk.
+    """
+    base = os.path.join(pheno_data, 'scores', CLIN_DIR)
+    csv_path = os.path.join(base, CLIN_CSV)
+    if not os.path.exists(csv_path):
+        raise SystemExit(f'clinical measures file not found: {csv_path}')
+
+    cols = pd.read_csv(csv_path, nrows=0).columns
+    measures = [c[:-len('_binary')] for c in cols
+                if c.endswith('_binary') and c[:-len('_binary')] in cols]
+    if not measures:
+        raise SystemExit(f'no paired <measure>/<measure>_binary columns in {csv_path}')
+
+    thresholds, directions = {}, {}
+    xlsx = os.path.join(base, CLIN_XLSX)
+    if os.path.exists(xlsx):
+        t = pd.read_excel(xlsx, sheet_name='thresholds RiskDirection')
+        for _, r in t.iterrows():
+            m = r['clinical_measure']
+            thresholds[m] = float(r['thresholds_used'])
+            directions[m] = bool(r['risk_directions'])
+    missing = [m for m in measures if m not in thresholds]
+    if missing:
+        raise SystemExit(f'no threshold recorded for {missing} in {xlsx}')
+
+    print(f'clinical measures for this phenotype ({len(measures)}):')
+    for m in measures:
+        if directions[m]:
+            print(f'  {m:<30} high values indicate risk, '
+                  f'threshold {thresholds[m]:g}')
+        else:
+            print(f'  {m:<30} low values indicate risk, so the high-risk '
+                  f'group is the bottom {LOW_RISK_QUANTILE:.0%} '
+                  f'(stored threshold {thresholds[m]:g} sits on the wrong tail)')
+    return measures, thresholds, directions
+
+
+LOW_RISK_QUANTILE = 0.20
+
+
+def clinical_high_risk(df, measure, thresholds, directions,
+                       q=LOW_RISK_QUANTILE):
+    """Boolean flag: is this individual high risk on this measure?
+
+    Where HIGH values indicate risk the stored threshold is used directly:
+    for T2D these are the published clinical cut-points (HbA1c 41 mmol/mol,
+    BMI 25, glucose 12) and need no adjustment.
+
+    Where LOW values indicate risk the stored threshold cannot be used. Those
+    thresholds are derived rather than supplied, and convert_to_binary places
+    them at the 80th percentile irrespective of direction -- so for coeliac,
+    where reduced basal metabolic rate, urea and haemoglobin indicate
+    malabsorption, "below the threshold" captures the bottom 80% of the cohort
+    rather than the bottom 20%. That flags four-fifths of everyone as high
+    risk at a case rate of 1.18-1.22% against a 1.11% baseline, which is
+    almost no enrichment, and leaves the complementary "clinically missed"
+    group too small to analyse. Taking the bottom 20% instead gives case rates
+    of 1.63-1.84%, a 1.5- to 1.7-fold enrichment.
+
+    The stored value is therefore replaced by the qth percentile when the
+    direction is low, and the substitution is reported.
+    """
+    if directions[measure]:
+        return df[measure] > thresholds[measure]
+    return df[measure] < df[measure].quantile(q)
+
 
 COVARIATES = ['age', 'SEX']
 
@@ -249,9 +321,9 @@ def main():
         cols = ['IID'] + [c for c in extra.columns
                           if c != 'IID' and c not in holdout.columns]
         holdout = holdout.merge(extra[cols], on='IID', how='left')
-    env = pd.read_csv(os.path.join(args.results_path, 'participant_environment.csv'),
-                      usecols=['Participant ID'] + list(CLINICAL))
-    env = env.rename(columns={'Participant ID': 'IID'})
+    measures, thresholds, directions = discover_clinical(args.pheno_data)
+    env = pd.read_csv(os.path.join(args.pheno_data, 'scores', CLIN_DIR, CLIN_CSV),
+                      usecols=['IID'] + measures)
 
     # age/SEX come from the holdout covariate PRS file, which is the same
     # source the rest of the pipeline uses for these terms.
@@ -272,30 +344,27 @@ def main():
 
     # Complete cases only, so both arms of every comparison are fitted on the
     # same individuals and the AUCs are directly comparable.
-    need = ['PHENOTYPE', args.prs_col] + COVARIATES + list(CLINICAL)
+    need = ['PHENOTYPE', args.prs_col] + COVARIATES + measures
     before = len(df)
     df = df.dropna(subset=need).reset_index(drop=True)
     y = df['PHENOTYPE'].to_numpy()
     print(f'holdout {before} -> {len(df)} complete cases '
           f'({int(y.sum())} cases, {int((1 - y).sum())} controls)\n')
 
-    print('Clinical threshold reference (continuous measures are modelled '
-          'directly; these are for context only)')
-    for col, flags in THRESHOLDS.items():
-        for name, t in flags:
-            below = df[col] <= t
-            cases_below = int(((y == 1) & below).sum())
-            print(f'  {col} <= {t:<5} [{name}]: {below.sum():6d} '
-                  f'({below.mean() * 100:5.1f}%) | cases below {cases_below}')
+    print('\nClinically flagged by each measure (context only; the models use '
+          'the continuous values)')
+    for m in measures:
+        hr = clinical_high_risk(df, m, thresholds, directions)
+        print(f'  {m:<30} flags {hr.sum():6d} ({hr.mean() * 100:5.1f}%) | '
+              f'cases flagged {int(((y == 1) & hr).sum())} of {int(y.sum())}')
     print()
 
     rows = []
-    rows.append(compare(df, y, list(CLINICAL), args.prs_col,
+    rows.append(compare(df, y, measures, args.prs_col,
                         'combined clinical model', args.seed, args.flag_rate))
-    for col in CLINICAL:
-        rows.append(compare(df, y, [col], args.prs_col,
-                            f'per-measure: {CLINICAL[col]}', args.seed,
-                            args.flag_rate))
+    for m in measures:
+        rows.append(compare(df, y, [m], args.prs_col,
+                            f'per-measure: {m}', args.seed, args.flag_rate))
 
     res = pd.DataFrame(rows)
     out = os.path.join(args.out_dir, 'nested_nri_clinical_eprs.csv')
