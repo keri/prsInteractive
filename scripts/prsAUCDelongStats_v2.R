@@ -1,6 +1,9 @@
 # Keri Multerer 2026
-# Re-run the AUC / DeLong / Nagelkerke statistics on the HOLDOUT cohort using
-# the current five ePRS encodings.
+# Re-run the AUC / DeLong / Nagelkerke statistics on either cohort using the
+# current ePRS encodings. --cohort selects validation or holdout; both read the
+# filtered score file, so only models retained as statistically distinct are
+# scored. This fully replaces prsAUCDelongStats.R, whose driver reads the
+# validation cohort under pre-refactor model names that no longer exist.
 #
 # WHY A SEPARATE DRIVER
 # prsAUCDelongStats.R is kept unchanged so its outputs remain reproducible.
@@ -41,6 +44,9 @@ suppressPackageStartupMessages({
 parser <- ArgumentParser()
 parser$add_argument("--pheno_data", required = TRUE,
                     help = "results/<pheno>/combinedAnalysis")
+parser$add_argument("--cohort", default = "holdout",
+                    help = "holdout or validation. Selects the score file, the
+                            covariate file and the output suffix.")
 parser$add_argument("--ensemble_file", default = NULL,
                     help = "CSV with IID,ensemble_prob from fitted_prs_ensemble.py")
 parser$add_argument("--source_script", default = NULL,
@@ -59,10 +65,19 @@ eval(parse(text = paste(lines[1:cut_at], collapse = "\n")))
 cat(sprintf("sourced %d function-definition lines from %s\n", cut_at, basename(src)))
 
 scores_path <- file.path(args$pheno_data, "scores")
-data <- read.csv(file.path(scores_path, "combinedPRSGroups.holdout.filtered.csv"),
-                 check.names = FALSE)
-cov_data <- read.csv(file.path(scores_path, "prsScores",
-                               "covariate.holdout.mixed.prs.csv"),
+stopifnot(args$cohort %in% c("holdout", "validation"))
+
+# Both cohorts use the filtered score file, so only models retained as
+# statistically distinct are scored.
+score_file <- if (args$cohort == "holdout")
+  "combinedPRSGroups.holdout.filtered.csv" else "combinedPRSGroups.filtered.csv"
+cov_file <- if (args$cohort == "holdout")
+  "covariate.holdout.mixed.prs.csv" else "covariate.mixed.prs.csv"
+suffix <- if (args$cohort == "holdout") ".holdout" else ".validation"
+
+cat(sprintf("cohort: %s  (%s)\n", args$cohort, score_file))
+data <- read.csv(file.path(scores_path, score_file), check.names = FALSE)
+cov_data <- read.csv(file.path(scores_path, "prsScores", cov_file),
                      check.names = FALSE)
 
 # The holdout covariate file stores the score as `prs`; the training file used
@@ -99,10 +114,12 @@ results <- compare_prs_models(
   prs_columns = all_cols,
   covariate_columns = c("scaled_prs_covariate"),
   phenotype_col = "PHENOTYPE",
-  output_path = file.path(scores_path, "prs_nagelkerke_auc_statistics.holdout.csv"),
+  output_path = file.path(scores_path,
+                          paste0("prs_nagelkerke_auc_statistics", suffix, ".csv")),
   pairwise_comparisons = comparisons,
-  pairwise_output = file.path(scores_path, "prs_pairwise_comparisons.holdout.csv")
+  pairwise_output = file.path(scores_path,
+                              paste0("prs_pairwise_comparisons", suffix, ".csv"))
 )
 
-cat("\nwrote prs_nagelkerke_auc_statistics.holdout.csv and",
-    "prs_pairwise_comparisons.holdout.csv\n")
+cat(sprintf("\nwrote prs_nagelkerke_auc_statistics%s.csv and prs_pairwise_comparisons%s.csv\n",
+            suffix, suffix))
