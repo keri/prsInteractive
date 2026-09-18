@@ -100,6 +100,19 @@ if (!is.null(args$ensemble_file)) {
 
 composites <- c("scaled_prs_ensemble", "scaled_prs_combined")
 composites <- composites[composites %in% names(data)]
+
+# The rule-based composite is built on the holdout by assign_holdout_risk_bin.py
+# and so is absent from the validation score file; the fitted ensemble arrives
+# only via --ensemble_file. A validation run therefore has no composite to
+# compare unless one is supplied, in which case only the per-encoding statistics
+# are produced and no pairwise file is written.
+if (length(composites) == 0) {
+  cat("\nNOTE: no composite score present for this cohort.\n")
+  cat("      Per-encoding statistics will be written; no pairwise comparisons.\n")
+  if (args$cohort == "validation")
+    cat("      Pass --ensemble_file with cross-validated validation scores to",
+        "include the fitted ensemble.\n")
+}
 all_cols <- c(prs_cols, composites)
 
 # Each composite against the additive baseline, plus the two composites
@@ -116,9 +129,10 @@ results <- compare_prs_models(
   phenotype_col = "PHENOTYPE",
   output_path = file.path(scores_path,
                           paste0("prs_nagelkerke_auc_statistics", suffix, ".csv")),
-  pairwise_comparisons = comparisons,
-  pairwise_output = file.path(scores_path,
-                              paste0("prs_pairwise_comparisons", suffix, ".csv"))
+  pairwise_comparisons = if (length(comparisons)) comparisons else NULL,
+  pairwise_output = if (length(comparisons))
+    file.path(scores_path, paste0("prs_pairwise_comparisons", suffix, ".csv"))
+  else NULL
 )
 
 cat(sprintf("\nwrote prs_nagelkerke_auc_statistics%s.csv and prs_pairwise_comparisons%s.csv\n",
