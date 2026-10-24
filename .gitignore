@@ -27,3 +27,4 @@ scripts/.Rhistory
 MethodsDocumentation/
 #.config
 .claude/
+*.tex
