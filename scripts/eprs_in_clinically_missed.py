@@ -200,6 +200,20 @@ def clinical_model_risk(df, y, measures, seed=42, n_splits=5):
     return out
 
 
+def decile_stats(y, scores, label, rows):
+    """Case rate in each score decile for the subgroup."""
+    for name, s in scores.items():
+        decile = pd.qcut(s, 10, labels=False)  # 0-indexed bins
+        for d in range(10):
+            mask = decile == d
+            n = int(mask.sum())
+            nc = int(y[mask].sum())
+            rows.append({'subgroup': label, 'score': name, 'decile': d + 1,
+                         'n': n, 'n_cases': nc,
+                         'case_rate': nc / n if n else np.nan})
+    return rows
+
+
 def evaluate(sub, y, scores, label, rows):
     """Discrimination and fixed-budget yield for each score in the subgroup."""
     base = y.mean()
@@ -297,9 +311,11 @@ def main():
     print()
 
     rows = []
+    decile_rows = []
     scores_all = {'ePRS_Comp': df[args.composite_col].to_numpy(),
                   'PRS_G': df[args.additive_col].to_numpy()}
     rows = evaluate(None, y, scores_all, 'whole holdout', rows)
+    decile_rows = decile_stats(y, scores_all, 'whole holdout', decile_rows)
     print('\nOverlap of the two headline definitions:')
     bn, mn = biomarker_neg, model_neg
     print(f'  both negative           {int((bn & mn).sum()):6d}  '
@@ -315,6 +331,7 @@ def main():
     for lab, mask in subgroups:
         sc = {k: v[mask] for k, v in scores_all.items()}
         rows = evaluate(None, y[mask], sc, lab, rows)
+        decile_rows = decile_stats(y[mask], sc, lab, decile_rows)
 
         # Does the composite beat the additive score where it matters?
         try:
@@ -327,6 +344,11 @@ def main():
     res = pd.DataFrame(rows)
     out = os.path.join(args.out_dir, 'eprs_in_clinically_missed.csv')
     res.to_csv(out, index=False)
+
+    dec = pd.DataFrame(decile_rows)
+    dec_out = os.path.join(args.out_dir, 'eprs_in_clinically_missed_deciles.csv')
+    dec.to_csv(dec_out, index=False)
+    print(f'\n-> {dec_out}')
 
     print('\n' + '=' * 96)
     print('ePRS_Comp AMONG INDIVIDUALS CLINICAL MEASURES DO NOT FLAG')
