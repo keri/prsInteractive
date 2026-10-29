@@ -1650,9 +1650,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
     
 #   phenotype_name = 'type2Diabetes'
-#   pheno_data = f'/Users/kerimulterer/prsInteractive/results/{phenotype_name}/combinedAnalysis'
-#   clinical_file = '/Users/kerimulterer/prsInteractive/results/participant_environment.csv'
-#   important_features_file = f'/Users/kerimulterer/prsInteractive/results/{phenotype_name}/combinedAnalysis/scores/featureScoresReducedFinalModel.filtered.csv'
 
     pheno_data = args.pheno_data or os.environ.get('PHENO_DATA')
     if not pheno_data:

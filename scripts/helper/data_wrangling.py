@@ -479,8 +479,6 @@ def calculate_odds_ratio_for_prs(df,binned_prs,prscr=False):
 #
 #
 #if __name__ == '__main__':
-#   
-#   main('/Users/kerimulterer/prsInteractive/results/type2Diabetes_test/epiFiles')
 
 
     

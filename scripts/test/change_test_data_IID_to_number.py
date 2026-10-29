@@ -8,7 +8,6 @@ data_path = os.environ.get("DATA_PATH")
 
 
 
-#root_dir = '/Users/kerimulterer/prsInteractive/'
 hla_path = f'{results_path}/participant_hla.csv'
 env_path = f'{results_path}/participant_environment.csv'
 cov_path = f'{results_path}/covar.csv'

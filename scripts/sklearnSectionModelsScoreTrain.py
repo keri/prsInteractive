@@ -23,7 +23,6 @@ warnings.simplefilter(action='ignore')
 
 # module_path = os.path.abspath(os.path.join('..'))
 # if module_path not in sys.path:
-#sys.path.append("/Users/kerimulterer/ukbiobank/")
 from helper.download import get_dataset, get_epi_columns, get_columns, get_column_index
 from helper.calculate_shap_values import *
 from helper.data_wrangling import *

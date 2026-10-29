@@ -1345,9 +1345,7 @@ if __name__ == "__main__":
     results_path       = args.results_path   or os.environ.get("RESULTS_PATH")
     feature_scores_file = args.feature_scores_file or os.environ.get("FEATURE_SCORES_FILE_FILTERED")
   
-#   pheno_results = '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
 #   pheno = 'type2Diabetes'
-#   results_path  = '/Users/kerimulterer/prsInteractive/results'
 #   feature_scores_file = None
 #   use_all = False
 #   threshold = 1.99

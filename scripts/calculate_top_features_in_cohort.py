@@ -932,7 +932,6 @@ if __name__ == '__main__':
     threshold = os.environ.get("THRESHOLD")
     threshold = float(threshold) if threshold else args.threshold
 
-#   pheno_data = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/combinedAnalysis'
 #   feature_scores_file = f"{pheno_data}/scores/featureScoresReducedFinalModel.filtered.csv"
 
     if not pheno_data:

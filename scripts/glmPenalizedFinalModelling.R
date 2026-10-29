@@ -925,24 +925,6 @@ training_env_clinical_file <- args$training_env_clinical_file
 test_env_clinical_file <- args$test_env_clinical_file
 
 
-#results_path <- '/Users/kerimulterer/prsInteractive/results'
-#pheno_data <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
-#data_path <- '/Users/kerimulterer/prsInteractive/data'
-#hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-#training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/trainingCombined.raw'
-#test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/testCombined.raw'
-#covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
-#feature_model_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/scores/importantFeaturesPostShap.filtered.csv'
-#participant_env_file='/Users/kerimulterer/prsInteractive/results/participant_environment.csv'
-#epi_combo <- 'sum'
-#threshold <- 1.99
-#training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/geneEnvironmentTraining.csv'
-#test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/geneEnvironmentTest.csv'
-#test_env_clinical_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/clinicalEnvironmentTest.csv'
-#training_env_clinical_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/clinicalEnvironmentTraining.csv'
-#test_env_main_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/mainEnvironmentTest.csv'
-#training_env_main_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/mainEnvironmentTraining.csv'
-
 scores_path = paste0(pheno_data,'/scores')
 #covar_pathway = paste0(results_path,'/covar.txt')
 

@@ -140,7 +140,5 @@ if __name__ == '__main__':
     config_file = args.config_file or os.environ.get('CONFIG_FILE')
     
 #   pheno = 'type2Diabetes'
-#   feature_scores_file = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi/scores/featureScoresReducedFinalModel.csv'
-#   config_file = f'/Users/kerimulterer/prsInteractive/results/{pheno}/summedEpi/pheno.config'
         
     compare_gene_env_to_genetic(feature_scores_file,config_file)

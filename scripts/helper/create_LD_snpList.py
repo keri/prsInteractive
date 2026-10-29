@@ -39,7 +39,6 @@ if __name__ == '__main__':
 #   print(f"[PYTHON] Reading from: {pheno_path}")
 
     
-#   pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
     feature_scores_file = f"{pheno_data}/scores/importantFeaturesPostShap.csv"
     print(f"[PYTHON] Reading features for LD from: {feature_scores_file}")
     
