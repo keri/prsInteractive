@@ -2974,7 +2974,7 @@ def match_direct_maps_to_tiered(direct_records: List[dict],
                 for col in ('snp1_gene_names', 'snp2_gene_names'):
                     if col not in tiered_df.columns:
                         continue
-                    mask = tiered_df[col].str.contains(g, case=False, na=False, regex=False)
+                    mask = tiered_df[col].astype(str).str.contains(g, case=False, na=False, regex=False)
                     matched_indices = tiered_df[mask].index.tolist()
                     if matched_indices:
                         break
@@ -3099,6 +3099,19 @@ if __name__ == "__main__":
     else:
         print("  No subtype*_map.csv files found — skipping direct-evidence step.")
 
+    # Deduplicate before saving — a feature matched by both cluster columns and a
+    # direct-map entry can appear twice with different cluster_key values; keep
+    # the first occurrence (cluster-column match has priority as it was appended
+    # first, direct-evidence appended second in the concat above).
+    before_dedup = len(assigned_df)
+    assigned_df = assigned_df.drop_duplicates(
+        subset=['feature', 'cohort', 'cluster_key', 'subtype']
+    ).reset_index(drop=True)
+    n_removed = before_dedup - len(assigned_df)
+    if n_removed:
+        print(f"  Removed {n_removed} duplicate feature×cohort×cluster×subtype rows "
+              f"before saving ({before_dedup} → {len(assigned_df)})")
+
     # Save long-format annotated table
     annotated_path = os.path.join(args.out_dir, 'subtype_feature_assignments.csv')
     assigned_df.to_csv(annotated_path, index=False)
@@ -3147,6 +3160,86 @@ if __name__ == "__main__":
             print(manual.to_string(index=False))
         else:
             print("  None — all assignments are automatic.")
+
+    # ------------------------------------------------------------------
+    # Weighted cluster → subtype contribution summary
+    # ------------------------------------------------------------------
+    # Shows, for each cohort, how many features each functional cluster
+    # contributes to each subtype and whether they agree with that subtype's
+    # expected direction of association.
+    #
+    # SIGNED CONCORDANCE.  Concordance records direction, not confidence: +1
+    # where the feature's observed direction matches the cluster's expected
+    # direction, -1 where it opposes it, 0 where no direction is available.
+    # A feature can therefore support one subtype and oppose another, which is
+    # the whole point of carrying it -- BMI is positively associated with MOD
+    # and MARD but negatively with others.  The weight is the concordance value
+    # itself, so discordant features subtract rather than being silently
+    # dropped.
+    #
+    # Earlier versions mapped {+1: 1.0, 0: 0.5, -1: 0.0}, which zeroed
+    # discordant features and so made the totals non-negative but also made
+    # them uninterpretable: a cluster with equal support and opposition looked
+    # identical to one with half as many features, all supporting.
+    #
+    # Counts and signed sums are reported side by side because they answer
+    # different questions -- n_features is how much a model has to say about a
+    # subtype, weighted_n is whether what it says agrees.  The percentage uses
+    # the feature count as its denominator; a signed sum divided by a signed
+    # total is meaningless, since the two can carry opposite signs.
+    if len(assigned_df):
+        print("\n" + "=" * 80)
+        print("CLUSTER → SUBTYPE CONTRIBUTION PER COHORT")
+        print("(signed concordance; % of cohort features by count)")
+        print("=" * 80)
+
+        has_conc = 'concordance' in assigned_df.columns
+        if has_conc:
+            assigned_df['_weight'] = assigned_df['concordance'].fillna(0.0)
+        else:
+            assigned_df['_weight'] = 0.0
+
+        dedup_w = assigned_df.drop_duplicates(
+            subset=['feature', 'cohort', 'cluster_key', 'subtype']
+        )
+        # Cohort feature total (denominator for the percentage column)
+        cohort_totals = (
+            dedup_w.groupby('cohort')['feature'].nunique().rename('cohort_total_n')
+        )
+
+        # Cluster × subtype × cohort signed sums and counts
+        summary = (
+            dedup_w.groupby(['cohort', 'cluster_key', 'subtype'])
+            .agg(weighted_n=('_weight', 'sum'),
+                 n_features=('feature', 'nunique'))
+            .reset_index()
+        )
+        summary = summary.merge(cohort_totals, on='cohort')
+        summary['pct_of_cohort'] = (
+            summary['n_features'] / summary['cohort_total_n'].replace(0, np.nan) * 100
+        ).round(1)
+        summary = summary.sort_values(
+            ['cohort', 'subtype', 'n_features'], ascending=[True, True, False]
+        )
+
+        for cohort, grp in summary.groupby('cohort'):
+            print(f"\n  {cohort}  (total features: "
+                  f"{cohort_totals.get(cohort, 0):.0f})")
+            print(f"  {'cluster_key':<52}  {'subtype':<6}  {'n_feat':>6}  "
+                  f"{'weighted_n':>10}  {'% cohort':>9}")
+            print(f"  {'-'*52}  {'-'*6}  {'-'*6}  {'-'*10}  {'-'*9}")
+            for _, r in grp.iterrows():
+                print(f"  {r['cluster_key']:<52}  {r['subtype']:<6}  "
+                      f"{r['n_features']:>6.0f}  {r['weighted_n']:>10.1f}  "
+                      f"{r['pct_of_cohort']:>8.1f}%")
+
+        # Save the summary table
+        summary_path = os.path.join(args.out_dir, 'cluster_subtype_cohort_weighted.csv')
+        summary[['cohort', 'cluster_key', 'subtype', 'weighted_n', 'n_features',
+                 'cohort_total_n', 'pct_of_cohort']].to_csv(summary_path, index=False)
+        print(f"\n  Saved cluster→subtype summary → {summary_path}")
+
+        assigned_df.drop(columns=['_weight'], inplace=True, errors='ignore')
 
     # ------------------------------------------------------------------
     # Step 7: (Optional) legacy OR-weighted analysis

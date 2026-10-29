@@ -35,11 +35,10 @@ if __name__ == '__main__':
     
     args = parser.parse_args()
     
-    pheno_data = args.pheno_path or os.environ.get("PHENO_DATA")
+    pheno_data = args.pheno_data or os.environ.get("PHENO_DATA")
 #   print(f"[PYTHON] Reading from: {pheno_path}")
 
     
-#   pheno_path = '/Users/kerimulterer/prsInteractive/testResults/type2Diabetes'
     feature_scores_file = f"{pheno_data}/scores/importantFeaturesPostShap.csv"
     print(f"[PYTHON] Reading features for LD from: {feature_scores_file}")
     

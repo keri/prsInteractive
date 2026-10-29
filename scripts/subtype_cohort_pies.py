@@ -260,8 +260,7 @@ def draw_panel(weighted: pd.DataFrame, out_path: str, show_labels: bool = True):
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('--assignments',
-                   default='results/type2Diabetes/subtypeResearch/enrichment/'
-                           'subtype_feature_assignments.csv')
+                   default='results/type2Diabetes/combinedAnalysis/scores/functionalEnrichment/subtype_feature_assignments.csv')
     p.add_argument('--out_dir',
                    default='results/type2Diabetes/subtypeResearch/enrichment/plots')
     args = p.parse_args()

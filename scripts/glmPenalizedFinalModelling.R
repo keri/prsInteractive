@@ -894,12 +894,12 @@ parser$add_argument("--reduced_feature_file" ,required = TRUE)
 parser$add_argument("--cardio_feature_file" ,required = TRUE)
 parser$add_argument("--epi_combo", required=TRUE)
 parser$add_argument("--threshold", required=TRUE)
-parser$add_argument("--training_env_gen_file", required = TRUE)
-parser$add_argument("--test_env_gen_file", required = TRUE)
-parser$add_argument("--training_env_main_file", required = TRUE)
-parser$add_argument("--test_env_main_file", required = TRUE)
-parser$add_argument("--training_env_clinical_file", required = TRUE)
-parser$add_argument("--test_env_clinical_file", required = TRUE)
+parser$add_argument("--training_env_gen_file", default = NULL)
+parser$add_argument("--test_env_gen_file", default = NULL)
+parser$add_argument("--training_env_main_file", default = NULL)
+parser$add_argument("--test_env_main_file", default = NULL)
+parser$add_argument("--training_env_clinical_file", default = NULL)
+parser$add_argument("--test_env_clinical_file", default = NULL)
 
 
 #
@@ -924,24 +924,6 @@ test_env_main_file <- args$test_env_main_file
 training_env_clinical_file <- args$training_env_clinical_file
 test_env_clinical_file <- args$test_env_clinical_file
 
-
-#results_path <- '/Users/kerimulterer/prsInteractive/results'
-#pheno_data <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
-#data_path <- '/Users/kerimulterer/prsInteractive/data'
-#hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-#training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/trainingCombined.raw'
-#test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/testCombined.raw'
-#covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
-#feature_model_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/scores/importantFeaturesPostShap.filtered.csv'
-#participant_env_file='/Users/kerimulterer/prsInteractive/results/participant_environment.csv'
-#epi_combo <- 'sum'
-#threshold <- 1.99
-#training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/geneEnvironmentTraining.csv'
-#test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/geneEnvironmentTest.csv'
-#test_env_clinical_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/clinicalEnvironmentTest.csv'
-#training_env_clinical_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/clinicalEnvironmentTraining.csv'
-#test_env_main_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/mainEnvironmentTest.csv'
-#training_env_main_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi/mainEnvironmentTraining.csv'
 
 scores_path = paste0(pheno_data,'/scores')
 #covar_pathway = paste0(results_path,'/covar.txt')
@@ -1038,48 +1020,41 @@ if (!file.exists(feature_scores_file)) {
 
 ######################### MAIN ENV & CLINICAL ENV DATA  ##################
 
-# Load main environment training data
-mainEnvTraining = fread(training_env_main_file, sep=",")
-mainEnvTraining[, IID := as.integer(IID)]
+# Helper: load env CSV or return an IID-only empty table when path is NULL or missing.
+# Merging an IID-only table (all.x=TRUE) adds no columns — safe no-op for analyses
+# that do not include GxGxE / G+GxE features.
+read_env_or_empty <- function(path) {
+  if (is.null(path) || !file.exists(path)) {
+    message(paste("env file not provided or missing, using empty table:", path))
+    return(data.table(IID = integer(0)))
+  }
+  dt <- fread(path, sep = ",")
+  dt[, IID := as.integer(IID)]
+  dt
+}
 
-# Load main environment test data
-mainEnvTest = fread(test_env_main_file, sep=",")
-mainEnvTest[, IID := as.integer(IID)]
+mainEnvTraining    <- read_env_or_empty(training_env_main_file)
+mainEnvTest        <- read_env_or_empty(test_env_main_file)
+clinicalEnvTraining <- read_env_or_empty(training_env_clinical_file)
+clinicalEnvTest    <- read_env_or_empty(test_env_clinical_file)
 
-# Load clinical environment data
-clinicalEnvTraining = fread(training_env_clinical_file, sep=",")
-clinicalEnvTraining[, IID := as.integer(IID)]
+allEnvTestPath      <- paste0(pheno_data, "/allEnvironmentTest.csv")
+allEnvTrainingPath  <- paste0(pheno_data, "/allEnvironmentTraining.csv")
+allEnvironmentTest      <- read_env_or_empty(allEnvTestPath)
+allEnvironmentTraining  <- read_env_or_empty(allEnvTrainingPath)
 
-clinicalEnvTest = fread(test_env_clinical_file, sep=",")
-clinicalEnvTest[, IID := as.integer(IID)]
+envTraining <- read_env_or_empty(training_env_gen_file)
+envTest     <- read_env_or_empty(test_env_gen_file)
 
-allEnvironmentTest = fread(paste0(pheno_data,"/allEnvironmentTest.csv"), sep=",")
-allEnvironmentTest[, IID := as.integer(IID)]
-  
-# Load alternative environment file
-allEnvironmentTraining = fread(paste0(pheno_data,"/allEnvironmentTraining.csv"), sep=",")
-allEnvironmentTraining[, IID := as.integer(IID)]
-
-envTraining = fread(training_env_gen_file, sep=",")
-envTraining[, IID := as.integer(IID)]
-
-envTest = fread(test_env_gen_file, sep=",")
-envTest[, IID := as.integer(IID)]
-
-# Check if mainEnvTest has only IID column
-if (ncol(mainEnvTest) == 1) {
+# When mainEnvTest is IID-only, attempt to reconstruct from allEnvironment minus clinical.
+if (ncol(mainEnvTest) == 1 && ncol(allEnvironmentTest) > 1) {
   message("mainEnvTest contains only IID column. Loading alternative file: allEnvironmentTest.csv")
-  
-  # Find features in allEnvironmentTest that are NOT in clinicalEnvTest
   diff_features = setdiff(names(allEnvironmentTest), names(clinicalEnvTest))
-  
-  # Keep only IID + non-clinical features
-  mainEnvTest = allEnvironmentTest[, c("IID", diff_features), with=FALSE]
-  mainEnvTraining = allEnvironmentTraining[, c("IID", diff_features), with=FALSE]
-  
+  mainEnvTest     = allEnvironmentTest[,    c("IID", diff_features), with = FALSE]
+  mainEnvTraining = allEnvironmentTraining[, c("IID", diff_features), with = FALSE]
   message(paste("mainEnvTest reconstructed with", length(diff_features), "non-clinical features + IID"))
-} else {
-  message(paste("mainEnvTest loaded successfully with", ncol(mainEnvTest)-1, "features"))
+} else if (ncol(mainEnvTest) > 1) {
+  message(paste("mainEnvTest loaded successfully with", ncol(mainEnvTest) - 1, "features"))
 }
 
 # Find features in clinicalEnvTest that are NOT in allEnvironmentTest columns so as not duplicate on merge
@@ -1302,18 +1277,18 @@ env_clinical_features = setdiff(names(clinicalEnvTraining), "IID")
 all_env_features = setdiff(names(allEnvironmentTraining), "IID")
 
 dataset_list = list(
-# list('clinical_main',c(env_clinical_features,covariate_columns)),
-# list('main',c(main_features,covariate_columns,hla_columns)),
-# list('epi',c(epi_features,covariate_columns,hla_columns)),
-# list('epi+main',c(main_features,epi_features,covariate_columns,hla_columns)),
-# list('cardio',c(env_genetic_features,covariate_columns)),
-# list('all',c(env_genetic_features,main_features,epi_features,hla_columns,covariate_columns)),
-# list('env_main',c(env_main_features,covariate_columns)),
-# list('all+env_main',c(env_genetic_features,main_features,epi_features,env_main_features,hla_columns,covariate_columns)),
-# list('all+env_main+clinical_main',c(env_genetic_features,main_features,epi_features,hla_columns,env_main_features,env_clinical_features,covariate_columns)),
-# list('env_combined',c(all_env_features,covariate_columns)),
-  list('all+env_combined',c(env_genetic_features,epi_main_features,all_env_features,hla_columns,covariate_columns))
-# list('covariate',c(covariate_columns))
+  list('clinical_main',c(env_clinical_features,covariate_columns)),
+  list('main',c(main_features,covariate_columns,hla_columns)),
+  list('epi',c(epi_features,covariate_columns,hla_columns)),
+  list('epi+main',c(main_features,epi_features,covariate_columns,hla_columns)),
+  list('cardio',c(env_genetic_features,covariate_columns)),
+  list('all',c(env_genetic_features,main_features,epi_features,hla_columns,covariate_columns)),
+  list('env_main',c(env_main_features,covariate_columns)),
+  list('all+env_main',c(env_genetic_features,main_features,epi_features,env_main_features,hla_columns,covariate_columns)),
+  list('all+env_main+clinical_main',c(env_genetic_features,main_features,epi_features,hla_columns,env_main_features,env_clinical_features,covariate_columns)),
+  list('env_combined',c(all_env_features,covariate_columns)),
+  list('all+env_combined',c(env_genetic_features,epi_main_features,all_env_features,hla_columns,covariate_columns)),
+  list('covariate',c(covariate_columns))
   
 )
 

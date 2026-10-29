@@ -2508,13 +2508,11 @@ def run_clinical_analysis(pheno, pheno_data, results_path, clinical_source_path=
         print("\nAUC Results low clinical all prs:")
         print(results['auc_low_clinical'])
         auc_low_clinical = results['auc_low_clinical']
-#       results['auc_low_clinical'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossPRSLowClinicalMeasure{file_ext}.csv')
         
         # Print AUC results
         print("\nAUC Results low clinical high prs")
         print(results['auc_low_clinical_high_prs'])
         auc_low_clinical_high_prs = results['auc_low_clinical_high_prs']
-#       results['auc_low_clinical_high_prs'].to_csv(f'/Users/kerimulterer/ukbiobank/{pheno}/tanigawaSet/prs/wrtClinical/aucAcrossHighPRSLowClinicalMeasure{file_ext}.csv')
         
         #put the auc results into a combined dataframe to save
         clinical_auc = pd.DataFrame()
@@ -2612,9 +2610,7 @@ if __name__ == '__main__':
     results_path = args.results_path or os.environ.get("RESULTS_PATH")
     print(f"[PYTHON] Reading from: {results_path}")
     
-#   pheno = "type2Diabetes"    
-#   pheno_data = "/Users/kerimulterer/prsInteractive/results/type2Diabetes/combinedAnalysis"
-#   results_path = "/Users/kerimulterer/prsInteractive/results"
+#   pheno = "type2Diabetes"
     
     
     if not pheno_data:

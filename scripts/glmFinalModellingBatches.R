@@ -956,18 +956,6 @@ covar_file <- args$covar_file
 feature_model_file <- args$feature_model_file
 
 
-#results_path <- '/Users/kerimulterer/prsInteractive/results'
-#pheno_path <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
-#data_path <- '/Users/kerimulterer/prsInteractive/data'
-#hla_file <- '/Users/kerimulterer/prsInteractive/results/participant_hla.csv'
-## training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw'
-#training_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/trainingCombined.raw'
-#test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined.raw'
-## test_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/testCombined_final.raw'
-#training_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTraining.csv'
-#test_env_gen_file <- '/Users/kerimulterer/prsInteractive/results/type2Diabetes/geneEnvironmentTest.csv'
-#covar_file='/Users/kerimulterer/prsInteractive/results/covar.csv'
-#feature_model_file='/Users/kerimulterer/prsInteractive/results/type2Diabetes/scores/importantFeaturesPostShap.csv'
 
 scores_path = paste0(pheno_path,'/scores')
 #covar_pathway = paste0(results_path,'/covar.txt')

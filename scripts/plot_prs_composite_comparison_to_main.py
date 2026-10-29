@@ -23,6 +23,16 @@ warnings.filterwarnings("ignore")
 PHENO_DATA   = os.environ.get("PHENO_DATA", "/path/to/pheno_data")
 INPUT_FILE   = os.path.join(PHENO_DATA, "scores","combinedPRSGroups.holdout.filtered.csv")
 OUTPUT_DIR   = os.path.join(PHENO_DATA, "figures", "modelComparisons","CompositeComparison")
+
+# Which composite to plot against bin_main. ePRS_Comp is the fitted ensemble,
+# so COMPOSITE_BIN should name the ensemble's bin column; set it to
+# "bin_combined" to reproduce the earlier rule-based figures instead. The
+# column is read from COMPOSITE_FILE when that file is given, which keeps the
+# ensemble out of combinedPRSGroups.holdout.filtered.csv so existing results
+# are not modified.
+COMPOSITE_BIN  = os.environ.get("COMPOSITE_BIN", "bin_combined")
+COMPOSITE_FILE = os.environ.get("COMPOSITE_FILE", "")
+COMPOSITE_LABEL = os.environ.get("COMPOSITE_LABEL", "Combined Model")
 N_BINS       = 1000        # number of bins in bin_combined / bin_main
 N_DECILES    = 10          # deciles for OR / prevalence
 FIGSIZE_BOX  = (14, 6)
@@ -141,7 +151,7 @@ def plot_boxplots(df: pd.DataFrame, status_col: str, out_dir: str):
     split by case (1) / control (0).
     """
     score_cols = {
-        "bin_combined": ("combined", COLOR_COMBINED),
+        COMPOSITE_BIN : ("combined", COLOR_COMBINED),
         "bin_main"    : ("main",     COLOR_MAIN),
     }
     # convert bins → 0–1 score for comparability
@@ -209,8 +219,8 @@ def plot_or_and_prevalence(df: pd.DataFrame, status_col: str, out_dir: str):
     Two-panel figure: top = OR, bottom = prevalence.
     """
     models = [
-        ("bin_combined", "Combined Model", COLOR_COMBINED),
-        ("bin_main",     "Main Model",     COLOR_MAIN),
+        (COMPOSITE_BIN, COMPOSITE_LABEL, COLOR_COMBINED),
+        ("bin_main",    "Main Model",      COLOR_MAIN),
     ]
 
     fig, (ax_or, ax_prev) = plt.subplots(
@@ -266,7 +276,7 @@ def plot_or_and_prevalence(df: pd.DataFrame, status_col: str, out_dir: str):
 
 def save_decile_stats(df: pd.DataFrame, status_col: str, out_dir: str):
     """Export decile-level OR / prevalence tables to CSV."""
-    for col, label in [("bin_combined", "combined"), ("bin_main", "main")]:
+    for col, label in [(COMPOSITE_BIN, "combined"), ("bin_main", "main")]:
         col_d  = f"{col}_decile"
         if col_d not in df.columns:
             df[col_d] = decile_groups(df[col])
@@ -289,10 +299,15 @@ def main():
         )
 
     df = pd.read_csv(INPUT_FILE)
-    print(f"  Rows: {len(df):,}   Columns: {list(df.columns)}")
+    if COMPOSITE_FILE:
+        extra = pd.read_csv(COMPOSITE_FILE)
+        keep = ["IID"] + [c for c in extra.columns if c != "IID" and c not in df.columns]
+        df = df.merge(extra[keep], on="IID", how="left")
+        print(f"  Merged composite from: {COMPOSITE_FILE}")
+    print(f"  Rows: {len(df):,}   Composite column: {COMPOSITE_BIN}")
 
     # ── Validate required columns ─────────────────────────────────────────
-    for col in ("bin_combined", "bin_main"):
+    for col in (COMPOSITE_BIN, "bin_main"):
         if col not in df.columns:
             sys.exit(f"ERROR: Expected column '{col}' not found in CSV.")
 
@@ -302,7 +317,7 @@ def main():
           f"controls={(df[status_col]==0).sum():,})")
 
     # Drop rows missing essential columns
-    df = df.dropna(subset=["bin_combined", "bin_main", status_col])
+    df = df.dropna(subset=[COMPOSITE_BIN, "bin_main", status_col])
     df[status_col] = df[status_col].astype(int)
 
     # ── Plots ─────────────────────────────────────────────────────────────

@@ -28,7 +28,6 @@ if __name__ == '__main__':
     
     pheno_path = args.pheno_folder or os.environ.get("PHENO_PATH")
     print(f"[PYTHON] Reading from: {pheno_path}")
-    #pheno_path = '/Users/kerimulterer/prsInteractive/results/type2Diabetes_test'
     
     
     if not pheno_path:

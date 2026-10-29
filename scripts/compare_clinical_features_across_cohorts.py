@@ -11,9 +11,14 @@ Design decisions:
   - Includes features with >5% missingness (excluded from modelling but valid here)
   - Non-parametric tests (Mann-Whitney U) given non-normal raw clinical data
   - FDR correction across features within each comparison
-  - Compares: each high-risk cohort vs all other high-risk cohorts
-              each low-risk cohort vs all other low-risk cohorts
-              high-risk vs low-risk within each cohort
+
+  Three comparison tiers:
+    HighRisk          : each top-20% cohort vs all other top-20% cohorts combined
+    LowRisk           : each bottom-20% cohort vs all other bottom-20% cohorts combined
+    ExclusiveHighRisk : exclusive top-20% cases (one cohort only) vs within-cohort
+                        bottom-20% controls — mirrors identify_exclusive_groups() in
+                        enrich_exclusive_cohort_features.py for a cleaner
+                        case-vs-control design with higher cohort specificity
 """
 
 import pandas as pd
@@ -52,8 +57,10 @@ def compare_two_groups(series_a, series_b, feature_name, label_a, label_b):
 
     try:
         stat, pval = stats.mannwhitneyu(a, b, alternative='two-sided')
-        # Rank-biserial correlation as effect size (r = 1 - 2U / n_a*n_b)
-        effect_size = 1 - (2 * stat) / (n_a * n_b)
+        # Rank-biserial correlation as effect size.  scipy returns U1, the
+        # statistic for the first sample, so r = 2*U1/(n_a*n_b) - 1 and r > 0
+        # means group a has the larger values, as documented below.
+        effect_size = (2 * stat) / (n_a * n_b) - 1
     except Exception:
         return None
 
@@ -119,6 +126,59 @@ def run_comparisons(data, feature_cols, group_col, groups, comparison_type):
                         result['cohort'] = f'{g1}_vs_{g2}'
                         result['comparison_type'] = comparison_type
                         rows.append(result)
+
+    return pd.DataFrame(rows)
+
+
+def run_exclusive_vs_within_controls(merged, feature_cols, cohort_names,
+                                     bin_cols, high_thresh, low_thresh):
+    """
+    ExclusiveHighRisk comparison — matches identify_exclusive_groups() logic in
+    enrich_exclusive_cohort_features.py.
+
+    For each cohort:
+      cases    = individuals in top-20% bin for THIS cohort only
+                 (not above high_thresh in any other cohort), PHENOTYPE == 2
+      controls = individuals in bottom-20% bin for THIS cohort, PHENOTYPE == 1
+
+    This within-cohort case-vs-control design is more specific than each_vs_others
+    and correctly captures what makes exclusive high-risk individuals different
+    from the low-risk baseline of the same PRS instrument.
+
+    Returns a DataFrame with the same columns as run_comparisons output.
+    """
+    rows = []
+
+    for col, cohort in zip(bin_cols, cohort_names):
+        other_cols  = [c for c in bin_cols if c != col]
+        is_high     = merged[col] > high_thresh
+        is_high_any_other = (
+            merged[other_cols].gt(high_thresh).any(axis=1)
+            if other_cols else pd.Series(False, index=merged.index)
+        )
+        is_low = merged[col] < low_thresh
+
+        case_mask    = is_high & ~is_high_any_other & (merged['PHENOTYPE'] == 2)
+        control_mask = is_low  & (merged['PHENOTYPE'] == 1)
+
+        cases    = merged[case_mask]
+        controls = merged[control_mask]
+
+        print(f"  {cohort}: {case_mask.sum():>5} exclusive cases  "
+              f"| {control_mask.sum():>6} within-cohort controls")
+
+        for feature in feature_cols:
+            result = compare_two_groups(
+                cases[feature],
+                controls[feature],
+                feature,
+                f'{cohort}_exclusive',
+                f'{cohort}_lowrisk_controls'
+            )
+            if result:
+                result['cohort']          = cohort
+                result['comparison_type'] = 'exclusive_vs_within_controls'
+                rows.append(result)
 
     return pd.DataFrame(rows)
 
@@ -386,16 +446,14 @@ def main(pheno_data, raw_features_file, holdout_ids_file=None,
     all_results = []
 
     for risk_tier, prefix, phenotype_filter in [
-        ('HighRisk',          'highrisk',  2),
-        ('LowRisk',           'lowrisk',   1),
-        ('ExclusiveHighRisk', 'exclusive', 2),
+        ('HighRisk',  'highrisk', 2),
+        ('LowRisk',   'lowrisk',  1),
     ]:
         print(f"\n{'='*60}")
         print(f"  Comparing {risk_tier} cohorts")
         print(f"{'='*60}")
 
-        # For each cohort, get the individuals in that risk tier
-        # Restrict to the correct phenotype (cases for high, controls for low)
+        # Build long-format dataframe: one row per individual per cohort membership
         tier_frames = []
         cohort_ns = {}
 
@@ -412,7 +470,7 @@ def main(pheno_data, raw_features_file, holdout_ids_file=None,
 
         tier_df = pd.concat(tier_frames, ignore_index=False)
 
-        # Each-vs-others comparison
+        # Each cohort vs all others combined
         results = run_comparisons(
             tier_df, feature_cols, group_col='cohort',
             groups=cohort_names, comparison_type='each_vs_others'
@@ -423,35 +481,25 @@ def main(pheno_data, raw_features_file, holdout_ids_file=None,
             continue
 
         results = apply_fdr(results, alpha=alpha)
-
-        # Flag meaningful effect sizes
         results['meaningful_effect'] = (
             results['significant_fdr'] &
             (results['effect_size_r'].abs() >= min_effect_size)
         )
-
         results['risk_tier'] = risk_tier
-
-        # Merge in missingness info
         results = results.merge(
             missingness[['feature', 'pct_missing', 'excluded_from_modelling']],
             on='feature', how='left'
         )
-
         all_results.append(results)
 
-        # Summary of findings
-        n_sig = results['significant_fdr'].sum()
-        n_meaningful = results['meaningful_effect'].sum()
+        n_sig      = results['significant_fdr'].sum()
+        n_meaning  = results['meaningful_effect'].sum()
         print(f"  Significant features (FDR<{alpha}): {n_sig}")
-        print(f"  Significant + meaningful effect (|r|>={min_effect_size}): {n_meaningful}")
+        print(f"  Significant + meaningful effect (|r|>={min_effect_size}): {n_meaning}")
 
-        # Highlight epi_product specifically
         epi_prod_results = results[
-            (results['cohort'] == 'epi_product') &
-            results['significant_fdr']
+            (results['cohort'] == 'epi_product') & results['significant_fdr']
         ].sort_values('p_value_fdr')
-
         if len(epi_prod_results) > 0:
             print(f"\n  epi_product significant features ({len(epi_prod_results)}):")
             print(epi_prod_results[['feature', 'mean_a', 'mean_b', 'effect_size_r',
@@ -459,18 +507,85 @@ def main(pheno_data, raw_features_file, holdout_ids_file=None,
         else:
             print(f"\n  epi_product: no significant clinical features found")
 
-        # Plots
         tag = f"{risk_tier}_{use_set}"
         plot_significant_features(tier_df, results, feature_cols,
                                    'cohort', cohort_names, figPath, tag)
         plot_effect_size_heatmap(results, figPath, tag)
 
-        # Save per-tier results
         results.sort_values(['cohort', 'p_value_fdr']).to_csv(
             os.path.join(outputPath, f'clinical_comparison_{risk_tier}_{use_set}.csv'),
             index=False
         )
         print(f"  Saved results → clinical_comparison_{risk_tier}_{use_set}.csv")
+
+    # ── ExclusiveHighRisk: exclusive cases vs within-cohort bottom-20% controls ─
+    # Mirrors identify_exclusive_groups() in enrich_exclusive_cohort_features.py:
+    #   cases    = top-20% THIS cohort only (not high in any other), PHENOTYPE == 2
+    #   controls = bottom-20% THIS cohort,                           PHENOTYPE == 1
+    print(f"\n{'='*60}")
+    print(f"  Comparing ExclusiveHighRisk cohorts (exclusive vs within-cohort controls)")
+    print(f"{'='*60}")
+
+    exc_results = run_exclusive_vs_within_controls(
+        merged, feature_cols, cohort_names, bin_cols, high_thresh, low_thresh
+    )
+
+    if not exc_results.empty:
+        exc_results = apply_fdr(exc_results, alpha=alpha)
+        exc_results['meaningful_effect'] = (
+            exc_results['significant_fdr'] &
+            (exc_results['effect_size_r'].abs() >= min_effect_size)
+        )
+        exc_results['risk_tier'] = 'ExclusiveHighRisk'
+        exc_results = exc_results.merge(
+            missingness[['feature', 'pct_missing', 'excluded_from_modelling']],
+            on='feature', how='left'
+        )
+        all_results.append(exc_results)
+
+        n_sig     = exc_results['significant_fdr'].sum()
+        n_meaning = exc_results['meaningful_effect'].sum()
+        print(f"  Significant features (FDR<{alpha}): {n_sig}")
+        print(f"  Significant + meaningful effect (|r|>={min_effect_size}): {n_meaning}")
+
+        epi_prod_exc = exc_results[
+            (exc_results['cohort'] == 'epi_product') & exc_results['significant_fdr']
+        ].sort_values('p_value_fdr')
+        if len(epi_prod_exc) > 0:
+            print(f"\n  epi_product exclusive significant features ({len(epi_prod_exc)}):")
+            print(epi_prod_exc[['feature', 'mean_a', 'mean_b', 'effect_size_r',
+                                 'p_value_fdr']].to_string(index=False))
+        else:
+            print(f"\n  epi_product: no significant exclusive clinical features found")
+
+        # Build a "labelled" tier_df for the boxplot (exclusive cases labelled by cohort)
+        exc_frames = []
+        for cohort in cohort_names:
+            col = f'bin_{cohort}'
+            other_cols = [c for c in bin_cols if c != col]
+            is_high     = merged[col] > high_thresh
+            is_high_other = (
+                merged[other_cols].gt(high_thresh).any(axis=1)
+                if other_cols else pd.Series(False, index=merged.index)
+            )
+            mask = is_high & ~is_high_other & (merged['PHENOTYPE'] == 2)
+            cd = merged[mask][feature_cols].copy()
+            cd['cohort'] = cohort
+            exc_frames.append(cd)
+        exc_tier_df = pd.concat(exc_frames, ignore_index=True)
+
+        tag = f"ExclusiveHighRisk_{use_set}"
+        plot_significant_features(exc_tier_df, exc_results, feature_cols,
+                                   'cohort', cohort_names, figPath, tag)
+        plot_effect_size_heatmap(exc_results, figPath, tag)
+
+        exc_results.sort_values(['cohort', 'p_value_fdr']).to_csv(
+            os.path.join(outputPath, f'clinical_comparison_ExclusiveHighRisk_{use_set}.csv'),
+            index=False
+        )
+        print(f"  Saved results → clinical_comparison_ExclusiveHighRisk_{use_set}.csv")
+    else:
+        print(f"  No results generated for ExclusiveHighRisk")
 
     # -------------------------------------------------------------------------
     # 8. Combined output, priority logic, and summary table

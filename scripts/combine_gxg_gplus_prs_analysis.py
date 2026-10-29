@@ -955,9 +955,11 @@ def run_clinical_analysis(
 def run_feature_importance(
     combined_pheno_data: str,
     feature_scores_file: str,
-    raw_env_features_file : str,
-#   threshold: float,
-    use_all: bool
+    raw_env_features_file: str,
+    use_all: bool,
+    run_exclusive: bool = False,
+    n_exclusive_iterations: int = 1000,
+    exclusive_z_threshold: float = 1.0,
 ) -> None:
     """
     Runs the pipeline for genomic data: SHAP / Random-Forest feature-importance analysis on the combined
@@ -972,10 +974,13 @@ def run_feature_importance(
     """
     print("\n[Step 5] Calculating feature importance in combined cohorts ...")
     run_pipeline(
-          pheno_data=combined_pheno_data,
-          feature_scores_file=feature_scores_file,
-          raw_features_file=raw_env_features_file,
-          use_all=use_all
+        pheno_data=combined_pheno_data,
+        feature_scores_file=feature_scores_file,
+        raw_features_file=raw_env_features_file,
+        use_all=use_all,
+        run_exclusive=run_exclusive,
+        n_exclusive_iterations=n_exclusive_iterations,
+        exclusive_z_threshold=exclusive_z_threshold,
     )
   
   
@@ -1047,6 +1052,9 @@ def main(
     steps: set[int],
     raw_env_features_file: str,
     use_all: bool = False,
+    run_exclusive: bool = False,
+    n_exclusive_iterations: int = 1000,
+    exclusive_z_threshold: float = 1.0,
 ) -> None:
     """
     Full combined GxG + G+G PRS analysis pipeline.
@@ -1233,7 +1241,8 @@ def main(
             feature_scores_file = _build_combined_feature_scores(
                 product_pheno, summed_pheno, combined_scores
             )
-        run_feature_importance(combined_pheno, feature_scores_file, raw_env_features_file,use_all)
+        run_feature_importance(combined_pheno, feature_scores_file, raw_env_features_file,
+                               use_all, run_exclusive, n_exclusive_iterations, exclusive_z_threshold)
     else:
         print("\n[Step 7] Skipped — calculate_top_features_in_cohort")
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1300,6 +1309,24 @@ if __name__ == "__main__":
         help="Path to raw environmental measures used in analysis across all phenotypes.",
     )
     parser.add_argument(
+        "--run_exclusive",
+        action="store_true",
+        default=False,
+        help="Run exclusive high-cases bootstrap GBM-SHAP in step 7 (default: False).",
+    )
+    parser.add_argument(
+        "--n_exclusive_iterations",
+        type=int,
+        default=1000,
+        help="Bootstrap iterations for exclusive high-cases analysis (default: 1000).",
+    )
+    parser.add_argument(
+        "--exclusive_z_threshold",
+        type=float,
+        default=1.0,
+        help="SHAP z-score threshold for exclusive high-cases (default: 1.0).",
+    )
+    parser.add_argument(
         "--steps",
         default="1,2,3,4,5,6,7",
         help="Comma-separated (or range) list of pipeline steps to run. "
@@ -1318,9 +1345,7 @@ if __name__ == "__main__":
     results_path       = args.results_path   or os.environ.get("RESULTS_PATH")
     feature_scores_file = args.feature_scores_file or os.environ.get("FEATURE_SCORES_FILE_FILTERED")
   
-#   pheno_results = '/Users/kerimulterer/prsInteractive/results/type2Diabetes'
 #   pheno = 'type2Diabetes'
-#   results_path  = '/Users/kerimulterer/prsInteractive/results'
 #   feature_scores_file = None
 #   use_all = False
 #   threshold = 1.99
@@ -1359,6 +1384,9 @@ if __name__ == "__main__":
       threshold=args.threshold,
       steps=steps,
       use_all=args.use_all,
+      run_exclusive=args.run_exclusive,
+      n_exclusive_iterations=args.n_exclusive_iterations,
+      exclusive_z_threshold=args.exclusive_z_threshold,
     )
   
 #   main(

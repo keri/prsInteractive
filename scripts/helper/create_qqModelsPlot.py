@@ -6,7 +6,6 @@ import matplotlib as mpl
 import os
 import sys
 from scipy.stats import pearsonr
-# sys.path.append("/Users/kerimulterer/ukbiobank/batchScripts/")
 from helper.draw_plots import *
 from helper.download import *
 from helper.data_wrangling import *
@@ -299,7 +298,6 @@ if __name__ == '__main__':
 	use_epi_main = args.use_epi_main or os.environ.get("USE_EPI_MAIN")
 	print(f"[PYTHON] setting use_epi_main to: {use_epi_main}")
 	
-	#pheno_data = '/Users/kerimulterer/prsInteractive/results/type2Diabetes/summedEpi'
 	
 	
 	if not pheno_data:

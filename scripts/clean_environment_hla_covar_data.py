@@ -124,8 +124,6 @@ if __name__ == "__main__":
   data_path = args.data_path or os.environ.get("DATA_PATH")
   results_path = args.results_path or os.environ.get("RESULTS_PATH")
   
-#   data_path = "/Users/kerimulterer/prsInteractive/testData"
-#   results_path = "/Users/kerimulterer/prsInteractive/results"
 
   if not data_path:
       raise ValueError("You must provide a data path via --data_path or set the DATA_PATH environment variable.")

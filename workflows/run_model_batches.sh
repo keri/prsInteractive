@@ -175,7 +175,11 @@ for JOB_ID in $(seq 1 $TOTAL_JOBS); do
     
     # Submit the SLURM job
     #   --export=START_BATCH=$JOB_START_BATCH,END_BATCH=$JOB_END_BATCH,DATA_TYPE=$DATA_TYPE,PHENO=$PHENO \
-    python "${SCRIPTS_DIR}/sklearnSectionModelsScoreTrain.py"
+    # MODEL_SCRIPT selects the feature-reduction implementation. Default is the
+    # original V1; set MODEL_SCRIPT=sklearnSectionModelsScoreTrainV2.py for the
+    # two-stage screen + single-pass GBM refactor, with MODEL_SCRIPT_ARGS for
+    # its extra flags (e.g. "--no_shap --n_jobs 60").
+    python "${SCRIPTS_DIR}/${MODEL_SCRIPT:-sklearnSectionModelsScoreTrain.py}" ${MODEL_SCRIPT_ARGS:-}
     
 done
 

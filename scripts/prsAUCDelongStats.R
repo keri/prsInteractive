@@ -1,3 +1,28 @@
+# ============================================================================
+# SUPERSEDED -- do not run. Use prsAUCDelongStats_v2.R instead:
+#
+#   Rscript scripts/prsAUCDelongStats_v2.R --pheno_data <combinedAnalysis> \
+#           --cohort validation|holdout [--ensemble_file <scores.csv>]
+#
+# The statistical functions in this file are still current and are sourced by
+# v2 unchanged; only the driver at the bottom is retired. It cannot run against
+# current data for three reasons:
+#
+#   1. It builds its composite from prs_main, prs_epi, prs_epi+main and
+#      prs_cardio. Only prs_main survives the encoding rename, so it takes the
+#      "Raw PRS columns not found" branch and never creates the composite that
+#      prs_cols then requires.
+#   2. prs_cols also names scaled_prs_epi, scaled_prs_cardio, scaled_prs_all
+#      and scaled_prs_epi+main, none of which exist in the current score files.
+#   3. It reads combinedPRSGroups.csv, the unfiltered validation cohort, so it
+#      would score models that redundancy filtering removed.
+#
+# v2 reproduces the validation statistics exactly -- scaled_prs_main AUC 0.5911,
+# matching manuscriptTables/prs_delong_auc_statisticsProduct.csv -- while using
+# the filtered score file and the current encoding names, and it covers the
+# holdout cohort as well.
+# ============================================================================
+
 #!/usr/bin/env Rscript
 
 # Load required libraries
